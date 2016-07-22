@@ -1,0 +1,40 @@
+{% extends 'layouts/layout.html' %}
+{% from "util.html" import render_form %}
+
+{% from 'util.html' import link_tag, script_tag %}
+
+{% if create %}
+  {% set title = 'Create Resume' %}
+{% else %}
+  {% set title = 'Edit Resume' %}
+{% endif %}
+
+{% block css %}
+  {{ link_tag('forms') }}
+{% endblock %}
+
+
+{% block body %}
+  <h2>
+    {% if create %}
+      Add new Resume
+    {% else %}
+      Edit Resume
+    {% endif %}
+  </h2>
+
+  <form action="?{{ request.query_string }}" class="form" method="post">
+      {{ render_form(form) }}
+    <div class="actions">
+      <input type="submit" class="btn btn-primary" value="push" name="submit">
+      <input type="submit" class="btn btn-primary" value="save" name="submit">
+      <a href="{{ url_for('resume_app.version', _external=True) }}" class="btn btn-default">Cancel</a>
+    </div>
+  </form>
+  {% include 'footer.html' %}
+
+{% endblock %}
+
+{% block js %}
+        {{ script_tag('cookies') }}
+{% endblock %}

@@ -1,0 +1,82 @@
+{% extends 'layouts/layout.html' %}
+{% from "util.html" import render_form %}
+
+{% from 'util.html' import link_tag, script_tag, comment_counted %}
+
+{% set title = 'Resume Details' %}
+
+{% block css %}
+{% endblock %}
+
+{% block body %}
+    <div id="resume">
+
+      <ul class="list-group">
+
+        <div id="resume-title">
+
+          <li class="list-group-item">
+          <h2>
+            <a href="{{ url_for('resume_app.detail', slug=resume.slug, _external=True) }}">{{ resume.title }}</a>
+          </h2>
+        </div>
+
+        <li id="name" class="list-group-item"><p><span><strong>Name: </strong>{{ resume.author }}</span></p>
+        <li id="email" class="list-group-item"><p><span><strong>Email: </strong>{{ resume.email }}</span></p>
+        <li id="phone" class="list-group-item"><p><span><strong>Phone: </strong>{{ resume.phone }}</span></p>
+        <li id="address" class="list-group-item"><p><span><strong>Address: </strong>{{ resume.address }}</span></p>
+
+        <p>{{ resume.skills }} </p>
+        <p>{{ resume.experience }} </p>
+        <p>{{ resume.education }}</p>
+        <p>{{ resume.honors }}</p>
+        <p>{{ resume.publication }}</p>
+        <p>{{ resume.activities }}</p>
+
+    </li>
+    </ul>
+  </div>
+
+  <div class="comments">
+    <h2>Comments</h2>
+    {% if resume.comments %}
+    <ul class="list-group">
+      {% for comment in resume.comments %}
+         <li class="list-group-item comment">
+           <p>
+            <span class="badge alert-success pull-right">
+             <button type="button" class="btn btn-primary btn-sm fa fa-thumbs-o-up">Thank</button>
+            </span>
+            <span class="badge alert-warning pull-right">
+             <button type="submit" value="post" class="todo btn btn-link btn-sm fa fa-paperclip">TODO</button>
+            </span>
+           
+           &nbsp {{ comment.body }}</p>
+           <p><strong>Tags: </strong>
+           {% for tag in comment.tags %}
+                <span class="{{ choices[tag-1][1] }} category label label-info">{{ choices[tag-1][1] }}</span>
+           {% endfor %}
+            </p>
+          {{ comment.text }}
+        </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+  
+  <div id="comment_form">
+    <h2>Add a comment</h2>
+    <form action="{{ url_for('resume_app.detail', slug=resume.slug, _external=True) }}" method="post">
+      {{ render_form(form) }}
+      <div class="actions">
+        <input type="submit" class="btn btn-primary" value="comment">
+      </div>
+    </form>
+  </div>
+  {% include 'footer.html' %}
+{% endblock %}
+
+{% block js %}
+        {{ script_tag('cookies') }}
+        {{ script_tag('resume/resume_detail') }}
+{% endblock %}

@@ -1,0 +1,125 @@
+{% extends 'layouts/layout.html' %}
+{% from 'util.html' import link_tag, script_tag %}
+
+{% set title = 'Resumes' %}
+
+{% block css %}
+
+{% endblock %}
+
+{% block body %}
+
+<div class="row">
+          <div class="col-lg-4">
+            <div class="panel panel-info">
+              <div class="panel-heading">
+                <div class="row">
+                  <div class="col-xs-6">
+                    <i class="fa fa-comments fa-5x"></i>
+                  </div>
+                  <div class="col-xs-6 text-right">
+                    <p class="announcement-heading">456</p>
+                    <p class="announcement-text">Total Comments</p>
+                  </div>
+                </div>
+              </div>
+              <a href="#">
+                <div class="panel-footer announcement-bottom">
+                  <div class="row">
+                    <div class="col-xs-6">
+                      View Details
+                    </div>
+                    <div class="col-xs-6 text-right">
+                      <i class="fa fa-arrow-circle-right"></i>
+                    </div>
+                  </div>
+                </div>
+              </a>
+            </div>
+          </div>
+          <div class="col-lg-4">
+            <div class="panel panel-warning">
+              <div class="panel-heading">
+                <div class="row">
+                  <div class="col-xs-6">
+                    <i class="fa fa-check fa-5x"></i>
+                  </div>
+                  <div class="col-xs-6 text-right">
+                    <p class="announcement-heading">12</p>
+                    <p class="announcement-text">Action Items</p>
+                  </div>
+                </div>
+              </div>
+              <a href="#">
+                <div class="panel-footer announcement-bottom">
+                  <div class="row">
+                    <div class="col-xs-6">
+                      Complete Tasks
+                    </div>
+                    <div class="col-xs-6 text-right">
+                      <i class="fa fa-arrow-circle-right"></i>
+                    </div>
+                  </div>
+                </div>
+              </a>
+            </div>
+          </div>
+
+          <div class="col-lg-4">
+            <div class="panel panel-success">
+              <div class="panel-heading">
+                <div class="row">
+                  <div class="col-xs-6">
+                    <i class="fa fa-users fa-5x"></i>
+                  </div>
+                  <div class="col-xs-6 text-right">
+                    <p class="announcement-heading">112</p>
+                    <p class="announcement-text">Profile views</p>
+                  </div>
+                </div>
+              </div>
+              <a href="#">
+                <div class="panel-footer announcement-bottom">
+                  <div class="row">
+                    <div class="col-xs-6">
+                      View Details
+                    </div>
+                    <div class="col-xs-6 text-right">
+                      <i class="fa fa-arrow-circle-right"></i>
+                    </div>
+                  </div>
+                </div>
+              </a>
+            </div>
+          </div>
+        </div><!-- /.row -->
+  <ul>
+    {% for key in resumes.keys() %}
+    <li> Resume: {{ key }}
+      <form class="form" method="post">
+        <input type="submit" class="button btn-success" 
+          value="Publish" name="Publish {{ key }}">
+      </form>
+      <br>
+      
+      <form class="form" method="post">
+        <ul>
+          {% for value in range(resumes[key]|length) %}
+            <li> 
+              <input type="submit" value="{{ value }}" name={{ key }}>
+            </li>
+          {% endfor %}
+        </ul>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+
+  {% include 'footer.html' %}
+
+{% endblock %}
+
+{% block js %}
+        {{ script_tag('cookies') }}
+{% endblock %}
+

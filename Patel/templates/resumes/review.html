@@ -1,0 +1,39 @@
+{% extends 'layouts/layout.html' %}
+{% from "util.html" import render_review_form %}
+
+{% from 'util.html' import link_tag, script_tag %}
+
+{% set title = 'Review Resume' %}
+
+{% block css %}
+  {{ link_tag('forms') }}
+{% endblock %}
+
+
+{% block body %}
+  <h2>
+    Review Resume
+  </h2>
+
+  {% for field in fields %}
+  <h4> {{ field }} </h4>
+  <font color="red"> Original: {{ edit[field].items }} </font>
+  <br>
+  <font color="green"> Edit: {{ orig[field].items }} </font>
+
+  <form action="?{{ request.query_string }}" class="form" method="post">
+    <div class="actions">
+      <input type="submit" class="btn btn-success" value="accept" name="submit">
+      <input type="submit" class="btn btn-danger" value="reject" name="submit">
+    </div>
+  </form>
+  <hr>
+  {% endfor %}
+
+  {% include 'footer.html' %}
+
+{% endblock %}
+
+{% block js %}
+        {{ script_tag('cookies') }}
+{% endblock %}

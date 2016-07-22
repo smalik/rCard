@@ -1,0 +1,99 @@
+from app import db
+
+"""
+Comments behave as follows:
+     1. Click on a comment button on the card.
+     2. A comment card pops up with:
+         i.      commenter pic
+         ii.     commenter username
+         iii.    comment text area
+         iv.     like button
+         v.      downvote button
+         vi.     submit button (optional)
+     3. User adds their comment text (limited to 240 chars)
+     4. Threaded to one level
+"""
+
+"""
+Base comment class that other commenting classes inherit.  We want to capture 
+the comment author, likes, downvotes, comment text, comment date, and what 
+topic the comment is about
+"""
+class Comment(db.EmbeddedDocument):
+    _id         = db.ObjectIdField()
+
+    # user ID from Person class of contributor
+    author      = db.ObjectIdField()
+    createDt    = db.DateTimeField()
+
+    # Topic of comment (e.g.  grammar, clarity, etc...)
+    topic       = db.StringField()
+
+    # Section this comment is bound to
+    section     = db.StringField()
+    section_id  = db.ObjectIdField()
+
+    # how many people upvoted/downvoted the comment posted in payload
+    upvote       = db.IntField()
+    downvote     = db.IntField()
+
+    # actual comment
+    payload      = db.StringField()
+
+    def __str__(self):
+        return """
+            author: {}
+            createDt: {}
+            topic: {}
+            section: {}
+            section_id: {}
+            upvote: {}
+            downvote: {}
+            payload: {}
+        """.format(self.author, self.createDt, self.topic, 
+            self.section, self.section_id, self.upvote, 
+            self.downvote, self.payload)
+
+class CommentsPerSection(db.EmbeddedDocument):
+    _id         = db.ObjectIdField()
+
+    num_comments = db.IntField()
+    index_num    = db.IntField()
+    section_name = db.StringField()
+
+    def __str__(self):
+        return """
+            num_comments: {}
+            index_num: {}
+            section_name: {}
+        """.format(self.num_comments, self.index_num, self.section_name)
+    
+class ToDosPerSection(db.EmbeddedDocument):
+    _id         = db.ObjectIdField()
+
+    num_todos    = db.IntField()
+    index_num    = db.IntField()
+    section_name = db.StringField()
+
+    def __str__(self):
+        return """
+            num_todos: {}
+            index_num: {}
+            section_name: {}
+        """.format(self.num_todos, self.index_num, self.section_name)
+
+"""
+Comment container for each comment and pointers of comments it is 
+associated with
+"""
+class Commenting(db.EmbeddedDocument):
+    _id         = db.ObjectIdField()
+
+    children    = db.ListField(db.ObjectIdField())
+    siblings    = db.ListField(db.ObjectIdField())
+
+    def comment_count(self):
+        return len(self.siblings)
+
+    def thread_count(self):
+        return len(self.children)

@@ -1,0 +1,83 @@
+{% extends 'layouts/layout.html' %}
+{% from 'util.html' import link_tag, script_tag, render_pagination %}
+
+{% set title = 'Jobs' %}
+
+{% block css %}
+{% endblock %}
+
+{% block body %}
+
+    <div id="jobList" class="panel panel-primary">
+        <div class="panel-heading">
+            <h3 class="panel-title">
+                {% if g.user.is_authenticated %}
+                    <!-- Showing gravatar, not convinced if necessary -->
+                    <!--span><img src="{{ g.user.avatar(g.user.email, 30) }}" class = "avatar pull-right"></span-->
+                {% endif %}
+                <span><i class ="fa fa-briefcase"></i>&nbsp; JOBS</span>
+                <div class="clearfix"></div>
+            </h3>
+        </div>
+
+        <div class="panel-body">
+            <div class="panel-group" id="accordion">
+                {% for row in rows.items %}
+                    <div class="panel panel-default">
+                        <div class="panel-heading" data-toggle="collapse" data-parent="#accordion" href={{ "#collapse" ~ loop.index|string }}>
+                          <div class="row">
+                            <div class="col-lg-2 col-md-2 pull-right jobScore">
+                                <a href={{ row.url }} class="logo-container">
+                                    <!--RANDOM NUMBER HACK ;)-->
+                                    <img src="http://placehold.it/150x150&text={{ range(50,100)|random }}" alt="Position" class="logo" height="60" width="60">
+                                </a>
+                            </div>
+                            <div class="col-lg-10 col-md-10 jobDetail">
+                                <div class="content">
+                                    <h3><a href={{ row.url }} class="title" itemprop="title">{{ row.jobtitle }}</a></h3>
+                                    <div itemprop="hiringOrganization" itemscope itemtype="http://schema.org/Organization">
+                                        <a class="company" href={{ row.url }} itemprop="name">{{ row.company }} </a>
+                                    </div>
+                                    <div class="details"> 
+                                        <span itemprop="jobLocation" itemscope itemtype="http://schema.org/Place">
+                                            <span itemprop="addressLocality">{{ row.formattedLocation }}</span>
+                                        </span> -
+                                        <span itemprop="datePosted">{{ row.formattedRelativeTime }}</span>
+                                    </div>
+                                    <dl class="snippet">
+                                        <dt class="label">Job Detail:</dt>
+                                        <dd><p class="abstract" itemprop="description">{{ row.snippet|striptags }}</p></dd>
+                                    </dl>
+                                </div>
+                            </div>
+                          </div>
+                        </div>
+                        {% if loop.index == 1 %}
+                        <div id={{ "collapse" ~ loop.index|string }} class="panel-collapse collapse in">
+                        {% else %}
+                        <div id={{ "collapse" ~ loop.index|string }} class="panel-collapse collapse">
+                        {% endif %}
+                            <div class="panel-body"> 
+                                Lorem Ipsum is simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry's standard dummy text ever since the 1500s, when an unknown printer took a galley of type and scrambled it to make a type specimen book. It has survived not only five centuries, but also the leap into electronic typesetting, remaining essentially unchanged. It was popularised in the 1960s with the release of Letraset sheets containing Lorem Ipsum passages, and more recently with desktop publishing software like Aldus PageMaker including versions of Lorem Ipsum.
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="panel-footer announcement-bottom">
+          <div class="text-center">
+            {{ render_pagination(rows, "jobs_app.jobs") }}
+          </div>
+        </div>
+    </div>
+
+    {% include 'footer.html' %}
+{% endblock %}
+
+{% block js %}
+        {{ script_tag('cookies') }}
+        {{ script_tag('jobs/jobs') }}
+        {{ script_tag('jobs/jobs_main') }}
+{% endblock %}
+

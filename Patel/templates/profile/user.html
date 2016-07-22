@@ -1,0 +1,34 @@
+{% extends 'layouts/layout.html' %}
+{% from 'util.html' import link_tag, script_tag, render_pagination %}
+
+{% set title = 'Jobs' %}
+
+{% block css %}
+{% endblock %}
+
+{% block body %}
+
+	<h1>User: {{ user.email }}!</h1>
+
+	<table>
+	    <tr valign="top">
+	        <td><img src="{{ user.avatar(user.email, 128) }}" class = "avatar"></td>
+	        <td><h1>User: {{ user.username }}</h1></td>
+	    </tr>
+	</table>
+	<hr>
+
+	{% for post in posts %}
+		<table>
+		    <tr valign="top">
+		        <td><img src="{{ post.author.avatar(user.email, 50) }}" class = "avatar"></td><td><i>{{post.author.username}} says:</i><br>{{post.body}}</td>
+		    </tr>
+		</table>
+	{% endfor %}
+
+    {% include 'footer.html' %}
+{% endblock %}
+
+{% block js %}
+        {{ script_tag('cookies') }}
+{% endblock %}

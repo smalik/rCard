@@ -1,0 +1,46 @@
+Terminology:
+	Owner -- Person who originally uploads/submits a resume to the server
+	Editor -- Person who is looking to fix up the resume
+
+Logistical:
+	Each person has their own resume
+	Each person has several editors that can change resume
+		Assume for now that everyone has this ability -- no reason to track for now
+		Later iterations will track for permission purposes
+	Any of these people has FOUR main abilities:
+		(1) Fork (clones the current state of the resume to their account)
+		(2) Edit (perform changes on their local copy of the resume) 
+		(3) Save (saves locally their changes -- the owner cannot see these) 
+		(4) Submit (publish the changes publicly for the owner to see)
+	The owner, after edits "submit", can choose to accept or reject
+		(1) Accept -- overwrites the existing fields with whatever they select
+		(2) Reject -- does not merge into the field
+		(3) Publish -- make the resume "finalized" (flushes out previous edits)
+	All the submitted resumes are tracked for purposes of version control (VC)
+	VC will consist of the following abilities for the owner:
+		(1) Navigate between accepted and rejected branches -- will be shown
+
+Technical:
+	Descriptions:
+		Forks -- Will be saved as added to a field called "EditingResumes" 
+			in the DB under the Editor User (this field will be a List(Resume))
+		Edit -- Pulls from the previously saved instance of the Resume and
+			populates the fields (which can then be edited). If first time, uses the
+			forked value from DB
+		Save -- Overwrites the last instance of the resume in "EditingResume"
+			in the DB
+		Submit -- Pulls from the user from the DB and pushes into the CurrentEdits
+			list corresponding to them
+		Accept -- Pulls from the resume in the CurrentEdits and replaces the value
+			in the current resume with that in the edit
+		Reject -- Same as accept but do not replace
+		Publish -- Sets FinalResume to WorkingResume. Flushes CurrentEdits out 
+			(resets it to an empty array)
+
+	New fields for DB:
+		WorkingResume (Resume) -- The resume to which any accepts/rejects are saved
+		FinalResume (Resume) -- The most recent resume that was "published"
+
+		User<CurrentEdits> (List(Resume)) -- All the current resumes that are being
+		User<EditingResumes> (List(Resume)) -- All the resumes that the given User
+			is currently editing
