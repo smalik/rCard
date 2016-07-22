@@ -11,11 +11,12 @@ from decorators import login_required
 import json
 from collections import namedtuple
 from functools import partial
+import time
 
 import resumes, comments
 from app import app
 from models import Resume, Comment, CommentsPerSection, Person, ToDosPerSection
-from forms import ResumeForm
+from forms import ResumeForm, CommentForm
 
 ResumeNeed = namedtuple('resume', ['method', 'value'])
 EditResumeNeed = partial(ResumeNeed, 'edit')
@@ -101,6 +102,7 @@ class DetailView(View):
 
     def get_context(self, slug=None):
         form = self.form()
+        resume = Resume.objects.get_or_404(slug=slug)
         context = {
             "resume": resume,
             "form": form,
@@ -141,8 +143,6 @@ class DetailView(View):
         return render_template('resumes/detail.html', **context)
 
     def dispatch_request(self, slug):
-        print('IIIIIIIIIIIINSIDE')
-        print(slug)
         if request.method.lower() == 'get':
             return self.get(slug)
         elif request.method.lower() == 'post':
@@ -326,9 +326,11 @@ class EditView(View):
         resume = dbUser.editing_resumes[resume_index]
         
         form = ResumeForm()
+        comment_form = CommentForm()
         context = {
             "resume": resume,
-            "form": form
+            "form": form,
+            "comment_form": comment_form
         }
         return context
 
@@ -337,32 +339,55 @@ class EditView(View):
 
         resume = context.get('resume')
         form = context.get('form')
+        comment_form = context.get('comment_form')
+
         for field in _form_to_dict(form):
             if field in resume:
                 form[field].data = ", ".join(resume[field].items)
 
-        return render_template('resumes/edit.html', form=form)
+        return render_template('resumes/edit.html', 
+            form=form, comment_form=comment_form)
 
     def post(self, slug):
         context = self.get_context(slug)
-        form = context.get('form')
         resume = context.get('resume')
-        
-        if form.validate():
-            for field in _form_to_dict(form):
-                if field in resume:
-                    resume[field].items = form[field].data.split(",")
-        resume.save()
-
         dbUser = resumes.Person.objects.get_or_404(
             username=g.user.username)
-        if request.form['submit'] == 'save':
-            dbUser.resume_save(resume)
-        elif request.form['submit'] == 'push':
-            dbUser.resume_submit(resume)
+        if "comment" in request.form:
+            comment_form = context.get('comment_form')
 
-        parent = resumes.Person.objects.get_or_404(
-            username=resume.parent_user)
+            comment = resumes.Comment()
+            comment._id = ObjectId()
+            comment.author_user = dbUser.username
+            # comment.createDt = time.gmtime(time.time())
+            comment.topic = comment_form['topic'].data
+            comment.section = comment_form['section'].data
+            comment.upvote = 0
+            comment.downvote = 0
+            comment.payload = comment_form['payload'].data
+            comment.save()
+
+            # resume.comments = [comment]
+            resume.comments = []
+            resume.comments.append(comment)
+            print(resume.comments)
+            # resume.comments.save()
+            resume.save()
+        else:
+            form = context.get('form')
+            if form.validate():
+                for field in _form_to_dict(form):
+                    if field in resume:
+                        resume[field].items = form[field].data.split(",")
+            resume.save()
+
+            if request.form['submit'] == 'save':
+                dbUser.resume_save(resume)
+            elif request.form['submit'] == 'push':
+                dbUser.resume_submit(resume)
+
+            parent = resumes.Person.objects.get_or_404(
+                username=resume.parent_user)
         return render_template('resumes/list.html', 
             resumes=dbUser.editing_resumes)
 
@@ -386,7 +411,6 @@ class ReviewView(View):
             resumes=sorted_edits)
 
     def post(self):
-        print(request.form)
         slug = list(request.form.keys())[0]
         return redirect(url_for('resume_app.review_single',
             slug=slug))

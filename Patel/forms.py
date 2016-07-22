@@ -16,22 +16,22 @@ class LoginForm(Form):
 # Signup Form created from user_form
 class RegisterForm(Form):
     username = TextField(label='Username', validators=[validators.Required(), 
-    	validators.Length(min=5, max=25)])
+        validators.Length(min=5, max=25)])
     email = TextField('Email', validators=[validators.Required()])
     password = PasswordField('Password', validators=[validators.Required(), 
-    	validators.Length(min=6, max=40)])
+        validators.Length(min=6, max=40)])
     confirm  = PasswordField('Repeat Password', validators=[validators.Required(), 
-    	validators.EqualTo('password', message='Passwords must match')])
+        validators.EqualTo('password', message='Passwords must match')])
 
 # For resetting password
 class ForgotForm(Form):
     username = TextField('Username', validators=[validators.Required()])
 
 class ResetPassForm(Form):
-	password = PasswordField('Password', validators=[validators.Required(), 
-		validators.Length(min=6, max=40)])
-	confirm  = PasswordField('Repeat Password', validators=[validators.Required(), 
-		validators.EqualTo('password', message='Passwords must match')])
+    password = PasswordField('Password', validators=[validators.Required(), 
+        validators.Length(min=6, max=40)])
+    confirm  = PasswordField('Repeat Password', validators=[validators.Required(), 
+        validators.EqualTo('password', message='Passwords must match')])
 
 class ResumeForm(Form):
     experience = TextField('Experience')
@@ -42,3 +42,8 @@ class ResumeForm(Form):
     pubs = TextField('Publications')
     interests = TextField('Interests')
     languages = TextField('Languages')
+
+class CommentForm(Form):
+    topic = TextField('Topic')
+    section = TextField('Section')
+    payload = TextField('Payload')

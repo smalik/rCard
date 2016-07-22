@@ -4,7 +4,7 @@ from bson.objectid import ObjectId
 from collections import OrderedDict
 
 from app import db
-from comments import CommentsPerSection, ToDosPerSection
+from comments import CommentsPerSection, ToDosPerSection, Comment
 
 class SocialMediaID:
     def __init__(self, network=None, uname=None, url=None):
@@ -240,6 +240,8 @@ class Resume(db.Document):
 
     comments_per_section = db.EmbeddedDocumentField(CommentsPerSection)
     todos_per_section    = db.EmbeddedDocumentField(ToDosPerSection)
+
+    comments      = db.ListField(db.ReferenceField(Comment))
 
     # which edit the current resume is -- only applicable for "edit" docs
     # None if referring to original

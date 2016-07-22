@@ -24,6 +24,13 @@
   </h2>
 
   <form action="?{{ request.query_string }}" class="form" method="post">
+    <h3>Add Comment</h3>
+    {{ render_form(comment_form) }}
+    <input type="submit" class="btn btn-primary" value="comment" name="comment">
+  </form>
+  <hr>
+
+  <form action="?{{ request.query_string }}" class="form" method="post">
       {{ render_form(form) }}
     <div class="actions">
       <input type="submit" class="btn btn-primary" value="push" name="submit">
@@ -31,6 +38,7 @@
       <a href="{{ url_for('resume_app.version', _external=True) }}" class="btn btn-default">Cancel</a>
     </div>
   </form>
+
   {% include 'footer.html' %}
 
 {% endblock %}

@@ -19,11 +19,11 @@ Base comment class that other commenting classes inherit.  We want to capture
 the comment author, likes, downvotes, comment text, comment date, and what 
 topic the comment is about
 """
-class Comment(db.EmbeddedDocument):
+class Comment(db.Document):
     _id         = db.ObjectIdField()
 
     # user ID from Person class of contributor
-    author      = db.ObjectIdField()
+    author_user = db.StringField()
     createDt    = db.DateTimeField()
 
     # Topic of comment (e.g.  grammar, clarity, etc...)
@@ -31,7 +31,7 @@ class Comment(db.EmbeddedDocument):
 
     # Section this comment is bound to
     section     = db.StringField()
-    section_id  = db.ObjectIdField()
+    # section_id  = db.ObjectIdField()
 
     # how many people upvoted/downvoted the comment posted in payload
     upvote       = db.IntField()
@@ -46,13 +46,11 @@ class Comment(db.EmbeddedDocument):
             createDt: {}
             topic: {}
             section: {}
-            section_id: {}
             upvote: {}
             downvote: {}
             payload: {}
-        """.format(self.author, self.createDt, self.topic, 
-            self.section, self.section_id, self.upvote, 
-            self.downvote, self.payload)
+        """.format(self.author_user, self.createDt, self.topic, 
+            self.section, self.upvote, self.downvote, self.payload)
 
 class CommentsPerSection(db.EmbeddedDocument):
     _id         = db.ObjectIdField()
