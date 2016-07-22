@@ -37,6 +37,27 @@
     </head>
 
     <body>
+        <nav class="navbar navbar-default">
+          <div class="container-fluid">
+            <div class="navbar-header">
+              <a class="navbar-brand" href="#">Plytos</a>
+            </div>
+            <ul class="nav navbar-nav">
+              <li><a href="/user/login" style="color: blue;">Login</a></li>
+              <li><a href="/user/register" style="color: blue;">Register</a></li> 
+              <li><a href="/user/logout" style="color: blue;">Logout</a></li> 
+
+              <li><a href="/resumes" style="color: red;">View</a></li> 
+              <li><a href="/resumes/create" style="color: red;">Create</a></li> 
+
+              <li><a href="/resumes/find" style="color: purple;">Find</a></li> 
+              <li><a href="/resumes/edits" style="color: purple;">Edit</a></li>
+               
+              <li><a href="/resumes/review" style="color: green;">Review</a></li> 
+            </ul>
+          </div>
+        </nav>
+
         {% block body %}{% endblock %}
 
         <!-- Javascript -->

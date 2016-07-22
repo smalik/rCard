@@ -373,9 +373,7 @@ class Person(db.Document):
     # deletes an instance of an object with "slug" and in the particular
     # array (typically working_resumes etc...) that is specified
     def del_existing(self, which, slug):
-        del_index = self.which_contain_doc(which, slug)
-        if del_index is not None:
-            del which[del_index]
+        which = [item for item in which if item.slug != slug]
 
     def resume_fork(self, resume):
         resume.num_edits += 1
@@ -436,10 +434,8 @@ class Person(db.Document):
         db_obj = field_class_lookup[field]()
 
         db_obj._id = ObjectId()
-        print(edit_value)
         db_obj.items = edit_value.split(',')
         db_obj.comments = []
-        print(type(db_obj))
 
         self.working_resumes[working_index][field] = db_obj
         self.working_resumes[working_index].save()

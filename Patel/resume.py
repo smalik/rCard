@@ -99,8 +99,7 @@ class DetailView(View):
                 todos_per_tag.section_name = choice[1]
                 resume.todos_per_section = todos_per_tag
 
-    def get_context(self, slug=None):       
-        resume = Resume.objects.get_or_404(slug=slug)
+    def get_context(self, slug=None):
         form = self.form()
         context = {
             "resume": resume,
@@ -142,6 +141,8 @@ class DetailView(View):
         return render_template('resumes/detail.html', **context)
 
     def dispatch_request(self, slug):
+        print('IIIIIIIIIIIINSIDE')
+        print(slug)
         if request.method.lower() == 'get':
             return self.get(slug)
         elif request.method.lower() == 'post':
