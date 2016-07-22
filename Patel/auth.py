@@ -30,6 +30,8 @@ def before_request():
 def register():
     form = RegisterForm()
     # current_app.logger.info(request.form)
+    if g.user is not None and g.user.is_authenticated:
+        return redirect(url_for("resume_app.list"))
 
     if request.method == "POST" and form.validate() == False:
         current_app.logger.info(form.errors)
@@ -54,8 +56,7 @@ def register():
             if login_user(user, remember="no"):
                 session["user_id"] = username
                 flash("Logged in!")
-                return redirect(request.args.get('next') 
-                    or '/resumes/create')
+                return redirect(url_for("resume_app.list"))
             else:
                 flash("Unable to log you in")
         except:
@@ -69,7 +70,7 @@ def register():
 def login():
     form = LoginForm()
     if g.user is not None and g.user.is_authenticated:
-        return render_template("index.html")
+        return redirect(url_for("resume_app.list"))
 
     if request.method == "POST" and "username" in request.form:
         username = request.form["username"]
@@ -85,7 +86,7 @@ def login():
 
                 identity_changed.send(current_app._get_current_object(),
                                       identity = Identity(user.id))
-                return redirect(request.args.get('next') or '/jobs')
+                return redirect(url_for("resume_app.list"))
             else:
                 flash("Unable to log you in")
     return render_template('forms/login.html', form=form)

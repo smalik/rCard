@@ -80,7 +80,7 @@ def make_resume(parent):
     resume.todos_per_section = todos_per_section
 
     resume.version = 0
-    resume.numEdits = 0
+    resume.num_edits = 0
     resume.editDt = []
     resume.slug = ""
 

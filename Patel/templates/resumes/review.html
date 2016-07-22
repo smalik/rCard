@@ -16,12 +16,16 @@
   </h2>
 
   {% for field in fields %}
-  <h4> {{ field }} </h4>
-  <font color="red"> Original: {{ edit[field].items }} </font>
-  <br>
-  <font color="green"> Edit: {{ orig[field].items }} </font>
-
   <form action="?{{ request.query_string }}" class="form" method="post">
+    <input name="field" value="{{ field }}"> </input>
+    <br>
+
+    Original: <input color="red" name="original" value="{{ orig[field].items }}"> </input>
+    <br>
+
+    Edit: <input color="green" name="edit" value="{{ edit[field].items }}"></input>
+    <br>
+
     <div class="actions">
       <input type="submit" class="btn btn-success" value="accept" name="submit">
       <input type="submit" class="btn btn-danger" value="reject" name="submit">
@@ -29,7 +33,6 @@
   </form>
   <hr>
   {% endfor %}
-
   {% include 'footer.html' %}
 
 {% endblock %}

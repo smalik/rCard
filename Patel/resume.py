@@ -1,5 +1,5 @@
 from flask import (Blueprint, render_template, request, redirect, 
-    url_for, g, abort)
+    url_for, g, abort, session)
 from flask.views import View
 from flask.ext.mongoengine.wtf import model_form
 from flask.ext.login import current_user
@@ -249,7 +249,11 @@ class CreateView(View):
             resume.interests = interests
             resume.languages = languages
             resume.skills = skills
+            
             resume.parent_user = creator.username
+            resume.version = None
+            resume.num_edits = 0
+
             resume.save()
 
             creator.working_resumes.append(resume)
@@ -315,9 +319,12 @@ class EditView(View):
     def get_context(self, slug):
         dbUser = resumes.Person.objects.get_or_404(
             username=g.user.username)
-        resume = dbUser.which_contain_doc(dbUser.editing_resumes, slug)
-        form = ResumeForm()
+        resume_index = dbUser.which_contain_doc(
+            dbUser.editing_resumes, slug)
 
+        resume = dbUser.editing_resumes[resume_index]
+        
+        form = ResumeForm()
         context = {
             "resume": resume,
             "form": form
@@ -325,8 +332,9 @@ class EditView(View):
         return context
 
     def get(self, slug):
-        resume = Resume.objects.get_or_404(slug=slug)
         context = self.get_context(slug)
+
+        resume = context.get('resume')
         form = context.get('form')
         for field in _form_to_dict(form):
             if field in resume:
@@ -337,19 +345,23 @@ class EditView(View):
     def post(self, slug):
         context = self.get_context(slug)
         form = context.get('form')
+        resume = context.get('resume')
         
-        dbUser = resumes.Person.objects.get_or_404(
-            username=g.user.username)
         if form.validate():
-            resume = Resume.objects.get_or_404(slug=slug)
             for field in _form_to_dict(form):
                 if field in resume:
                     resume[field].items = form[field].data.split(",")
+        resume.save()
+
+        dbUser = resumes.Person.objects.get_or_404(
+            username=g.user.username)
         if request.form['submit'] == 'save':
             dbUser.resume_save(resume)
         elif request.form['submit'] == 'push':
             dbUser.resume_submit(resume)
 
+        parent = resumes.Person.objects.get_or_404(
+            username=resume.parent_user)
         return render_template('resumes/list.html', 
             resumes=dbUser.editing_resumes)
 
@@ -365,6 +377,7 @@ class ReviewView(View):
     decorators = [login_required]
 
     def get(self):
+        session['slug'] = None
         dbUser = resumes.Person.objects.get_or_404(
             username=g.user.username)
         sorted_edits = dbUser.get_sorted_edits()
@@ -372,10 +385,25 @@ class ReviewView(View):
             resumes=sorted_edits)
 
     def post(self):
+        print(request.form)
         slug = list(request.form.keys())[0]
+        return redirect(url_for('resume_app.review_single',
+            slug=slug))
+
+    def dispatch_request(self):
+        if request.method.lower() == 'get':
+            return self.get()
+        if request.method.lower() == 'post':
+            return self.post()
+        return "Improper method used: {}".format(request.method)
+
+class OneReviewView(View):
+    #Also need a decorator to verify this is the owner of resume
+    decorators = [login_required]
+
+    def get(self, slug):
         dbUser = resumes.Person.objects.get_or_404(
             username=g.user.username)
-        
         if 'Publish ' in slug:
             dbUser.resume_publish(slug.replace('Publish ',''))
             return redirect(url_for('resume_app.review'))
@@ -391,27 +419,22 @@ class ReviewView(View):
         return render_template('resumes/review.html',
             edit=current_edit, orig=working_resume, fields=edit_fields)
 
-    def dispatch_request(self):
-        if request.method.lower() == 'get':
-            return self.get()
-        if request.method.lower() == 'post':
-            return self.post()
-        return "Improper method used: {}".format(request.method)
-
-class OneReviewView(View):
-    #Also need a decorator to verify this is the owner of resume
-    decorators = [login_required]
-
-    def get(self, slug):
-        resume = Resume.objects.get_or_404(slug=slug)
+    def post(self, slug):
         dbUser = resumes.Person.objects.get_or_404(
             username=g.user.username)
-        return render_template('resumes/list_review.html',
-            resumes=dbUser.current_edits)
+        if 'submit' in request.form:
+            if request.form['submit'] == 'accept':
+                field = request.form['field']
+                edit_value = request.form['edit']
+                dbUser.resume_accept(slug, field, edit_value)
+            return redirect(url_for('resume_app.review'))
 
     def dispatch_request(self, slug):
+        session['slug'] = slug
         if request.method.lower() == 'get':
-            return self.get(slug)
+            return self.get(session['slug'])
+        if request.method.lower() == 'post':
+            return self.post(session['slug'])
         return "Improper method used: {}".format(request.method)
 
 class FinalView(View):
@@ -501,7 +524,7 @@ resume_app.add_url_rule('/edit/<slug>',
 resume_app.add_url_rule('/review', view_func=ReviewView.as_view('review'), 
     methods=['GET', 'POST'])
 resume_app.add_url_rule('/review/<slug>', 
-    view_func=OneReviewView.as_view('review_single'), methods=['GET'])
+    view_func=OneReviewView.as_view('review_single'), methods=['GET', 'POST'])
 
 # for viewing the finalized resumes
 resume_app.add_url_rule('/final', view_func=FinalView.as_view('final'), 

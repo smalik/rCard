@@ -1,5 +1,7 @@
 from datetime import datetime
 from copy import deepcopy
+from bson.objectid import ObjectId
+from collections import OrderedDict
 
 from app import db
 from comments import CommentsPerSection, ToDosPerSection
@@ -239,8 +241,13 @@ class Resume(db.Document):
     comments_per_section = db.EmbeddedDocumentField(CommentsPerSection)
     todos_per_section    = db.EmbeddedDocumentField(ToDosPerSection)
 
+    # which edit the current resume is -- only applicable for "edit" docs
+    # None if referring to original
     version     = db.IntField()
-    numEdits    = db.IntField()
+    
+    # number of edits that resume has -- only applicable for original
+    # None if referring to a derived doc (i.e. an edit)
+    num_edits    = db.IntField()
     editDt      = db.ListField(db.DateTimeField())
 
     slug        = db.StringField()
@@ -258,12 +265,14 @@ class Resume(db.Document):
             comments_per_section: {}
             todos_per_section: {}
             version: {}
-            numEdits: {}
+            num_edits: {}
             editDt: {}
+            slug: {}
         """.format(self.experience, self.volunteer, self.education, 
             self.skills, self.awards, self.pubs, self.interests, 
             self.languages, self.comments_per_section, 
-            self.todos_per_section, self.version, self.numEdits, self.editDt)
+            self.todos_per_section, self.version, self.num_edits, 
+            self.editDt, self.slug)
 
 class Personal(db.EmbeddedDocument):
     _id          = db.ObjectIdField()    
@@ -357,30 +366,41 @@ class Person(db.Document):
     # editing_resumes) if the resume is contained
     def which_contain_doc(self, which, slug):
         for i in range(len(which)):
-            print(which[i].slug)
-            print(slug)
             if which[i].slug == slug:
                 return i
         return None
 
-    def resume_fork(self, resume):
-        existing_resume = self.which_contain_doc(self.editing_resumes, 
-            resume.slug)
-        if existing_resume is not None:
-            return self.editing_resumes[existing_resume]
+    # deletes an instance of an object with "slug" and in the particular
+    # array (typically working_resumes etc...) that is specified
+    def del_existing(self, which, slug):
+        del_index = self.which_contain_doc(which, slug)
+        if del_index is not None:
+            del which[del_index]
 
-        edit_version = deepcopy(resume)
+    def resume_fork(self, resume):
+        resume.num_edits += 1
+        resume.save()
+
+        self.del_existing(self.editing_resumes, resume.slug)
+        edit_version = Resume()
+
+        # makes an editing copy of the resume and saves it
+        for field in resume:
+            if field != 'id':
+                edit_version[field] = resume[field]
+
+        edit_version.num_edits = None
+        edit_version.version = resume.num_edits
+        edit_version.save()
+        
+        # adds this editing copy to the list of resumes 
+        # being edited by the user at hand
         self.editing_resumes.append(edit_version)
         self.save()
-
+        
     def resume_save(self, resume):
-        existing_resume = self.which_contain_doc(self.editing_resumes, 
-            resume.slug)
-        if existing_resume is not None:
-            del self.editing_resumes[existing_resume]
-
+        self.del_existing(self.editing_resumes, resume.slug)
         self.editing_resumes.append(resume)
-        resume.save()
         self.save()
 
     def resume_submit(self, resume):
@@ -390,32 +410,49 @@ class Person(db.Document):
 
     ################## Owner Version Control Funcs #############################
     def get_sorted_edits(self):
-        sorted_edits = {}
+        sorted_edits = OrderedDict()
         for resume in self.current_edits:
-            if resume.slug not in sorted_edits:
-                sorted_edits[resume.slug] = []
-            sorted_edits[resume.slug].append(resume)
+            try:
+                if resume.slug not in sorted_edits:
+                    sorted_edits[resume.slug] = []
+                sorted_edits[resume.slug].append(resume)
+            except:
+                pass
         return sorted_edits
 
-    def resume_accept(self, edit, fields):
-        for field in fields:
-            self.working_resume.field = edit.field
-        self.working_resume.save()
-        self.save()
+    def resume_accept(self, slug, field, edit_value):
+        field_class_lookup = {
+            'experience': Experience,
+            'volunteer': Volunteer,
+            'education': Education,
+            'skills': Skills,
+            'awards': Awards,
+            'pubs': Publications,
+            'interests': Interests,
+            'languages': Languages,
+        }
+
+        working_index = self.which_contain_doc(self.working_resumes, slug)
+        db_obj = field_class_lookup[field]()
+
+        db_obj._id = ObjectId()
+        print(edit_value)
+        db_obj.items = edit_value.split(',')
+        db_obj.comments = []
+        print(type(db_obj))
+
+        self.working_resumes[working_index][field] = db_obj
+        self.working_resumes[working_index].save()
 
     def resume_publish(self, slug):
         # finds the working resume and sees if there is already a finalized
         # version corresponding to it -- deletes if exists
         working_resume = self.which_contain_doc(self.working_resumes, slug)
-        existing_final = self.which_contain_doc(self.final_resumes, slug)
-        if existing_final is not None:
-            del self.final_resumes[existing_final]
+        
+        self.del_existing(self.final_resumes, slug)
         self.final_resumes.append(self.working_resumes[working_resume])
 
         # removes all edits corresponding to it
-        del_indices = [i for i in range(len(self.editing_resumes))
-            if slug == self.editing_resumes[i].slug]
-        
-        for index in del_indices:
-            del self.editing_resumes[i]
+        self.current_edits = [edit for edit in 
+            self.current_edits if slug != edit.slug]
         self.save()
