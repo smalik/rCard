@@ -30,6 +30,50 @@
   </form>
   <hr>
 
+  <ul>
+    {% for i in range(experience|length) %}
+      <li>
+        <a href="/resumes/indiv_edit/{{ slug }}/experience/{{ i }}">
+          Experience {{ i }}
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+  <hr>
+
+  <ul>
+    {% for i in range(volunteer|length) %}
+      <li>
+        <a href="/resumes/indiv_edit/{{ slug }}/volunteer/{{ i }}">
+          Volunteer {{ i }}
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+  <hr>
+
+  <ul>
+    {% for i in range(education|length) %}
+      <li>
+        <a href="/resumes/indiv_edit/{{ slug }}/education/{{ i }}">
+          Education {{ i }}
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+  <hr>
+
+  <ul>
+    {% for i in range(awards|length) %}
+      <li>
+        <a href="/resumes/indiv_edit/{{ slug }}/awards/{{ i }}">
+          Awards {{ i }}
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+  <hr>
+
   <form action="?{{ request.query_string }}" class="form" method="post">
       {{ render_form(form) }}
     <div class="actions">

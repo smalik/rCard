@@ -1,7 +1,18 @@
-from flask import Blueprint, render_template, request, redirect, url_for
+"""
+jobs.py: Creates the model for the Job, used for 
+streaming any online listings. Implemented in MongoDB
+
+__author__ = "Yash Patel"
+__copyright__ = "Copyright 2016, Plytos Inc."
+
+__license__ = "Free/Open"
+__version__ = "1.0.0"
+__maintainer__ = "Yash Patel"
+__email__ = "ypatel@princeton.edu"
+"""
 
 from datetime import datetime
-from app import db
+from plytos import db
 
 """
 Job description Data model behaves as follows:
@@ -17,14 +28,8 @@ Job description Data model behaves as follows:
     10. Work Remotely (Yes or No)
     11. Benefits (as tags)
 """
-jobs_app = Blueprint('jobs_app', __name__, template_folder='templates')
-
-@jobs_app.route('/', methods=["GET", "POST"])
-def get_jobs():
-    return render_template("index.html")
-
 class JobDescription(db.Document):
-    id         = db.ObjectIdField()
+    _id         = db.ObjectIdField()
 
     companyName = db.StringField()
     title       = db.StringField()

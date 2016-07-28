@@ -1,4 +1,17 @@
-from app import db
+"""
+comments.py: Creates the model for the comment system,
+namely the comment and todos objects. Implemented in MongoDB
+
+__author__ = "Yash Patel"
+__copyright__ = "Copyright 2016, Plytos Inc."
+
+__license__ = "Free/Open"
+__version__ = "1.0.0"
+__maintainer__ = "Yash Patel"
+__email__ = "ypatel@princeton.edu"
+"""
+
+from plytos import db
 
 """
 Comments behave as follows:
@@ -19,7 +32,7 @@ Base comment class that other commenting classes inherit.  We want to capture
 the comment author, likes, downvotes, comment text, comment date, and what 
 topic the comment is about
 """
-class Comment(db.Document):
+class Comment(db.EmbeddedDocument):
     _id         = db.ObjectIdField()
 
     # user ID from Person class of contributor
@@ -31,7 +44,6 @@ class Comment(db.Document):
 
     # Section this comment is bound to
     section     = db.StringField()
-    # section_id  = db.ObjectIdField()
 
     # how many people upvoted/downvoted the comment posted in payload
     upvote       = db.IntField()
@@ -79,19 +91,3 @@ class ToDosPerSection(db.EmbeddedDocument):
             index_num: {}
             section_name: {}
         """.format(self.num_todos, self.index_num, self.section_name)
-
-"""
-Comment container for each comment and pointers of comments it is 
-associated with
-"""
-class Commenting(db.EmbeddedDocument):
-    _id         = db.ObjectIdField()
-
-    children    = db.ListField(db.ObjectIdField())
-    siblings    = db.ListField(db.ObjectIdField())
-
-    def comment_count(self):
-        return len(self.siblings)
-
-    def thread_count(self):
-        return len(self.children)

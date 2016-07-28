@@ -1,8 +1,20 @@
+"""
+decorators.py: Miscellaneous decorator functions used for
+establishing some of the routes and misc functionality 
+(i.e. forget password emailing).
+
+__author__ = "Yash Patel"
+__copyright__ = "Copyright 2016, Plytos Inc."
+
+__license__ = "Free/Open"
+__version__ = "1.0.0"
+__maintainer__ = "Yash Patel"
+__email__ = "ypatel@princeton.edu"
+"""
+
 from flask import g
 from functools import wraps
 from threading import Thread
-
-#TODO timed, jsonp http://flask.pocoo.org/snippets/category/decorators/
 
 def async(f):
     def wrapper(*args, **kwargs):

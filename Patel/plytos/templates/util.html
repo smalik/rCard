@@ -96,7 +96,8 @@
 {% endmacro %}
 
 {% macro render_form(form) %}
-  {% for field in form %}
+  {{ form.hidden_tag() }}
+  {% for field in form if field.widget.input_type != 'hidden' %}
     {{ render_field(field) }}
   {% endfor %}
 {% endmacro %}

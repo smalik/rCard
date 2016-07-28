@@ -1,0 +1,69 @@
+{% extends 'layouts/layout.html' %}
+{% from "util.html" import render_form %}
+{% from 'util.html' import link_tag, script_tag %}
+
+{% if create %}
+  {% set title = 'Create Resume' %}
+{% else %}
+  {% set title = 'Edit Resume' %}
+{% endif %}
+
+{% block css %}
+  {{ link_tag('forms') }}
+{% endblock %}
+
+
+{% block body %}
+  <h2>
+    {% if create %}
+      Add new Resume -- Separate values by commas
+    {% else %}
+      Edit Resume
+    {% endif %}
+  </h2>
+
+  <form class="form" method="post">
+    {{ render_form(work_form) }}
+    <input type="submit" class="btn btn-primary" name="submit"
+      value="Create New Work">
+  </form>
+
+  <hr>
+
+  <form class="form" method="post">
+    {{ render_form(volunteer_form) }}
+    <input type="submit" class="btn btn-primary" name="submit"
+      value="Create New Volunteer">
+  </form>
+
+  <hr>
+
+  <form class="form" method="post">
+    {{ render_form(education_form) }}
+    <input type="submit" class="btn btn-primary" name="submit"
+      value="Create New Education">
+  </form>
+
+  <hr>
+
+  <form class="form" method="post">
+    {{ render_form(award_form) }}
+    <input type="submit" class="btn btn-primary" name="submit"
+      value="Create New Award">
+  </form>
+
+  <hr><form class="form" method="post">
+    {{ render_form(form) }}
+    <div class="actions">
+      <input type="submit" class="btn btn-primary" name="submit" value="Save">
+      <a href="{{ url_for('resume_app.list', _external=True) }}" 
+        class="btn btn-default">Cancel</a>
+    </div>
+  </form>
+  {% include 'footer.html' %}
+
+{% endblock %}
+
+{% block js %}
+  {{ script_tag('cookies') }}
+{% endblock %}

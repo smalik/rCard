@@ -1,31 +1,59 @@
+"""
+auth.py: Sets up the basic functionality of the app, namely
+the login, registration, and logout features, namely all those
+under the /user/ extension. Creates these in the "Login",
+"Register", and "Logout" pages
+
+__author__ = "Yash Patel"
+__copyright__ = "Copyright 2016, Plytos Inc."
+
+__license__ = "Free/Open"
+__version__ = "1.0.0"
+__maintainer__ = "Yash Patel"
+__email__ = "ypatel@princeton.edu"
+"""
+
 from flask import (Blueprint, render_template, request, current_app, flash,
                    redirect, url_for, session, g)
 from flask.ext.login import (login_user, 
     logout_user, confirm_login, current_user)
 from flask.ext.principal import Identity, AnonymousIdentity, identity_changed
 from flask.ext.mail import Message
+from bson.objectid import ObjectId
 
 from uuid import uuid4
 from datetime import datetime
 
-from decorators import async, login_required
-from libs.User import User
-from app import login_manager, flask_bcrypt, mail, app
-from models import Comment, PasswordResetRequest
-from forms import LoginForm, RegisterForm, ForgotForm, ResetPassForm
+from plytos import login_manager, flask_bcrypt, mail, app
+from plytos.decorators import async, login_required
+
+from plytos.models.resume import Skills
+from plytos.models.comments import Comment
+from plytos.models.person import Person
+from plytos.models.reset import PasswordResetRequest
+from plytos.forms import LoginForm, RegisterForm, ForgotForm, ResetPassForm
 
 MIN_PASSWORD_LENGTH = 4
 auth_login = Blueprint('auth_login', __name__, template_folder='templates')
+
+def get_with_username(username):
+    dbPerson = Person.objects.get_or_404(username=username)
+    if dbPerson: 
+        return dbPerson
+    return None
 
 # General Request Handlers
 @app.before_request
 def before_request():
     if "user_id" in session and session["user_id"]:
-        userObj = User()
-        g.user = userObj.get_by_username(session["user_id"])
+        g.user = get_with_username(username=session["user_id"])
     else:
         g.user = current_user
     
+@app.route('/')
+def home():
+    return render_template("index.html")
+
 @auth_login.route('/register', methods=["GET", "POST"])
 def register():
     form = RegisterForm()
@@ -44,15 +72,34 @@ def register():
         # generate password hash
         password_hash = flask_bcrypt.generate_password_hash(
             request.form['password'])
-        
-        user = User(
-            email = email,
-            password_hash = password_hash, 
-            active = True, 
-            username = username
-        )
         try:
+            user = Person()
+            print('INSIIIIIDE')
+            
+            user._id = ObjectId()
+            user.email = email
+            user.password_hash = password_hash
+            user.active = True
+            user.username = username
+            user.info = ""
+
+            user.final_resumes = []
+            user.working_resumes = []
+
+            user.current_edits = []
+            user.editing_resumes = []
+            user.comments = []
+
+            print('INSIIIIIDE')
+            user.skills = Skills(
+               _id = ObjectId(),
+               items = [],
+               comments = []
+            )
+
+            print('INSIIIIIDE')
             user.save()
+            print('INSIIIIIDE')
             if login_user(user, remember="no"):
                 session["user_id"] = username
                 flash("Logged in!")
@@ -74,8 +121,7 @@ def login():
 
     if request.method == "POST" and "username" in request.form:
         username = request.form["username"]
-        userObj = User()
-        user = userObj.get_by_username(username)
+        user = get_with_username(username)
         if user and user.is_active() and flask_bcrypt.\
             check_password_hash(user.password_hash, request.form["password"]):
             remember = request.form.get("remember", "no") == "yes"
@@ -126,10 +172,7 @@ def send_email(subject, sender, recipients, text_body, html_body):
 def forgot():
     form = ForgotForm()
     if request.method == "POST" and "username" in request.form:
-        username = request.form["username"]
-        userObj = User()
-        user = userObj.get_by_username(username)
-
+        user = get_with_username(request.form["username"])
         if user:
             reset_link = generate_password_reset_link(str(user.id))
             subject = "Plytos Password Reset"
@@ -196,10 +239,10 @@ def reset_password():
             has_errors = True
 
         if not has_errors:
-            userObj = User()
+            user = get_with_username(g.user.username)
             password_hash = flask_bcrypt.generate_password_hash(password)
             try:
-                userObj.reset_password(reset_request.user_id, password_hash)
+                user.reset_password(reset_request.user_id, password_hash)
                 reset_request.delete()
                 session.pop(reset_request.user_id, None)
                 flash("You have successfully reset your password!", "success")
@@ -225,8 +268,7 @@ def logout():
 @auth_login.route('/<username>/')
 @login_required
 def profile(username):
-    userObj = User()
-    user = userObj.get_by_username(username)
+    user = get_with_username(username)
 
     if user == None:
         flash('User ' + username + ' not found.')
@@ -250,9 +292,7 @@ def unauthorized_callback():
 def load_user(uname):
     if uname is None:
         redirect('/login')
-    user = User()
-    user.get_by_username(uname)
+    user = get_with_username(uname)
     if user.is_active():
         return user
-    else:
-        return None
+    else: return None
