@@ -74,7 +74,6 @@ def register():
             request.form['password'])
         try:
             user = Person()
-            print('INSIIIIIDE')
             
             user._id = ObjectId()
             user.email = email
@@ -90,16 +89,13 @@ def register():
             user.editing_resumes = []
             user.comments = []
 
-            print('INSIIIIIDE')
             user.skills = Skills(
                _id = ObjectId(),
                items = [],
                comments = []
             )
 
-            print('INSIIIIIDE')
             user.save()
-            print('INSIIIIIDE')
             if login_user(user, remember="no"):
                 session["user_id"] = username
                 flash("Logged in!")
