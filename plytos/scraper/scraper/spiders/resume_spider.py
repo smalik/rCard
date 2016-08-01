@@ -25,6 +25,7 @@ from scrapy import Spider
 from scrapy.shell import inspect_response
 from scrapy.spiders import Rule
 from scrapy.linkextractors import LinkExtractor
+from scrapy.linkextractors.lxmlhtml import LxmlLinkExtractor
 from scrapy.selector import Selector
 
 from scraper.items import ResumeItem, WorkItem, SchoolItem, ItemList
@@ -35,9 +36,8 @@ class ResumeIndeedSpider(Spider):
     name = "resume"
     allowed_domains = ["indeed.com"]
     start_urls = ['http://www.indeed.com/resumes/statistics-python',]
-                  #'http://www.indeed.com/resumes/statistics-python',
                   #'http://www.indeed.com/resumes/data-scientist',
-                  #'http://www.indeed.com/resumes/python',]
+                  #'http://www.indeed.com/resumes/python',
                   #'http://www.indeed.com/resumes/java',
                   #'http://www.indeed.com/resumes/SAS',
                   #'http://www.indeed.com/resumes/javascript',
@@ -60,8 +60,8 @@ class ResumeIndeedSpider(Spider):
                   #'http://www.indeed.com/resumes/animator']
 
     rules = (Rule(LinkExtractor(
-        restrict_xpaths = ('//a[@class="instl confirm-nav next"]')), 
-        callback = "parse_item", follow = True),)
+        restrict_xpaths = ('//a[@class="confirm-nav next"]')), 
+        callback = "parse", follow=True),)
 
     def parse(self, response):
         hxs     =   Selector(response)
