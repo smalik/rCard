@@ -15,7 +15,7 @@ BOT_NAME = 'scraper'
 SPIDER_MODULES = ['scraper.spiders']
 NEWSPIDER_MODULE = 'scraper.spiders'
 
-DEPTH_LIMIT = 50
+DEPTH_LIMIT = 3
 
 MEMUSAGE_REPORT = True
 
@@ -30,5 +30,5 @@ ITEM_PIPELINES = {'scraper.pipelines.MongoDBPipeline': 0,}
 
 MONGODB_SERVER = "localhost"
 MONGODB_PORT = 27017
-MONGODB_DB = "test"
-MONGODB_COLLECTION = "plytos"
+MONGODB_DB = "resume"
+MONGODB_COLLECTION = "resume"

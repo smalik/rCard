@@ -28,8 +28,8 @@ class ItemList(Item):
     items         = Field()
     comments      = Field()
     
-    def encode(self, obj):
-        return obj.__dict__
+    def encode(self):
+        return self.__dict__
 
 class WorkItem(Item):
     _id           = Field()
@@ -45,8 +45,8 @@ class WorkItem(Item):
     highlights       = Field()
     skills           = Field()
 
-    def encode(self, obj):
-        return obj.__dict__
+    def encode(self):
+        return self.__dict__
 
 class SchoolItem(Item):
     _id           = Field()
@@ -61,9 +61,8 @@ class SchoolItem(Item):
     gpa             = Field()
     courses         = Field()
 
-    def encode(self, obj):
-        return obj.__dict__
-
+    def encode(self):
+        return self.__dict__
 
 class ResumeItem(Item):
     _id           = Field()
@@ -89,3 +88,6 @@ class ResumeItem(Item):
     num_edits            = Field()
     editDt               = Field()
     slug                 = Field()
+
+    def encode(self):
+        return self.__dict__

@@ -29,19 +29,35 @@ from scrapy.selector import Selector
 
 from scraper.items import ResumeItem, WorkItem, SchoolItem, ItemList
 
+import sys
+
 class ResumeIndeedSpider(Spider):
     name = "resume"
     allowed_domains = ["indeed.com"]
-    start_urls = ['http://www.indeed.com/resumes/statistics-python',
-                  'http://www.indeed.com/resumes/data-scientist',
-                  'http://www.indeed.com/resumes/python',
-                  'http://www.indeed.com/resumes/java',
-                  'http://www.indeed.com/resumes/SAS',
-                  'http://www.indeed.com/resumes/javascript',
-                  'http://www.indeed.com/resumes/marketing-analyst',
-                  'http://www.indeed.com/resumes/biomedical',
-                  'http://www.indeed.com/resumes/physicist',
-                  'http://www.indeed.com/resumes/business-analyst']
+    start_urls = ['http://www.indeed.com/resumes/statistics-python',]
+                  #'http://www.indeed.com/resumes/statistics-python',
+                  #'http://www.indeed.com/resumes/data-scientist',
+                  #'http://www.indeed.com/resumes/python',]
+                  #'http://www.indeed.com/resumes/java',
+                  #'http://www.indeed.com/resumes/SAS',
+                  #'http://www.indeed.com/resumes/javascript',
+                  #'http://www.indeed.com/resumes/marketing-analyst',
+                  #'http://www.indeed.com/resumes/biomedical',
+                  #'http://www.indeed.com/resumes/physicist',
+                  #'http://www.indeed.com/resumes/business-analyst',
+                  #'http://www.indeed.com/resumes/writer',
+                  #'http://www.indeed.com/resumes/product-manager',
+                  #'http://www.indeed.com/resumes/produce-manager',
+                  #'http://www.indeed.com/resumes/technical-writer',
+                  #'http://www.indeed.com/resumes/photographer',
+                  #'http://www.indeed.com/resumes/dev-ops',
+                  #'http://www.indeed.com/resumes/architect',
+                  #'http://www.indeed.com/resumes/civil-engineer',
+                  #'http://www.indeed.com/resumes/graphic-designer',
+                  #'http://www.indeed.com/resumes/electrical-engineer',
+                  #'http://www.indeed.com/resumes/server',
+                  #'http://www.indeed.com/resumes/translator',
+                  #'http://www.indeed.com/resumes/animator']
 
     rules = (Rule(LinkExtractor(
         restrict_xpaths = ('//a[@class="instl confirm-nav next"]')), 
@@ -50,7 +66,6 @@ class ResumeIndeedSpider(Spider):
     def parse(self, response):
         hxs     =   Selector(response)
         digest  =   hxs.xpath('//ol[@class="resultsList"]')
-        records =   ResumeItem()
         
         url_prefix = 'http://www.indeed.com'
 
@@ -58,14 +73,12 @@ class ResumeIndeedSpider(Spider):
         names   =   digest.xpath('//a[@target="_blank"]/text()').extract()
         links   =   digest.xpath('//a[@target="_blank"]/@href').extract()
                 
+        count = 0
         for name, link in zip(names, links):
             if name not in 'Feedback':
-                records['parent_user'] =   name
                 if "http://" not in link:
                     link =   url_prefix + link
-
-                records = self.parse_node(requests.get(link))
-                yield records
+                yield self.parse_node(requests.get(link))
 
     def get_work(self, hxs):
         workHistory =   []
@@ -105,7 +118,7 @@ class ResumeIndeedSpider(Spider):
                 workEntry['highlights']   = []
                 workEntry['skills']       = []
 
-                workHistory.append(workEntry)
+                workHistory.append(workEntry.encode())
         return workHistory
 
     def get_edu(self, hxs):
@@ -157,7 +170,7 @@ class ResumeIndeedSpider(Spider):
                 eduEntry['gpa']       = 0.0
                 eduEntry['courses']   = []
 
-                eduHistory.append(eduEntry)
+                eduHistory.append(eduEntry.encode())
         return eduHistory
 
     def parse_node(self, response):
@@ -199,14 +212,15 @@ class ResumeIndeedSpider(Spider):
         records =   ResumeItem()
         
         records['_id']          = str(ObjectId()) 
+        
         records['parent_user']  =   str(''.join(name).encode('utf8',
-            errors='ignore'))
+            errors='ignore').decode('utf8'))
         records['awards']       =   msgpack.packb(str(''.join(
             summary))).decode('utf8', errors='ignore')
         records['skills']       =   msgpack.packb(skills).decode(
             'utf8', errors='ignore')
-        records['experience']   = workItemList
-        records['education']    = eduItemList
+        records['experience']   = workItemList.encode()
+        records['education']    = eduItemList.encode()
 
         ######################## DEFAULT ############################
         records['skills']               = None

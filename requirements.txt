@@ -22,10 +22,8 @@ itsdangerous==0.23
 meld3==1.0.0
 mongoengine==0.8.7
 paramiko==1.12.4
-pdfminer==20131113
 py-bcrypt==0.4
 pycrypto==2.6.1
 pymongo==2.6.3
 requests==2.0.0
 slate==0.3
-supervisor==3.0
