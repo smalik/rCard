@@ -1,3 +1,17 @@
+"""
+pipelines.py: Creates the pipeline for feeding the scraped data
+into the relevant MongoDB database. Used for populating the
+test/development-level DB
+
+__author__ = "Yash Patel"
+__copyright__ = "Copyright 2016, Plytos Inc."
+
+__license__ = "Free/Open"
+__version__ = "1.0.0"
+__maintainer__ = "Yash Patel"
+__email__ = "ypatel@princeton.edu"
+"""
+
 import pymongo
 from scrapy.conf import settings
 from scrapy.exceptions import DropItem

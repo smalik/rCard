@@ -1,43 +1,46 @@
-# Define here the models for your scraped items
-#
-# See documentation in:
-# http://doc.scrapy.org/en/latest/topics/items.html
+"""
+items.py: Models for the scraping process -- equivalent to those
+used in the models of the overall production to make this relevant
+for testing development code
+
+__author__ = "Yash Patel"
+__copyright__ = "Copyright 2016, Plytos Inc."
+
+__license__ = "Free/Open"
+__version__ = "1.0.0"
+__maintainer__ = "Yash Patel"
+__email__ = "ypatel@princeton.edu"
+"""
 
 from scrapy.item import Item, Field
+
+# Each item has set of values that are not available from 
+# indeed.com scraping -- just set these variables to default
 
 # Captures the structures of each of the following classes:
 # - Volunteer
 # - Education
 # - Awards
 # - Publications
-class ItemList(object):
-    def __init__(self):
-        self.items = []
-        self.comments = []
+class ItemList(Item):
+    _id           = Field()
+
+    items         = Field()
+    comments      = Field()
     
     def encode(self, obj):
         return obj.__dict__
 
-class VolunteerItem(Item):
-    org           = Field()
-    title         = Field()
-    startDt       = Field()
-    endDt         = Field()
-    url           = Field()
-    impact        = Field()
-
-    highlights    = Field()
-
-    def encode(self, obj):
-        return obj.__dict__
-
 class WorkItem(Item):
+    _id           = Field()
+
     position         = Field()
     company          = Field()
     start_date       = Field()
     end_date         = Field()
     description      = Field()
 
+    ###################### DEFAULT ##########################
     url              = Field()
     highlights       = Field()
     skills           = Field()
@@ -46,30 +49,25 @@ class WorkItem(Item):
         return obj.__dict__
 
 class SchoolItem(Item):
+    _id           = Field()
+
     school          = Field()
     degree          = Field()
     locale          = Field()
     admit_date      = Field()
     grad_date       = Field()
 
-    gpa          = Field()
-    courses      = Field()
+    ###################### DEFAULT ##########################
+    gpa             = Field()
+    courses         = Field()
 
     def encode(self, obj):
         return obj.__dict__
 
-
-class AwardItem(Item):
-    title        = Field()
-    date         = Field()
-    issuer       = Field()
-    desc         = Field()
-    url          = Field()
-
-    def encode(self, obj):
-        return obj.__dict__
 
 class ResumeItem(Item):
+    _id           = Field()
+
     parent_user   = Field()
     skills        = Field()
 
@@ -78,22 +76,16 @@ class ResumeItem(Item):
     education     = Field()
     awards        = Field()
 
-class ResumeDataItem(Item):
-    # define the fields for your resume here:
-    name        = Field()
-    url         = Field()
-    email       = Field()
-    phone       = Field()
-    headline    = Field()
-    locale      = Field()
-    summary     = Field()
-    experience  = Field()
-    education   = Field()    
-    skills      = Field()
-    links       = Field()
-
-    def getName(self):
-        return self.name
+    ###################### DEFAULT ##########################
+    skills               = Field()
+    pubs                 = Field()
+    interests            = Field()
+    languages            = Field()
+    comments_per_section = Field()
+    todos_per_section    = Field()
     
-    def encode(self, obj):
-        return obj.__dict__
+    comments             = Field()
+    version              = Field()
+    num_edits            = Field()
+    editDt               = Field()
+    slug                 = Field()

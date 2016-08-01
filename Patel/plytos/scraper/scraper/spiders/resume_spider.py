@@ -1,3 +1,17 @@
+"""
+resume_spider.py: Spider object used to crawl around the Indeed
+resume website and collect information/make resume objects for
+saving to the development DB
+
+__author__ = "Yash Patel"
+__copyright__ = "Copyright 2016, Plytos Inc."
+
+__license__ = "Free/Open"
+__version__ = "1.0.0"
+__maintainer__ = "Yash Patel"
+__email__ = "ypatel@princeton.edu"
+"""
+
 #!/usr/bin/env python
 import types
 import time
@@ -5,6 +19,7 @@ from datetime import date, datetime, timedelta
 
 import requests
 import msgpack
+from bson.objectid import ObjectId
 
 from scrapy import Spider
 from scrapy.shell import inspect_response
@@ -12,7 +27,7 @@ from scrapy.spiders import Rule
 from scrapy.linkextractors import LinkExtractor
 from scrapy.selector import Selector
 
-from scraper.scraper.items import ResumeItem, WorkItem, SchoolItem, ItemList
+from scraper.items import ResumeItem, WorkItem, SchoolItem, ItemList
 
 class ResumeIndeedSpider(Spider):
     name = "resume"
@@ -23,7 +38,10 @@ class ResumeIndeedSpider(Spider):
                   'http://www.indeed.com/resumes/java',
                   'http://www.indeed.com/resumes/SAS',
                   'http://www.indeed.com/resumes/javascript',
-                  'http://www.indeed.com/resumes/marketing-analyst']
+                  'http://www.indeed.com/resumes/marketing-analyst',
+                  'http://www.indeed.com/resumes/biomedical',
+                  'http://www.indeed.com/resumes/physicist',
+                  'http://www.indeed.com/resumes/business-analyst']
 
     rules = (Rule(LinkExtractor(
         restrict_xpaths = ('//a[@class="instl confirm-nav next"]')), 
@@ -49,35 +67,8 @@ class ResumeIndeedSpider(Spider):
                 records = self.parse_node(requests.get(link))
                 yield records
 
-    def parse_node(self, response):
-        hxs     =   Selector(response)
-        # inspect_response(response, self)
-        records =   ResumeItem()
-        
-        name        =   hxs.xpath('//h1[@id="resume-contact"]/text()').extract()
-        headline    =   hxs.xpath('//h2[@id="headline"]/text()').extract()
-
-        rlocale      =   hxs.xpath('//p[@id="headline_location" '
-            'and @class="locality"]//text()').extract()
-        summary     =   hxs.xpath('//p[@id="res_summary" '
-            'and @class="summary"]/text()').extract()
-        skills      =   list()
-        skill       =   hxs.xpath('//div[@id="skills-items" '
-            'and @class="items-container"]//p//text()').extract()
-        if len(skill) != 0:
-            skills.append(str(''.join(skill)))        
-        skill       =   hxs.xpath('//div[@id="additionalinfo-section" '
-            'and @class="last"]//div[@class="data_display"]//p//text()').extract()
-        if len(skill) != 0:
-            skills.append(str(''.join(skill)))        
-        
-        resume_links    =   list()
-        links       =   hxs.xpath('//div[@id="link-items" '
-            'and @class="items-container"]//p//text()').extract()
-        for link in links:
-            resume_links.append(str(''.join(link)))
-
-        workHistory =   ItemList()
+    def get_work(self, hxs):
+        workHistory =   []
         experience  =   hxs.xpath('//div[@id="work-experience-items"]/div')
         for elem in experience:
             item = elem.xpath('div')
@@ -108,9 +99,17 @@ class ResumeIndeedSpider(Spider):
                     '//text()').extract()
                 workEntry['description']    =   str(''.join(description))
 
-                workHistory.items.append(workEntry)
-                
-        eduHistory =   ItemList()
+                ################### DEFAULT #######################
+                workEntry['_id']          = str(ObjectId())
+                workEntry['url']          = ""
+                workEntry['highlights']   = []
+                workEntry['skills']       = []
+
+                workHistory.append(workEntry)
+        return workHistory
+
+    def get_edu(self, hxs):
+        eduHistory =   []
         education  =   hxs.xpath('//div[@id="education-items" '
             'and @class="items-container"]/div')
         for elem in education:
@@ -153,16 +152,74 @@ class ResumeIndeedSpider(Spider):
                     eduEntry['admit_date']  =   'NULL'
                     eduEntry['grad_date']   =   'NULL'
 
-                eduHistory.items.append(eduEntry)
+                ################### DEFAULT #######################
+                eduEntry['_id']       = str(ObjectId())
+                eduEntry['gpa']       = 0.0
+                eduEntry['courses']   = []
 
-        # volunteer
-        records['parent_user']     =   str(''.join(name).encode('utf8',
+                eduHistory.append(eduEntry)
+        return eduHistory
+
+    def parse_node(self, response):
+        hxs     =   Selector(response)
+        name        =   hxs.xpath('//h1[@id="resume-contact"]/text()').extract()
+        headline    =   hxs.xpath('//h2[@id="headline"]/text()').extract()
+
+        rlocale      =   hxs.xpath('//p[@id="headline_location" '
+            'and @class="locality"]//text()').extract()
+        summary     =   hxs.xpath('//p[@id="res_summary" '
+            'and @class="summary"]/text()').extract()
+        skills      =   list()
+        skill       =   hxs.xpath('//div[@id="skills-items" '
+            'and @class="items-container"]//p//text()').extract()
+        if len(skill) != 0:
+            skills.append(str(''.join(skill)))        
+        skill       =   hxs.xpath('//div[@id="additionalinfo-section" '
+            'and @class="last"]//div[@class="data_display"]//p//text()').extract()
+        if len(skill) != 0:
+            skills.append(str(''.join(skill)))        
+        
+        resume_links    =   list()
+        links       =   hxs.xpath('//div[@id="link-items" '
+            'and @class="items-container"]//p//text()').extract()
+        for link in links:
+            resume_links.append(str(''.join(link)))
+
+        workItemList = ItemList()
+        workItemList['_id']      = str(ObjectId()) 
+        workItemList['items']    = self.get_work(hxs)
+        workItemList['comments'] = []
+
+        eduItemList = ItemList()
+        eduItemList['_id']      = str(ObjectId()) 
+        eduItemList['items']    = self.get_edu(hxs)
+        eduItemList['comments'] = []
+
+        ######################## Set Resume ############################
+        records =   ResumeItem()
+        
+        records['_id']          = str(ObjectId()) 
+        records['parent_user']  =   str(''.join(name).encode('utf8',
             errors='ignore'))
-        records['awards']  =   str(msgpack.packb(str(''.join(
-            summary))).decode('utf8', errors='ignore'))
-        records['skills']   =   str(msgpack.packb(skills).decode(
-            'utf8', errors='ignore'))
-        records['experience'] = workHistory
-        records['education']    = str(msgpack.packb(eduHistory, 
-            default=eduHistory.encode).decode('utf8', errors='ignore'))
+        records['awards']       =   msgpack.packb(str(''.join(
+            summary))).decode('utf8', errors='ignore')
+        records['skills']       =   msgpack.packb(skills).decode(
+            'utf8', errors='ignore')
+        records['experience']   = workItemList
+        records['education']    = eduItemList
+
+        ######################## DEFAULT ############################
+        records['skills']               = None
+        records['pubs']                 = None
+        records['interests']            = None
+        records['languages']            = None
+        records['comments_per_section'] = None
+        records['todos_per_section']    = None
+        
+        records['comments']      = []
+        records['version']       = 0
+        records['num_edits']     = 0
+        records['editDt']        = []
+        records['slug']          = str(ObjectId())
+
         return records
