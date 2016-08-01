@@ -78,7 +78,10 @@ class ResumeIndeedSpider(Spider):
             if name not in 'Feedback':
                 if "http://" not in link:
                     link =   url_prefix + link
-                yield self.parse_node(requests.get(link))
+                records = self.parse_node(requests.get(link))
+
+                if records:
+                    yield records
 
     def get_work(self, hxs):
         workHistory =   []
@@ -176,6 +179,10 @@ class ResumeIndeedSpider(Spider):
     def parse_node(self, response):
         hxs     =   Selector(response)
         name        =   hxs.xpath('//h1[@id="resume-contact"]/text()').extract()
+
+        if len(name).strip() == 0:
+            return None
+
         headline    =   hxs.xpath('//h2[@id="headline"]/text()').extract()
 
         rlocale      =   hxs.xpath('//p[@id="headline_location" '
@@ -212,7 +219,6 @@ class ResumeIndeedSpider(Spider):
         records =   ResumeItem()
         
         records['_id']          = str(ObjectId()) 
-        
         records['parent_user']  =   str(''.join(name).encode('utf8',
             errors='ignore').decode('utf8'))
         records['awards']       =   msgpack.packb(str(''.join(
