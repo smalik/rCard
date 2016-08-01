@@ -35,8 +35,8 @@ import sys
 class ResumeIndeedSpider(Spider):
     name = "resume"
     allowed_domains = ["indeed.com"]
-    start_urls = ['http://www.indeed.com/resumes/statistics-python',]
-                  #'http://www.indeed.com/resumes/data-scientist',
+    start_urls = ['http://www.indeed.com/resumes/statistics-python',
+                  'http://www.indeed.com/resumes/data-scientist',]
                   #'http://www.indeed.com/resumes/python',
                   #'http://www.indeed.com/resumes/java',
                   #'http://www.indeed.com/resumes/SAS',

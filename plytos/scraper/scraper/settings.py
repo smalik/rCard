@@ -15,7 +15,7 @@ BOT_NAME = 'scraper'
 SPIDER_MODULES = ['scraper.spiders']
 NEWSPIDER_MODULE = 'scraper.spiders'
 
-DEPTH_LIMIT = 3
+DEPTH_LIMIT = 50
 
 MEMUSAGE_REPORT = True
 
