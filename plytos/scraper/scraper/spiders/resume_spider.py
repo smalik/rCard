@@ -180,9 +180,6 @@ class ResumeIndeedSpider(Spider):
         hxs     =   Selector(response)
         name        =   hxs.xpath('//h1[@id="resume-contact"]/text()').extract()
 
-        if len(name.strip()) == 0:
-            return None
-
         headline    =   hxs.xpath('//h2[@id="headline"]/text()').extract()
 
         rlocale      =   hxs.xpath('//p[@id="headline_location" '
@@ -227,6 +224,9 @@ class ResumeIndeedSpider(Spider):
             'utf8', errors='ignore')
         records['experience']   = workItemList.encode()
         records['education']    = eduItemList.encode()
+
+        if len(records['parent_user'].strip()) == 0:
+            return None
 
         ######################## DEFAULT ############################
         records['skills']               = None
