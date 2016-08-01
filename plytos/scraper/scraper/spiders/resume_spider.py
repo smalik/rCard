@@ -180,7 +180,7 @@ class ResumeIndeedSpider(Spider):
         hxs     =   Selector(response)
         name        =   hxs.xpath('//h1[@id="resume-contact"]/text()').extract()
 
-        if len(name).strip() == 0:
+        if len(name.strip()) == 0:
             return None
 
         headline    =   hxs.xpath('//h2[@id="headline"]/text()').extract()
