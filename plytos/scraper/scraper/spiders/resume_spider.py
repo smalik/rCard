@@ -73,9 +73,9 @@ class ResumeIndeedSpider(CrawlSpider):
         count = 0
         for name, link in zip(names, links):
             if name not in 'Feedback':
+                link = link.split()[0]
                 if "http://" not in link:
                     link =   url_prefix + link
-                link = link.split()[0]
                 records = self.parse_node(requests.get(link))
 
                 if records:
@@ -175,6 +175,7 @@ class ResumeIndeedSpider(CrawlSpider):
         return eduHistory
 
     def parse_node(self, response):
+        inspect_response(response, self)
         hxs     =   Selector(response)
         name        =   hxs.xpath('//h1[@id="resume-contact"]/text()').extract()
 

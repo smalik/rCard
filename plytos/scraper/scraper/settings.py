@@ -24,7 +24,11 @@ COOKIES_ENABLED = False
 DOWNLOAD_DELAY = 2
 
 LOG_ENABLED = True
-# LOG_FILE = 'C:\\Users\\ypatel\\Documents\\Sulaiman_Work\\resume_collab\\plytos\\scraper\\scrapy_output.txt'
+DEFAULT_REQUEST_HEADERS = {
+    'referer': 'http://www.google.com'
+}
+
+USER_AGENT = "Mozilla/5.0 (Windows NT 6.2; WOW64) Chrome/27.0.1453.93 Safari/537.36"
 
 ############### MongoDB Settings #####################
 ITEM_PIPELINES = {'scraper.pipelines.MongoDBPipeline': 0,}
