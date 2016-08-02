@@ -24,6 +24,7 @@ COOKIES_ENABLED = False
 DOWNLOAD_DELAY = 2
 
 LOG_ENABLED = True
+# LOG_FILE = 'C:\\Users\\ypatel\\Documents\\Sulaiman_Work\\resume_collab\\plytos\\scraper\\scrapy_output.txt'
 
 ############### MongoDB Settings #####################
 ITEM_PIPELINES = {'scraper.pipelines.MongoDBPipeline': 0,}

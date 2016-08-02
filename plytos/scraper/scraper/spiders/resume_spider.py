@@ -21,22 +21,19 @@ import requests
 import msgpack
 from bson.objectid import ObjectId
 
-from scrapy import Spider
+from scrapy.spiders import CrawlSpider
 from scrapy.shell import inspect_response
 from scrapy.spiders import Rule
 from scrapy.linkextractors import LinkExtractor
-from scrapy.linkextractors.lxmlhtml import LxmlLinkExtractor
 from scrapy.selector import Selector
 
 from scraper.items import ResumeItem, WorkItem, SchoolItem, ItemList
 
-import sys
-
-class ResumeIndeedSpider(Spider):
+class ResumeIndeedSpider(CrawlSpider):
     name = "resume"
     allowed_domains = ["indeed.com"]
-    start_urls = ['http://www.indeed.com/resumes/statistics-python',
-                  'http://www.indeed.com/resumes/data-scientist',]
+    start_urls = ['http://www.indeed.com/resumes/statistics-python',]
+                  # 'http://www.indeed.com/resumes/data-scientist',
                   #'http://www.indeed.com/resumes/python',
                   #'http://www.indeed.com/resumes/java',
                   #'http://www.indeed.com/resumes/SAS',
@@ -61,9 +58,9 @@ class ResumeIndeedSpider(Spider):
 
     rules = (Rule(LinkExtractor(
         restrict_xpaths = ('//a[@class="confirm-nav next"]')), 
-        callback = "parse", follow=True),)
+        callback = "parse_item", follow=True),)
 
-    def parse(self, response):
+    def parse_item(self, response):
         hxs     =   Selector(response)
         digest  =   hxs.xpath('//ol[@class="resultsList"]')
         
@@ -101,7 +98,7 @@ class ResumeIndeedSpider(Spider):
 
                 dates       =   entry.xpath('p[@class="work_dates"]//text()').extract()
                 dates_str   =   str(''.join(dates)).split(' to ')
-                if len(dates) > 0:
+                if len(dates_str) > 1:
                     if dates_str[0]:
                         workEntry['start_date'] =   dates_str[0]
                     if dates_str[1]:
