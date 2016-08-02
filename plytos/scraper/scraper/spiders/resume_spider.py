@@ -32,29 +32,29 @@ from scraper.items import ResumeItem, WorkItem, SchoolItem, ItemList
 class ResumeIndeedSpider(CrawlSpider):
     name = "resume"
     allowed_domains = ["indeed.com"]
-    start_urls = ['http://www.indeed.com/resumes/statistics-python',]
-                  # 'http://www.indeed.com/resumes/data-scientist',
-                  #'http://www.indeed.com/resumes/python',
-                  #'http://www.indeed.com/resumes/java',
-                  #'http://www.indeed.com/resumes/SAS',
-                  #'http://www.indeed.com/resumes/javascript',
-                  #'http://www.indeed.com/resumes/marketing-analyst',
-                  #'http://www.indeed.com/resumes/biomedical',
-                  #'http://www.indeed.com/resumes/physicist',
-                  #'http://www.indeed.com/resumes/business-analyst',
-                  #'http://www.indeed.com/resumes/writer',
-                  #'http://www.indeed.com/resumes/product-manager',
-                  #'http://www.indeed.com/resumes/produce-manager',
-                  #'http://www.indeed.com/resumes/technical-writer',
-                  #'http://www.indeed.com/resumes/photographer',
-                  #'http://www.indeed.com/resumes/dev-ops',
-                  #'http://www.indeed.com/resumes/architect',
-                  #'http://www.indeed.com/resumes/civil-engineer',
-                  #'http://www.indeed.com/resumes/graphic-designer',
-                  #'http://www.indeed.com/resumes/electrical-engineer',
-                  #'http://www.indeed.com/resumes/server',
-                  #'http://www.indeed.com/resumes/translator',
-                  #'http://www.indeed.com/resumes/animator']
+    start_urls = ['http://www.indeed.com/resumes/statistics-python',
+                  'http://www.indeed.com/resumes/data-scientist',
+                  'http://www.indeed.com/resumes/python',
+                  'http://www.indeed.com/resumes/java',
+                  'http://www.indeed.com/resumes/SAS',
+                  'http://www.indeed.com/resumes/javascript',
+                  'http://www.indeed.com/resumes/marketing-analyst',
+                  'http://www.indeed.com/resumes/biomedical',
+                  'http://www.indeed.com/resumes/physicist',
+                  'http://www.indeed.com/resumes/business-analyst',
+                  'http://www.indeed.com/resumes/writer',
+                  'http://www.indeed.com/resumes/product-manager',
+                  'http://www.indeed.com/resumes/produce-manager',
+                  'http://www.indeed.com/resumes/technical-writer',
+                  'http://www.indeed.com/resumes/photographer',
+                  'http://www.indeed.com/resumes/dev-ops',
+                  'http://www.indeed.com/resumes/architect',
+                  'http://www.indeed.com/resumes/civil-engineer',
+                  'http://www.indeed.com/resumes/graphic-designer',
+                  'http://www.indeed.com/resumes/electrical-engineer',
+                  'http://www.indeed.com/resumes/server',
+                  'http://www.indeed.com/resumes/translator',
+                  'http://www.indeed.com/resumes/animator']
 
     rules = (Rule(LinkExtractor(
         restrict_xpaths = ('//a[@class="confirm-nav next"]')), 
@@ -75,6 +75,7 @@ class ResumeIndeedSpider(CrawlSpider):
             if name not in 'Feedback':
                 if "http://" not in link:
                     link =   url_prefix + link
+                link = link.split()[0]
                 records = self.parse_node(requests.get(link))
 
                 if records:
