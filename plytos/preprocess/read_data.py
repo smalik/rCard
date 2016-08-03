@@ -26,7 +26,10 @@ import redis
 
 import string
 import re
-import multiprocessing
+# import multiprocessing
+
+import dill as pickle
+import pathos.multiprocessing as multiprocessing
 
 settings = {
     'mongo_host': 'localhost',
@@ -74,6 +77,12 @@ def _gen_ngrams(r, n):
         for sentence in sentences]
 
 def push_chunk(chunk):
+    stem_map = {
+        "Lancaster": LancasterStemmer(),
+        "Porter": PorterStemmer(),
+        "Snowball": SnowballStemmer('english')
+    }
+
     #################### Binary Flagging ########################
     # Set each of the following flags to either True/False
     set_case             = True
@@ -89,7 +98,7 @@ def push_chunk(chunk):
 
     # stem, lemma, other* (Anything)
     stem_lemma           = "stem"
-    
+
     df    =  pd.DataFrame(list(chunk))
     for (experience, _id) in zip(df["experience"], df[query_col]):
         for item in experience['_values']['items']:
@@ -124,6 +133,7 @@ def push_chunk(chunk):
             for sentence in sentences:
                 if len(sentence) > 0:
                     r.lpush(_id, sentence.encode('utf8'))
+    return True
 
 """ Read from Mongo and Store into DataFrame """
 def chunk_mongo(r, db, collection, host, port, query={}):
@@ -146,14 +156,9 @@ def chunk_mongo(r, db, collection, host, port, query={}):
 
 def transform_db():
     r = redis.StrictRedis(host='localhost', port=6379, db=0)
-    stem_map = {
-        "Lancaster": LancasterStemmer('english'),
-        "Porter": PorterStemmer('english'),
-        "Snowball": SnowballStemmer('english')
-    }
 
     print("Reading Data...")
-    chunks = read_mongo(
+    chunks = chunk_mongo(
         r = r,
         db = settings["mongo_db_name"],
         collection = settings["mongo_collection_name"],
@@ -163,7 +168,7 @@ def transform_db():
     )
 
     pool = multiprocessing.Pool(multiprocessing.cpu_count())
-    pool.starmap_async(push_chunk, chunks)
+    pool.starmap_async(push_chunk, chunks).get()
 
 if __name__ == "__main__":
     transform_db()
