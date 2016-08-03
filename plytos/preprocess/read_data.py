@@ -73,7 +73,7 @@ def _gen_ngrams(sentences, n):
     return [[sentence[i:] for i in range(n)]
         for sentence in sentences]
 
-def push_chunk(chunk):
+def push_chunk(chunk, r):
     query_col = "_id"
     stem_map = {
         "Lancaster": LancasterStemmer(),
@@ -97,7 +97,8 @@ def push_chunk(chunk):
     # stem, lemma, other* (Anything)
     stem_lemma           = "stem"
 
-    df    =  pd.DataFrame(list(chunk))
+    r.flushall()
+    df    =  pd.DataFrame(chunk)
     for (experience, _id) in zip(df["experience"], df[query_col]):
         for item in experience['_values']['items']:
             description = item['_values']['description']
@@ -140,13 +141,13 @@ def chunk_mongo(r, db, collection, host, port, query={}):
     # Make a query to the specific DB and Collection
     cursor = db[collection].find(query)
     query_results = cursor.count()
-    r.flushall()
-
+    
     # Expand the cursor and construct the DataFrame
     chunks = []
 
     for start in range(0, query_results, settings["chunk_size"]):
-        chunks.append((cursor[start : start + settings["chunk_size"]]))
+        chunks.append([list(cursor[start : 
+            start + settings["chunk_size"]])], r)
     return chunks
 
 def transform_db():
