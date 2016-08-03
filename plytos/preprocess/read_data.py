@@ -48,43 +48,30 @@ def _apply_func(r, f):
 
 #################### Basic Formatting/Clean ########################
 def _rem_stop(r, stops=stopwords.words("english")):
-    _apply_func(r, lambda sentence : " ".join([word for word in 
-        sentence.split() if word not in stops]))
+    return [" ".join([word for word in sentence.split() if 
+        word not in stops]) for sentence in sentences]
 
 def _rem_punc(r):
-    _apply_func(r, lambda sentence : 
-        sentence.translate(string.punctuation))
+    return [sentence.translate(string.punctuation) 
+        for sentence in sentences]
 
 def _lower_words(r):
-    _apply_func(r, lambda sentence : sentence.lower())
+    return [sentence.lower() for sentence in sentences]
 
 ###################### Transform to Bases ###########################
 def _stem_values(r, stemmer):
-    _apply_func(r, lambda sentence : " ".join([stemmer.stem(word) 
-        for word in sentence.split()]))
+    return [" ".join([stemmer.stem(word) 
+        for word in sentence.split()]) for sentence in sentences]
 
 def _lemmatize_values(r):
     wordnet_lemmatizer = WordNetLemmatizer()
-    _apply_func(r, lambda sentence : " ".join([
-        wordnet_lemmatizer.lemmatize(word) for word in  sentence.split()]))
+    return [" ".join([wordnet_lemmatizer.lemmatize(word) 
+        for word in sentence.split()]) for sentence in sentences]
 
 ####################### Generate n-Grams ############################
 def _gen_ngrams(r, n):
-    _apply_func(r, lambda sentence : 
-        [input_list[i:] for i in range(n)])
-
-def _rem_encode(sent):
-    regex = re.compile("[\\\\][^ ]+")
-    no_encodes = regex.finditer(str(sent))
-    cleaned_sent = []
-    for encode in no_encodes:
-        end = encode[0]
-        cleaned_sent.append(sent[start:end])
-        start = end
-    end_segment = sent[start:end]
-    if len(end_segment) > 0:
-        cleaned_sent.append(end_segment)
-    return " ".join(cleaned_sent)
+    return [[sentence[i:] for i in range(n)]
+        for sentence in sentences]
 
 def push_chunk(chunk):
     df    =  pd.DataFrame(list(chunk))
@@ -93,9 +80,34 @@ def push_chunk(chunk):
             description = item['_values']['description']
             description = description.translate(string.punctuation)
             sentences = sent_tokenize(description)
-            for sent in sentences:
-                if len(sent) > 0:
-                    r.rpush(_id, sent.encode('utf8'))
+
+            if set_case:
+                print("Changing to Lower")
+                sentences = _lower_words(sentences)
+
+            if remove_stopwords:
+                print("Removing Stopwords...")
+                sentences = _rem_stop(sentences)
+
+            if remove_punctuation:
+                print("Removing Punctuation...")
+                sentences = _rem_punc(sentences)
+
+            if stem_lemma == "stem":
+                print("Stemming Words...")
+                sentences = _stem_values(sentences, stemmer=stem_map[which_stemmer])
+            elif stem_lemma == "lemma":
+                print("Lemmatizing Words...")
+                sentences = _lemmatize_values(sentences)
+
+            if generate_ngrams:
+                print("Generating N-grams...")
+                n = 3
+                sentences = _gen_ngrams(sentences, n)
+
+            for sentence in sentences:
+                if len(sentence) > 0:
+                    r.lpush(_id, sentence.encode('utf8'))
 
 """ Read from Mongo and Store into DataFrame """
 def read_mongo(r, db, collection, host, port, query={}):
@@ -150,30 +162,6 @@ def transform_db():
         port = settings["mongo_port"],
         query = {},
     )
-
-    if set_case:
-        print("Changing to Lower")
-        _lower_words(r)
-
-    if remove_stopwords:
-        print("Removing Stopwords...")
-        _rem_stop(r)
-
-    if remove_punctuation:
-        print("Removing Punctuation...")
-        _rem_punc(r)
-
-    if stem_lemma == "stem":
-        print("Stemming Words...")
-        _stem_values(r, stemmer=stem_map[which_stemmer])
-    elif stem_lemma == "lemma":
-        print("Lemmatizing Words...")
-        _lemmatize_values(r)
-
-    if generate_ngrams:
-        print("Generating N-grams...")
-        n = 3
-        _gen_ngrams(r, n)
 
 if __name__ == "__main__":
     transform_db()
