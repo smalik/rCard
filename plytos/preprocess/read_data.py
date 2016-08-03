@@ -32,11 +32,12 @@ settings = {
 
 def _apply_func(r, f):
     for key in r.keys():
-        sentences = r.get(key)
+        sentences = r.lrange(key, start=0, end=-1)
         result = []
         for sentence in sentences:
-            result.append(f(sentence))
-        r.set(key, result)
+            result.append(f(str(sentence)))
+        r.delete(key)
+        r.lpush(key, *result)
 
 def _rem_stop(r):
     stops = stopwords.words("english")
@@ -53,7 +54,7 @@ def _rem_punc(r):
         lambda sentence : sentence.translate(string.punctuation))
 
 def _find_ngrams(input_list, n):
-    return zip(*[input_list[i:] for i in range(n)])
+    return [input_list[i:] for i in range(n)]
 
 def _gen_ngrams(r, n):
     _apply_func(r, 
@@ -70,12 +71,13 @@ def read_mongo(r, db, collection, host, port, query={}):
     # Make a query to the specific DB and Collection
     cursor = db[collection].find(query)
     query_results = cursor.count()
-    
+    r.flushall()
     # Expand the cursor and construct the DataFrame
     for start in range(0, query_results, settings["chunk_size"]):
         chunk = list(cursor[start : start + settings["chunk_size"]])
         df    =  pd.DataFrame(chunk)
         for (experience, _id) in zip(df["experience"], df[query_col]):
+            # r.set(_id, [])
             for item in experience['_values']['items']:
                 description = item['_values']['description']
                 description = description.translate(string.punctuation)
@@ -92,7 +94,7 @@ if __name__ == "__main__":
     remove_stopwords     = True
     stem_values          = True
     remove_punctuation   = True
-    generate_ngrams      = True    
+    generate_ngrams      = False
 
     print("Reading Data...")
     read_mongo(
