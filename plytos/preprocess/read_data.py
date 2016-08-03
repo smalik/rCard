@@ -31,18 +31,15 @@ settings = {
 }
 
 def _apply_func(r, f):
-    stops = stopwords.words("english")
     for key in r.keys():
         sentences = r.get(key)
         result = []
-        arr_sentences = [sentence.strip()[1:-1] for sentence 
-            in sentences[1:-1].split(",")]
-
-        for sentence in arr_sentences:
+        for sentence in sentences:
             result.append(f(sentence))
         r.set(key, result)
 
 def _rem_stop(r):
+    stops = stopwords.words("english")
     _apply_func(r, lambda sentence : " ".join([word for word in 
         sentence.split() if word not in stops]))
 
@@ -55,12 +52,12 @@ def _rem_punc(r):
     _apply_func(r, 
         lambda sentence : sentence.translate(string.punctuation))
 
-def find_ngrams(input_list, n):
+def _find_ngrams(input_list, n):
     return zip(*[input_list[i:] for i in range(n)])
 
 def _gen_ngrams(r, n):
     _apply_func(r, 
-        lambda sentence : find_ngrams(sentence.split(), n))
+        lambda sentence : _find_ngrams(sentence.split(), n))
 
 """ Read from Mongo and Store into DataFrame """
 def read_mongo(r, db, collection, host, port, query={}):
@@ -79,21 +76,25 @@ def read_mongo(r, db, collection, host, port, query={}):
         chunk = list(cursor[start : start + settings["chunk_size"]])
         df    =  pd.DataFrame(chunk)
         for (experience, _id) in zip(df["experience"], df[query_col]):
-            exp_sentences = []
             for item in experience['_values']['items']:
                 description = item['_values']['description']
                 description = description.translate(string.punctuation)
 
                 sentences = sent_tokenize(description)
                 clean_sent = [sent for sent in sentences if len(sent) > 0]
-                exp_sentences.append(clean_sent)
-            r.set(_id, exp_sentences)
+                r.rpush(_id, clean_sent)
             # pd.read_msgpack(redisConn.get("key"))
     return df
 
 if __name__ == "__main__":
     r = redis.StrictRedis(host='localhost', port=6379, db=0)
 
+    remove_stopwords     = True
+	stem_values          = True
+    remove_punctuation   = True
+    generate_ngrams      = True    
+
+    print("Reading Data...")
     read_mongo(
         r = r,
         db = settings["mongo_db_name"],
@@ -102,5 +103,20 @@ if __name__ == "__main__":
         port = settings["mongo_port"],
         query = {},
     )
-    _rem_stop(r)
-    _stem_values(r)
+
+    if remove_stopwords:
+    	print("Removing Stopwords...")
+		_rem_stop(r)
+
+	if stem_values:
+		print("Stemming Words...")
+		_stem_values(r)
+
+	if remove_punctuation:
+		print("Removing Punctuation...")
+		_rem_punc(r)
+
+	if generate_ngrams:
+		print("Generating N-grams...")
+		n = 3
+		_gen_ngrams(r, n)
