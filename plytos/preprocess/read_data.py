@@ -90,7 +90,7 @@ if __name__ == "__main__":
     r = redis.StrictRedis(host='localhost', port=6379, db=0)
 
     remove_stopwords     = True
-	stem_values          = True
+    stem_values          = True
     remove_punctuation   = True
     generate_ngrams      = True    
 
@@ -105,18 +105,18 @@ if __name__ == "__main__":
     )
 
     if remove_stopwords:
-    	print("Removing Stopwords...")
-		_rem_stop(r)
+        print("Removing Stopwords...")
+        _rem_stop(r)
 
-	if stem_values:
-		print("Stemming Words...")
-		_stem_values(r)
+    if stem_values:
+        print("Stemming Words...")
+        _stem_values(r)
 
-	if remove_punctuation:
-		print("Removing Punctuation...")
-		_rem_punc(r)
+    if remove_punctuation:
+        print("Removing Punctuation...")
+        _rem_punc(r)
 
-	if generate_ngrams:
-		print("Generating N-grams...")
-		n = 3
-		_gen_ngrams(r, n)
+    if generate_ngrams:
+        print("Generating N-grams...")
+        n = 3
+        _gen_ngrams(r, n)
