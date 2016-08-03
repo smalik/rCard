@@ -30,12 +30,15 @@ settings = {
     'drop_collections_on_load'    : True,
 }
 
-def __apply_func(r, f):
+def _apply_func(r, f):
     stops = stopwords.words("english")
     for key in r.keys():
         sentences = r.get(key)
         result = []
-        for sentence in sentences:
+        arr_sentences = [sentence.strip()[1:-1] for sentence 
+            in sentences[1:-1].split(",")]
+
+        for sentence in arr_sentences:
             result.append(f(sentence))
         r.set(key, result)
 
