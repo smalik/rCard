@@ -78,9 +78,9 @@ def push_chunk(chunk):
 
     query_col = "_id"
     stem_map = {
-        "Lancaster": LancasterStemmer(),
-        "Porter": PorterStemmer(),
-        "Snowball": SnowballStemmer('english')
+        "lancaster": LancasterStemmer(),
+        "porter": PorterStemmer(),
+        "snowball": SnowballStemmer('english')
     }
 
     #################### Binary Flagging ########################
@@ -107,31 +107,25 @@ def push_chunk(chunk):
             sentences = sent_tokenize(post_translate)
 
             if set_case:
-                print("Changing to Lower")
                 sentences = _lower_words(sentences)
 
             if remove_stopwords:
-                print("Removing Stopwords...")
                 sentences = _rem_stop(sentences)
 
             if remove_punctuation:
-                print("Removing Punctuation...")
                 sentences = _rem_punc(sentences)
 
             if stem_lemma == "stem":
-                print("Stemming Words...")
                 sentences = _stem_values(sentences, stemmer=stem_map[which_stemmer])
             elif stem_lemma == "lemma":
-                print("Lemmatizing Words...")
                 sentences = _lemmatize_values(sentences)
 
             if generate_ngrams:
-                print("Generating N-grams...")
                 n = 3
                 sentences = _gen_ngrams(sentences, n)
 
             for sentence in sentences:
-                if len(sentence) > 0:
+                if glen(sentence) > 0:
                     r.lpush(_id, sentence.encode('utf8'))
 
 """ Read from Mongo and Store into DataFrame """
