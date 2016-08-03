@@ -74,6 +74,22 @@ def _gen_ngrams(r, n):
         for sentence in sentences]
 
 def push_chunk(chunk):
+    #################### Binary Flagging ########################
+    # Set each of the following flags to either True/False
+    set_case             = True
+    remove_stopwords     = True
+    remove_punctuation   = True
+    generate_ngrams      = False
+
+    #################### Binary Flagging ########################
+    # Set each of the flags to one of the possible values given
+
+    # lancaster, porter, snowball
+    which_stemmer        = "snowball"
+
+    # stem, lemma, other* (Anything)
+    stem_lemma           = "stem"
+    
     df    =  pd.DataFrame(list(chunk))
     for (experience, _id) in zip(df["experience"], df[query_col]):
         for item in experience['_values']['items']:
@@ -110,7 +126,7 @@ def push_chunk(chunk):
                     r.lpush(_id, sentence.encode('utf8'))
 
 """ Read from Mongo and Store into DataFrame """
-def read_mongo(r, db, collection, host, port, query={}):
+def chunk_mongo(r, db, collection, host, port, query={}):
     query_col = "_id"
     keep = ['sentences', query_col]
     # Connect to MongoDB
@@ -123,38 +139,21 @@ def read_mongo(r, db, collection, host, port, query={}):
 
     # Expand the cursor and construct the DataFrame
     chunks = []
-    pool = multiprocessing.Pool(multiprocessing.cpu_count())
 
     for start in range(0, query_results, settings["chunk_size"]):
         chunks.append((cursor[start : start + settings["chunk_size"]]))
-    pool.starmap_async(push_chunk, chunks)
+    return chunks
 
 def transform_db():
     r = redis.StrictRedis(host='localhost', port=6379, db=0)
     stem_map = {
-        "Lancaster": LancasterStemmer(),
-        "Porter": PorterStemmer(),
-        "Snowball": SnowballStemmer()
+        "Lancaster": LancasterStemmer('english'),
+        "Porter": PorterStemmer('english'),
+        "Snowball": SnowballStemmer('english')
     }
 
-    #################### Binary Flagging ########################
-    # Set each of the following flags to either True/False
-    set_case             = True
-    remove_stopwords     = True
-    remove_punctuation   = True
-    generate_ngrams      = False
-
-    #################### Binary Flagging ########################
-    # Set each of the flags to one of the possible values given
-
-    # lancaster, porter, snowball
-    which_stemmer        = "snowball"
-
-    # stem, lemma, other* (Anything)
-    stem_lemma           = "stem"
-
     print("Reading Data...")
-    read_mongo(
+    chunks = read_mongo(
         r = r,
         db = settings["mongo_db_name"],
         collection = settings["mongo_collection_name"],
@@ -162,6 +161,9 @@ def transform_db():
         port = settings["mongo_port"],
         query = {},
     )
+
+    pool = multiprocessing.Pool(multiprocessing.cpu_count())
+    pool.starmap_async(push_chunk, chunks)
 
 if __name__ == "__main__":
     transform_db()
