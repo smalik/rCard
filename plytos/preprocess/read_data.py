@@ -26,10 +26,7 @@ import redis
 
 import string
 import re
-# import multiprocessing
-
-import dill as pickle
-import pathos.multiprocessing as multiprocessing
+import multiprocessing
 
 settings = {
     'mongo_host': 'localhost',
@@ -103,8 +100,8 @@ def push_chunk(chunk):
     for (experience, _id) in zip(df["experience"], df[query_col]):
         for item in experience['_values']['items']:
             description = item['_values']['description']
-            description = description.translate(string.punctuation)
-            sentences = sent_tokenize(description)
+            post_translate = description.translate(string.punctuation)
+            sentences = sent_tokenize(post_translate)
 
             if set_case:
                 print("Changing to Lower")
@@ -133,7 +130,6 @@ def push_chunk(chunk):
             for sentence in sentences:
                 if len(sentence) > 0:
                     r.lpush(_id, sentence.encode('utf8'))
-    return True
 
 """ Read from Mongo and Store into DataFrame """
 def chunk_mongo(r, db, collection, host, port, query={}):
