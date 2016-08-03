@@ -73,7 +73,9 @@ def _gen_ngrams(sentences, n):
     return [[sentence[i:] for i in range(n)]
         for sentence in sentences]
 
-def push_chunk(chunk, r):
+def push_chunk(chunk):
+    r = redis.StrictRedis(host='localhost', port=6379, db=0)
+
     query_col = "_id"
     stem_map = {
         "Lancaster": LancasterStemmer(),
@@ -97,8 +99,7 @@ def push_chunk(chunk, r):
     # stem, lemma, other* (Anything)
     stem_lemma           = "stem"
 
-    r.flushall()
-    df    =  pd.DataFrame(chunk)
+    df    =  pd.DataFrame(list(chunk))
     for (experience, _id) in zip(df["experience"], df[query_col]):
         for item in experience['_values']['items']:
             description = item['_values']['description']
@@ -134,7 +135,7 @@ def push_chunk(chunk, r):
                     r.lpush(_id, sentence.encode('utf8'))
 
 """ Read from Mongo and Store into DataFrame """
-def chunk_mongo(r, db, collection, host, port, query={}):
+def chunk_mongo(db, collection, host, port, query={}):
     # Connect to MongoDB
     db = MongoClient(host, port)[db]
 
@@ -146,16 +147,12 @@ def chunk_mongo(r, db, collection, host, port, query={}):
     chunks = []
 
     for start in range(0, query_results, settings["chunk_size"]):
-        chunks.append([list(cursor[start : 
-            start + settings["chunk_size"]])], r)
+        chunks.append([list(cursor[start : start + settings["chunk_size"]])])
     return chunks
 
 def transform_db():
-    r = redis.StrictRedis(host='localhost', port=6379, db=0)
-
     print("Reading Data...")
     chunks = chunk_mongo(
-        r = r,
         db = settings["mongo_db_name"],
         collection = settings["mongo_collection_name"],
         host = settings["mongo_host"],
