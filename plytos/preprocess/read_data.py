@@ -30,7 +30,7 @@ settings = {
     'drop_collections_on_load'    : True,
 }
 
-def _apply_func(r, f):
+def __apply_func(r, f):
     stops = stopwords.words("english")
     for key in r.keys():
         sentences = r.get(key)
@@ -40,23 +40,23 @@ def _apply_func(r, f):
         r.set(key, result)
 
 def _rem_stop(r):
-    apply_func(r, lambda sentence : " ".join([word for word in 
+    _apply_func(r, lambda sentence : " ".join([word for word in 
         sentence.split() if word not in stops]))
 
 def _stem_values(r):
     st = LancasterStemmer()
-    apply_func(r, lambda sentence : " ".join([st.stem(word) for word 
+    _apply_func(r, lambda sentence : " ".join([st.stem(word) for word 
         in sentence.split()]))
 
 def _rem_punc(r):
-    apply_func(r, 
+    _apply_func(r, 
         lambda sentence : sentence.translate(string.punctuation))
 
 def find_ngrams(input_list, n):
     return zip(*[input_list[i:] for i in range(n)])
 
 def _gen_ngrams(r, n):
-    apply_func(r, 
+    _apply_func(r, 
         lambda sentence : find_ngrams(sentence.split(), n))
 
 """ Read from Mongo and Store into DataFrame """
@@ -99,3 +99,5 @@ if __name__ == "__main__":
         port = settings["mongo_port"],
         query = {},
     )
+    _rem_stop(r)
+    _stem_values(r)
