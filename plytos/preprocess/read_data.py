@@ -30,10 +30,37 @@ settings = {
     'drop_collections_on_load'    : True,
 }
 
-# pd.read_msgpack(redisConn.get("key"))
+def _apply_func(r, f):
+    stops = stopwords.words("english")
+    for key in r.keys():
+        sentences = r.get(key)
+        result = []
+        for sentence in sentences:
+            result.append(f(sentence))
+        r.set(key, result)
+
+def _rem_stop(r):
+    apply_func(r, lambda sentence : " ".join([word for word in 
+        sentence.split() if word not in stops]))
+
+def _stem_values(r):
+    st = LancasterStemmer()
+    apply_func(r, lambda sentence : " ".join([st.stem(word) for word 
+        in sentence.split()]))
+
+def _rem_punc(r):
+    apply_func(r, 
+        lambda sentence : sentence.translate(string.punctuation))
+
+def find_ngrams(input_list, n):
+    return zip(*[input_list[i:] for i in range(n)])
+
+def _gen_ngrams(r, n):
+    apply_func(r, 
+        lambda sentence : find_ngrams(sentence.split(), n))
 
 """ Read from Mongo and Store into DataFrame """
-def read_mongo(db, collection, host, port, query={}):
+def read_mongo(r, db, collection, host, port, query={}):
     query_col = "_id"
     keep = ['sentences', query_col]
 
@@ -43,30 +70,29 @@ def read_mongo(db, collection, host, port, query={}):
     # Make a query to the specific DB and Collection
     cursor = db[collection].find(query)
     query_results = cursor.count()
-    r = redis.StrictRedis(host='localhost', port=6379, db=0)
-
+    
     # Expand the cursor and construct the DataFrame
-    stops = stopwords.words("english")
-    st = LancasterStemmer()
-
     for start in range(0, query_results, settings["chunk_size"]):
         chunk = list(cursor[start : start + settings["chunk_size"]])
         df    =  pd.DataFrame(chunk)
-
         for (experience, _id) in zip(df["experience"], df[query_col]):
             exp_sentences = []
             for item in experience['_values']['items']:
                 description = item['_values']['description']
                 description = description.translate(string.punctuation)
-                # clean_descrip = " ".join([st.stem(word) for word in 
-                #    description.split() if word not in stops])
 
-                exp_sentences.append(sent_tokenize(clean_descrip))
+                sentences = sent_tokenize(description)
+                clean_sent = [sent for sent in sentences if len(sent) > 0]
+                exp_sentences.append(clean_sent)
             r.set(_id, exp_sentences)
+            # pd.read_msgpack(redisConn.get("key"))
     return df
 
 if __name__ == "__main__":
-    pd = read_mongo(
+    r = redis.StrictRedis(host='localhost', port=6379, db=0)
+
+    read_mongo(
+        r = r,
         db = settings["mongo_db_name"],
         collection = settings["mongo_collection_name"],
         host = settings["mongo_host"],
