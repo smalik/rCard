@@ -47,33 +47,34 @@ def _apply_func(r, f):
         r.lpush(key, *result)
 
 #################### Basic Formatting/Clean ########################
-def _rem_stop(r, stops=stopwords.words("english")):
+def _rem_stop(sentences, stops=stopwords.words("english")):
     return [" ".join([word for word in sentence.split() if 
         word not in stops]) for sentence in sentences]
 
-def _rem_punc(r):
+def _rem_punc(sentences):
     return [sentence.translate(string.punctuation) 
         for sentence in sentences]
 
-def _lower_words(r):
+def _lower_words(sentences):
     return [sentence.lower() for sentence in sentences]
 
 ###################### Transform to Bases ###########################
-def _stem_values(r, stemmer):
+def _stem_values(sentences, stemmer):
     return [" ".join([stemmer.stem(word) 
         for word in sentence.split()]) for sentence in sentences]
 
-def _lemmatize_values(r):
+def _lemmatize_values(sentences):
     wordnet_lemmatizer = WordNetLemmatizer()
     return [" ".join([wordnet_lemmatizer.lemmatize(word) 
         for word in sentence.split()]) for sentence in sentences]
 
 ####################### Generate n-Grams ############################
-def _gen_ngrams(r, n):
+def _gen_ngrams(sentences, n):
     return [[sentence[i:] for i in range(n)]
         for sentence in sentences]
 
 def push_chunk(chunk):
+    query_col = "_id"
     stem_map = {
         "Lancaster": LancasterStemmer(),
         "Porter": PorterStemmer(),
@@ -133,8 +134,6 @@ def push_chunk(chunk):
 
 """ Read from Mongo and Store into DataFrame """
 def chunk_mongo(r, db, collection, host, port, query={}):
-    query_col = "_id"
-    keep = ['sentences', query_col]
     # Connect to MongoDB
     db = MongoClient(host, port)[db]
 
