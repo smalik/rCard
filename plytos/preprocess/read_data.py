@@ -20,6 +20,7 @@ from pymongo import MongoClient
 import redis
 
 import string
+import re
 
 settings = {
     'mongo_host': 'localhost',
@@ -35,7 +36,7 @@ def _apply_func(r, f):
         sentences = r.lrange(key, start=0, end=-1)
         result = []
         for sentence in sentences:
-            result.append(f(str(sentence)))
+            result.append(f(sentence.decode('utf8')))
         r.delete(key)
         r.lpush(key, *result)
 
@@ -60,14 +61,25 @@ def _gen_ngrams(r, n):
     _apply_func(r, 
         lambda sentence : _find_ngrams(sentence.split(), n))
 
+def _rem_encode(sent):
+    regex = re.compile("[\\\\][^ ]+")
+    no_encodes = regex.finditer(str(sent))
+    cleaned_sent = []
+    for encode in no_encodes:
+        end = encode[0]
+        cleaned_sent.append(sent[start:end])
+        start = end
+    end_segment = sent[start:end]
+    if len(end_segment) > 0:
+        cleaned_sent.append(end_segment)
+    return " ".join(cleaned_sent)
+
 """ Read from Mongo and Store into DataFrame """
 def read_mongo(r, db, collection, host, port, query={}):
     query_col = "_id"
     keep = ['sentences', query_col]
-
     # Connect to MongoDB
     db = MongoClient(host, port)[db]
-
     # Make a query to the specific DB and Collection
     cursor = db[collection].find(query)
     query_results = cursor.count()
@@ -81,10 +93,10 @@ def read_mongo(r, db, collection, host, port, query={}):
             for item in experience['_values']['items']:
                 description = item['_values']['description']
                 description = description.translate(string.punctuation)
-
                 sentences = sent_tokenize(description)
-                clean_sent = [sent for sent in sentences if len(sent) > 0]
-                r.rpush(_id, clean_sent)
+                for sent in sentences:
+                    if len(sent) > 0:
+                        r.rpush(_id, sent.encode('utf8'))
             # pd.read_msgpack(redisConn.get("key"))
     return df
 
