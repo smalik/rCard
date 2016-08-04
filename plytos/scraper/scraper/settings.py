@@ -15,8 +15,16 @@ BOT_NAME = 'scraper'
 SPIDER_MODULES = ['scraper.spiders']
 NEWSPIDER_MODULE = 'scraper.spiders'
 
-DEPTH_LIMIT = 0
+DOWNLOADER_MIDDLEWARES = {
+        'scrapy.contrib.downloadermiddleware.useragent.UserAgentMiddleware' : None,
+        'simplyspider.rotate_useragent.RotateUserAgentMiddleware' :200,
+        'scrapy_crawlera.CrawleraMiddleware': 300
+}
 
+CRAWLERA_ENABLED = True
+CRAWLERA_APIKEY = '<API key>'
+
+DEPTH_LIMIT = 0
 MEMUSAGE_REPORT = True
 
 AJAXCRAWL_ENABLED = True
@@ -24,11 +32,8 @@ COOKIES_ENABLED = False
 DOWNLOAD_DELAY = 5
 
 LOG_ENABLED = True
-# DEFAULT_REQUEST_HEADERS = {
-#    'referer': 'http://www.google.com'
-# }
 
-USER_AGENT = "Mozilla/5.0 (Windows NT 6.2; WOW64) Chrome/27.0.1453.93 Safari/537.36"
+# USER_AGENT = "Mozilla/5.0 (Windows NT 6.2; WOW64) Chrome/27.0.1453.93 Safari/537.36"
 
 ############### MongoDB Settings #####################
 ITEM_PIPELINES = {'scraper.pipelines.MongoDBPipeline': 0,}

@@ -1,3 +1,16 @@
+"""
+rotate_useragent.py: Rotates the agent for the requests to escape
+the issue of blocking requests by Indeed
+
+__author__ = "Yash Patel"
+__copyright__ = "Copyright 2016, Plytos Inc."
+
+__license__ = "Free/Open"
+__version__ = "1.0.0"
+__maintainer__ = "Yash Patel"
+__email__ = "ypatel@princeton.edu"
+"""
+
 #!/usr/bin/python
 #-*-coding:utf-8-*-
 
