@@ -236,6 +236,8 @@ class Skills(db.EmbeddedDocument):
         return None
 
 class Resume(db.Document):
+    meta = {'collection': 'resumes'}
+
     # _id          = db.ObjectIdField()    
     parent_user       = db.StringField()
 

@@ -107,6 +107,8 @@ class Personal(db.EmbeddedDocument):
             self.phone, self.url, self.summary, self.comments)
 
 class Person(db.Document):
+    meta = {'collection': 'users'}
+
     _id           = db.ObjectIdField()    
     active        = db.BooleanField()
     email         = db.StringField(required=True) 

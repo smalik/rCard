@@ -33,6 +33,8 @@ the comment author, likes, downvotes, comment text, comment date, and what
 topic the comment is about
 """
 class Comment(db.EmbeddedDocument):
+    meta = {'collection': 'comments'}
+
     _id         = db.ObjectIdField()
 
     # user ID from Person class of contributor

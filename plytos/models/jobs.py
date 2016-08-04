@@ -29,6 +29,8 @@ Job description Data model behaves as follows:
     11. Benefits (as tags)
 """
 class JobDescription(db.Document):
+    meta = {'collection': 'jobs'}
+
     _id         = db.ObjectIdField()
 
     companyName = db.StringField()
