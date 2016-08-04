@@ -32,7 +32,7 @@ from plytos.models.resume import (Resume, Experience, Education,
 
 def _get_html(link):
     sess = requests.Session()
-    retries = Retry(total=25, backoff_factor=0.1)
+    retries = Retry(total=5, backoff_factor=1)
     sess.mount('http://', HTTPAdapter(max_retries=retries))
     return sess.get(link).content
 
@@ -263,27 +263,27 @@ def populate_db():
     start_urls = {
         'http://www.indeed.com/resumes/statistics-python': True,
         'http://www.indeed.com/resumes/data-scientist': True,
-        #'http://www.indeed.com/resumes/python': True,
-        #'http://www.indeed.com/resumes/java': True,
-        #'http://www.indeed.com/resumes/SAS': True,
-        #'http://www.indeed.com/resumes/javascript': True,
-        #'http://www.indeed.com/resumes/marketing-analyst': True,
-        #'http://www.indeed.com/resumes/biomedical': True,
-        #'http://www.indeed.com/resumes/physicist': True,
-        #'http://www.indeed.com/resumes/business-analyst': True,
-        #'http://www.indeed.com/resumes/writer': True,
-        #'http://www.indeed.com/resumes/product-manager': True,
-        #'http://www.indeed.com/resumes/produce-manager': True,
-        #'http://www.indeed.com/resumes/technical-writer': True,
-        #'http://www.indeed.com/resumes/photographer': True,
-        #'http://www.indeed.com/resumes/dev-ops': True,
-        #'http://www.indeed.com/resumes/architect': True,
-        #'http://www.indeed.com/resumes/civil-engineer': True,
-        #'http://www.indeed.com/resumes/graphic-designer': True,
-        #'http://www.indeed.com/resumes/electrical-engineer': True,
-        #'http://www.indeed.com/resumes/server': True,
-        #'http://www.indeed.com/resumes/translator': True,
-        #'http://www.indeed.com/resumes/animator': True
+        'http://www.indeed.com/resumes/python': True,
+        'http://www.indeed.com/resumes/java': True,
+        'http://www.indeed.com/resumes/SAS': True,
+        'http://www.indeed.com/resumes/javascript': True,
+        'http://www.indeed.com/resumes/marketing-analyst': True,
+        'http://www.indeed.com/resumes/biomedical': True,
+        'http://www.indeed.com/resumes/physicist': True,
+        'http://www.indeed.com/resumes/business-analyst': True,
+        'http://www.indeed.com/resumes/writer': True,
+        'http://www.indeed.com/resumes/product-manager': True,
+        'http://www.indeed.com/resumes/produce-manager': True,
+        'http://www.indeed.com/resumes/technical-writer': True,
+        'http://www.indeed.com/resumes/photographer': True,
+        'http://www.indeed.com/resumes/dev-ops': True,
+        'http://www.indeed.com/resumes/architect': True,
+        'http://www.indeed.com/resumes/civil-engineer': True,
+        'http://www.indeed.com/resumes/graphic-designer': True,
+        'http://www.indeed.com/resumes/electrical-engineer': True,
+        'http://www.indeed.com/resumes/server': True,
+        'http://www.indeed.com/resumes/translator': True,
+        'http://www.indeed.com/resumes/animator': True
     }
 
     for url in start_urls:

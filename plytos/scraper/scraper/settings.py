@@ -15,7 +15,7 @@ BOT_NAME = 'scraper'
 SPIDER_MODULES = ['scraper.spiders']
 NEWSPIDER_MODULE = 'scraper.spiders'
 
-DEPTH_LIMIT = 50
+DEPTH_LIMIT = 0
 
 MEMUSAGE_REPORT = True
 
@@ -24,9 +24,9 @@ COOKIES_ENABLED = False
 DOWNLOAD_DELAY = 5
 
 LOG_ENABLED = True
-DEFAULT_REQUEST_HEADERS = {
-    'referer': 'http://www.google.com'
-}
+# DEFAULT_REQUEST_HEADERS = {
+#    'referer': 'http://www.google.com'
+# }
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 6.2; WOW64) Chrome/27.0.1453.93 Safari/537.36"
 
