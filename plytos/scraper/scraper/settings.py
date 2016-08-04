@@ -17,14 +17,20 @@ NEWSPIDER_MODULE = 'scraper.spiders'
 
 DOWNLOADER_MIDDLEWARES = {
         'scrapy.contrib.downloadermiddleware.useragent.UserAgentMiddleware' : None,
-        'simplyspider.rotate_useragent.RotateUserAgentMiddleware' :200,
+        'scraper.rotate_useragent.RotateUserAgentMiddleware' :200,
         'scrapy_crawlera.CrawleraMiddleware': 300
 }
 
 CRAWLERA_ENABLED = True
-CRAWLERA_APIKEY = '<API key>'
+CRAWLERA_APIKEY = 'b9d2ed74df214e97bf3e5d0765990554'
 
-DEPTH_LIMIT = 0
+CONCURRENT_REQUESTS = 51
+CONCURRENT_REQUESTS_PER_DOMAIN = 51
+AUTOTHROTTLE_ENABLED = False
+DOWNLOAD_TIMEOUT = 300
+
+
+DEPTH_LIMIT = 1
 MEMUSAGE_REPORT = True
 
 AJAXCRAWL_ENABLED = True
