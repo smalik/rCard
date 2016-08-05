@@ -17,7 +17,11 @@ from scrapy.conf import settings
 from scrapy.exceptions import DropItem
 
 class MongoDBPipeline(object):
+    """  Pipeline for streaming scrape result to Mongo DB """
+
     def __init__(self):
+        """ Initializes connection to Mongo DB """
+
         connection = pymongo.MongoClient(
             settings['MONGODB_SERVER'],
             settings['MONGODB_PORT']
@@ -26,6 +30,13 @@ class MongoDBPipeline(object):
         self.collection = db[settings['MONGODB_COLLECTION']]
 
     def process_item(self, item, spider):
+        """ Saves the specified item to the configured Mongo DB
+
+        Keyword arguments:
+        item -- Item being stored to the DB
+        spider -- Spider that scraped the object being saved
+        """
+
         valid = True
         for data in item:
             if not data:

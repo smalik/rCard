@@ -37,6 +37,12 @@ MIN_PASSWORD_LENGTH = 4
 auth_login = Blueprint('auth_login', __name__, template_folder='templates')
 
 def get_with_username(username):
+    """Returns DB user object associated to the passed in username
+
+    Keyword arguments:
+    username (string) -- Name of the user to be retrieved
+    """
+    
     dbPerson = Person.objects.get_or_404(username=username)
     if dbPerson: 
         return dbPerson
@@ -45,6 +51,9 @@ def get_with_username(username):
 # General Request Handlers
 @app.before_request
 def before_request():
+    """Sets up the global user object to be retrieved that is
+    associated with the current session user
+    """
     if "user_id" in session and session["user_id"]:
         g.user = get_with_username(username=session["user_id"])
     else:
@@ -52,12 +61,19 @@ def before_request():
     
 @app.route('/')
 def home():
+    """ Returns the index page when accessing home """
     return render_template("index.html")
 
 @auth_login.route('/register', methods=["GET", "POST"])
 def register():
+    """ Returns the registration page when accessing without
+    having logged in. If submitting, validates form and creates user
+    in the DB appropriately
+    """
+
     form = RegisterForm()
-    # current_app.logger.info(request.form)
+
+    # Case where someone is already logged in and is trying to access
     if g.user is not None and g.user.is_authenticated:
         return redirect(url_for("resume_app.list"))
 
@@ -111,7 +127,14 @@ def register():
 
 @auth_login.route('/login', methods=["GET", "POST"])
 def login():
+    """ Returns the login page when accessing without
+    having logged in. If submitting, checks that the specified
+    login username and password exist in the DB
+    """
+
     form = LoginForm()
+
+    # Case where someone is already logged in and is trying to access
     if g.user is not None and g.user.is_authenticated:
         return redirect(url_for("resume_app.list"))
 
@@ -134,6 +157,13 @@ def login():
     return render_template('forms/login.html', form=form)
 
 def generate_password_reset_link(user_id):
+    """ Returns a link for resetting the password of the account
+    associated with DB object with user_id ID value
+
+    Keyword arguments:
+    user_id (string) -- ID of the account being resetted
+    """
+
     # Clear out all old requests for this member
     for r in PasswordResetRequest.objects(user_id=user_id):
         session.pop(r.user_id, None)
@@ -153,16 +183,28 @@ def generate_password_reset_link(user_id):
 
 @async
 def send_async_email(message):
+    """ Asynchronously sends the given message to a previously
+    established connection (used in resetting passwords)
+
+    Keyword arguments:
+    message (string) -- Body/text for the e-mail
+    """
+
     with mail.connect() as conn:
         with app.app_context():
             conn.send(message)
 
 def send_email(subject, sender, recipients, text_body, html_body):
+    """  Sends email with the given 
+
+    Keyword arguments:
+    message (string) -- Body/text for the e-mail
+    """
+
     message = Message(subject, sender=sender, recipients=recipients)
     message.body = text_body
     message.html = html_body
     mail.send(message)
-    # send_async_email(message)
 
 @auth_login.route('/forgot', methods=["GET", "POST"])
 def forgot():

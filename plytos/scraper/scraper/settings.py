@@ -11,10 +11,12 @@ __maintainer__ = "Yash Patel"
 __email__ = "ypatel@princeton.edu"
 """
 
+###################### Metadata for Spider ##############################
 BOT_NAME = 'scraper'
 SPIDER_MODULES = ['scraper.spiders']
 NEWSPIDER_MODULE = 'scraper.spiders'
 
+#################### Prevents time-out pages ############################
 DOWNLOADER_MIDDLEWARES = {
         'scrapy.contrib.downloadermiddleware.useragent.UserAgentMiddleware' : None,
         'scraper.rotate_useragent.RotateUserAgentMiddleware' :200,
@@ -30,18 +32,15 @@ AUTOTHROTTLE_ENABLED = False
 DOWNLOAD_TIMEOUT = 300
 CRAWLERA_PRESERVE_DELAY = True
 
+################## Filters where spider crawls ##########################
 DEPTH_LIMIT = 3
 MEMUSAGE_REPORT = True
 
 AJAXCRAWL_ENABLED = True
 COOKIES_ENABLED = False
-# DOWNLOAD_DELAY = 5
-
 LOG_ENABLED = True
 
-# USER_AGENT = "Mozilla/5.0 (Windows NT 6.2; WOW64) Chrome/27.0.1453.93 Safari/537.36"
-
-############### MongoDB Settings #####################
+###################### MongoDB Pipe Settings #############################
 ITEM_PIPELINES = {'scraper.pipelines.MongoDBPipeline': 0,}
 
 MONGODB_SERVER = "localhost"

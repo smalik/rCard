@@ -31,12 +31,23 @@ from plytos.models.resume import (Resume, Experience, Education,
     Awards, WorkItem, EducationItem, AwardItem)
 
 def _get_html(link):
+    """ Extracts HTML content of the given link
+
+    Keyword arguments:
+    link -- String of URL of page to be parsed
+    """
     sess = requests.Session()
     retries = Retry(total=5, backoff_factor=1)
     sess.mount('http://', HTTPAdapter(max_retries=retries))
     return sess.get(link).content
 
 def parse(link):
+    """ Extracts all the resumes to be navigated and added to the
+    DB from the given start link
+
+    Keyword arguments:
+    link -- String of URL of page to be parsed
+    """
     html = _get_html(link)
     soup = BeautifulSoup(html, "lxml")
 
@@ -62,6 +73,13 @@ def parse(link):
         print("Completed Resume")
 
 def get_work(resume_soup):
+    """ Extracts and creates WorkItem from the soup of
+    the resume page. Returns as an array of such items
+
+    Keyword arguments:
+    resume_soup -- BeautifulSoup of resume page
+    """
+
     workHistory =   []
     experience = resume_soup.find_all("div", attrs={"class" : 
         "work-experience-section"})
@@ -114,6 +132,13 @@ def get_work(resume_soup):
     return workHistory
 
 def get_edu(resume_soup):
+    """ Extracts and creates EducationItem from the soup of
+    the resume page. Returns as an array of such items
+
+    Keyword arguments:
+    resume_soup -- BeautifulSoup of resume page
+    """
+
     eduHistory =   []
     education  =   resume_soup.find_all("div", attrs={"class" : 
         "education-section"})
@@ -166,6 +191,13 @@ def get_edu(resume_soup):
     return eduHistory
 
 def parse_page(resume_soup):
+    """ Extracts and creates Resume from the soup of
+    the resume page. Returns this object
+
+    Keyword arguments:
+    resume_soup -- BeautifulSoup of resume page
+    """
+
     resume =   Resume()
     resume._id          = str(ObjectId()) 
 
@@ -256,6 +288,8 @@ def parse_page(resume_soup):
     return resume
 
 def populate_db():
+    """ Populates MongoDB by scraping through specified start URLs """
+
     MAX_SCRAPES = 100
     INCREMENT = 50
 

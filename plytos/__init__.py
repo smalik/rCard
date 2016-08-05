@@ -18,9 +18,12 @@ from flask.ext.login import LoginManager
 from flask.ext.bcrypt import Bcrypt
 from flask_mongoengine import MongoEngine
 
+# Application object configured to the settings set up
+# in the config.py file
 app = Flask(__name__)
 app.config.from_object('config')
 
+# MongoDB back-end database
 db = MongoEngine()
 db.init_app(app)
 
@@ -31,6 +34,7 @@ login_manager.init_app(app)
 
 flask_bcrypt = Bcrypt(app)
 
+# Sets up the routes for each of the sub-app classes
 from plytos.views.jobs import jobs_app
 from plytos.views.resume import resume_app
 from plytos.views.auth import auth_login

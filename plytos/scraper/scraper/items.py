@@ -14,15 +14,11 @@ __email__ = "ypatel@princeton.edu"
 
 from scrapy.item import Item, Field
 
-# Each item has set of values that are not available from 
-# indeed.com scraping -- just set these variables to default
-
-# Captures the structures of each of the following classes:
-# - Volunteer
-# - Education
-# - Awards
-# - Publications
 class ItemList(Item):
+    """ Mirrors "Volunteer", "Education", "Awards", "Publications" 
+    objects from Mongo ORM, allowing for Scrapy to 
+    create and save such objects
+    """
     _id           = Field()
 
     items         = Field()
@@ -32,6 +28,9 @@ class ItemList(Item):
         return self.__dict__
 
 class WorkItem(Item):
+    """ Mirrors "WorkItem" object from Mongo ORM, allowing for Scrapy
+    to create and save such objects
+    """
     _id           = Field()
 
     position         = Field()
@@ -49,6 +48,9 @@ class WorkItem(Item):
         return self.__dict__
 
 class SchoolItem(Item):
+    """ Mirrors "EducationItem" object from Mongo ORM, allowing for Scrapy
+    to create and save such objects
+    """
     _id           = Field()
 
     school          = Field()
@@ -65,6 +67,9 @@ class SchoolItem(Item):
         return self.__dict__
 
 class ResumeItem(Item):
+    """ Mirrors "Resume" object from Mongo ORM, allowing for Scrapy
+    to create and save such objects
+    """
     _id           = Field()
 
     parent_user   = Field()

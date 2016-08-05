@@ -17,12 +17,23 @@ from functools import wraps
 from threading import Thread
 
 def async(f):
+    """ Allows function to be run asynchrously to Flask app 
+    
+    Keyword arguments:
+    f -- Function to be run
+    """
     def wrapper(*args, **kwargs):
         thread = Thread(target=f, args=args, kwargs=kwargs)
         thread.start()
     return wrapper
 
 def login_required(f):
+    """ Forces function passed in to be run only if a user
+    is currently logged in
+
+    Keyword arguments:
+    f -- Function to be run
+    """
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if g.user is None:

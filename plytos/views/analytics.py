@@ -3,7 +3,7 @@ analytics.py: Setsup the models for the analytics,
 specifically used for charting out the path of a person's
 career based on past trends and experience
 
-__author__ = "Yash Patel"
+__author__ = "Yas hPatel"
 __copyright__ = "Copyright 2016, Plytos Inc."
 
 __license__ = "Free/Open"
@@ -29,8 +29,6 @@ class AnalyticsView(MethodView):
     decorators = [login_required]
 
     def get(self):
-        #Get reference of current user and send it to template
-        #Should only send relevant stats based on user
         curr_user = Person.objects.get_or_404(email=g.user.email)
         return render_template('analytics/dash.html', user=curr_user)
 

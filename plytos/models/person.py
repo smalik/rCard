@@ -19,9 +19,19 @@ from plytos.models.comments import Comment
 import plytos.models.resume as resume_model
 
 class Location(db.EmbeddedDocument):
-    _id          = db.ObjectIdField() 
+    """
+    ToDosPerSection Data model behaves as follows:
+        1.  First line of the address (required)
+        2.  Second line of address
+        3.  Zip code of location
+        4.  City of location
+        5.  Country of location
+        6.  Region of location
+    """
 
-    address1    = db.StringField()
+    _id          = db.ObjectIdField(required=True) 
+
+    address1    = db.StringField(required=True)
     address2    = db.StringField()
     zipcode     = db.StringField()
     city        = db.StringField()
@@ -29,6 +39,7 @@ class Location(db.EmbeddedDocument):
     region      = db.StringField()
 
     def __str__(self):
+        """ Returns a formatting string for printing locations """
         return """
                 address1: {}
                 address2: {}
@@ -41,18 +52,21 @@ class Location(db.EmbeddedDocument):
                 self.city, self.country, self.region, self.comments)
 
 class SocialMediaItem(db.EmbeddedDocument):
-    _id          = db.ObjectIdField()
+    """
+    SocialMediaItem Data model behaves as follows:
+        1.  Name of the social media network (required)
+        2.  Username on the network
+        3.  URL of personal profile page (required)
+    """
 
-    network       = db.StringField()
+    _id          = db.ObjectIdField(required=True)
+
+    network       = db.StringField(required=True)
     uname         = db.StringField()
     url           = db.StringField()
 
-    def getSocial(self):
-        # social = {self.network : {self.uname : self.url}}
-        social = [self.network, self.uname, self.url]
-        return social
-
     def __str__(self):
+        """ Returns a formatting string for printing social media """
         return """
                 network: {}
                 uname: {}
@@ -60,25 +74,49 @@ class SocialMediaItem(db.EmbeddedDocument):
             """.format(self.network, self.uname, self.url)
 
 class SocialProfile(db.EmbeddedDocument):
-    _id          = db.ObjectIdField()
+    """
+    SocialProfile Data model behaves as follows:
+        1.  List of all social media pages (required)
+        2.  List of comments associated to profile
+    """
 
-    items       = db.ListField(db.EmbeddedDocumentField('SocialMediaItem'))
+    _id          = db.ObjectIdField(required=True)
+
+    items       = db.ListField(db.EmbeddedDocumentField('SocialMediaItem'),
+        required=True)
     comments    = db.ListField(db.IntField())
 
     def __str__(self):
+        """ Returns a formatting string for printing profiles """
         return """
                 items: {}
                 comments: {}
             """.format(self.items, self.comments)
 
 class Personal(db.EmbeddedDocument):
-    _id          = db.ObjectIdField()    
+    """
+    Personal Data model behaves as follows:
+        1.  Username to whom the personal info belonds 
+        2.  Location associated with the user
+        3.  Social profiles of the user
+        4.  First name (required)
+        5.  Last name
+        6.  Middle name
+        7.  One-line description of person
+        8.  User picture/snapshot
+        9.  Phone number
+        10. Homepage/URL of the user (i.e. profile)
+        11. Text description self (extension of headline)
+        12. List of comments associated to personal info
+    """
+
+    _id          = db.ObjectIdField(required=True)    
     parent      = db.ReferenceField('Person')
 
     location    = db.EmbeddedDocumentField(Location)
     profiles    = db.EmbeddedDocumentField(SocialProfile)
 
-    firstName   = db.StringField()
+    firstName   = db.StringField(required=True)
     lastName    = db.StringField()
     middleName  = db.StringField()
     headline    = db.StringField()
@@ -90,6 +128,7 @@ class Personal(db.EmbeddedDocument):
     comments    = db.ListField(db.IntField())
 
     def __str__(self):
+        """ Returns a formatting string for printing personal attributes """
         return """
             location: {}
             profiles: {}
@@ -107,30 +146,36 @@ class Personal(db.EmbeddedDocument):
             self.phone, self.url, self.summary, self.comments)
 
 class Person(db.Document):
+    """
+    Person Data model behaves as follows:
+        1.  Whether or not the given user is active
+        2.  Account email address (required)
+        3.  Account username (required)
+        4.  Account password (hashed w/ MD5) (required)
+        5.  Identity of the person from Personal card (required)
+        6.  Current finalized resume being used
+        7.  Most recent save of the resume (not published though)
+        8.  Set of resumes that are being tracked for edits
+        9.  Resumes the user is editing
+        10. List of comments associated to overall user
+        11. Skills associated with overal user account
+    """
+
     meta = {'collection': 'users'}
 
-    _id           = db.ObjectIdField()    
+    _id           = db.ObjectIdField(required=True)    
     active        = db.BooleanField()
     email         = db.StringField(required=True) 
     username      = db.StringField(required=True) 
     password_hash = db.BinaryField(required=True)
 
-    # Identity of the person from Personal card
     info          = db.StringField(required=True) # db.EmbeddedDocumentField(Personal)
 
-    # Current finalized resume being used
     final_resumes      = db.ListField(db.ReferenceField(resume_model.Resume))
-
-    # Most recent save of the resume (not published though)
-    working_resumes    = db.ListField(db.ReferenceField(resume_model.Resume))
-
-    # Set of resumes that are being tracked for edits (when user forks)
+    working_resumes    = db.ListField(db.ReferenceField(resume_model.Resume))\
     current_edits     = db.ListField(db.ReferenceField(resume_model.Resume))
-
-    # Resumes the user is editing
     editing_resumes   = db.ListField(db.ReferenceField(resume_model.Resume))
 
-    # Most recent working resume
     comments      = db.ListField(db.IntField())
     skills        = db.EmbeddedDocumentField('Skills')
 
@@ -159,6 +204,7 @@ class Person(db.Document):
         return False
 
     def __str__(self):
+        """ Returns a formatting string for printing a user """
         return """
                 active: {}
                 email: {}

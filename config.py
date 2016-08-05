@@ -11,6 +11,11 @@ __maintainer__ = "Yash Patel"
 __email__ = "ypatel@princeton.edu"
 """
 
+# Determines which DB to which connection occurs
 MONGODB_SETTINGS = {'DB': 'plytos'}
+
+# Creates log/debug mode for executing Flask in browser
 DEBUG = True
+
+# Secret key used for WTForms -- prevents XSS
 SECRET_KEY = "s3cretk3yish3r3"

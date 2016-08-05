@@ -14,15 +14,23 @@ __email__ = "ypatel@princeton.edu"
 from plytos import db
 
 class PasswordResetRequest(db.Document):
-	_id = db.ObjectIdField()
+    """
+    PasswordResetRequest Data model behaves as follows:
+        1.  Hash code for the reset request (required)
+        2.  ID associated with person making request (required)
+        3.  When the request was initially made (required)
+    """
 
-	reset_code_hash = db.StringField(required=True) 
-	user_id = db.StringField(required=True) 
-	timestamp = db.DateTimeField(required=True)
+    _id = db.ObjectIdField(required=True)
 
-	def __str__(self):
-		return """
-			reset_code_hash: {}
-			user_id: {}
-			timestamp: {}
-		""".format(self.reset_code_hash, self.user_id, self.timestamp)
+    reset_code_hash = db.StringField(required=True) 
+    user_id = db.StringField(required=True) 
+    timestamp = db.DateTimeField(required=True)
+
+    def __str__(self):
+        """ Returns a formatting string for printing reset requests """
+        return """
+            reset_code_hash: {}
+            user_id: {}
+            timestamp: {}
+        """.format(self.reset_code_hash, self.user_id, self.timestamp)

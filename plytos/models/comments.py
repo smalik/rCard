@@ -13,48 +13,35 @@ __email__ = "ypatel@princeton.edu"
 
 from plytos import db
 
-"""
-Comments behave as follows:
-     1. Click on a comment button on the card.
-     2. A comment card pops up with:
-         i.      commenter pic
-         ii.     commenter username
-         iii.    comment text area
-         iv.     like button
-         v.      downvote button
-         vi.     submit button (optional)
-     3. User adds their comment text (limited to 240 chars)
-     4. Threaded to one level
-"""
-
-"""
-Base comment class that other commenting classes inherit.  We want to capture 
-the comment author, likes, downvotes, comment text, comment date, and what 
-topic the comment is about
-"""
 class Comment(db.EmbeddedDocument):
+    """
+    Comment Data model behaves as follows:
+        1.  User name of commenter (required)
+        2.  When the comment was posted (required)
+        3.  What topic the comment is about (heading)
+        4.  Where the comment is posted (required)
+        5.  How many upvotes ("likes") comment received (required)
+        6.  How many downvotes ("dislikes") received (required)
+        7.  The text content of the comment (required)
+    """
+
     meta = {'collection': 'comments'}
 
-    _id         = db.ObjectIdField()
+    _id         = db.ObjectIdField(required=True)
 
-    # user ID from Person class of contributor
-    author_user = db.StringField()
+    author_user = db.StringField(required=True)
     createDt    = db.DateTimeField()
 
-    # Topic of comment (e.g.  grammar, clarity, etc...)
     topic       = db.StringField()
 
-    # Section this comment is bound to
-    section     = db.StringField()
+    section     = db.StringField(required=True)
 
-    # how many people upvoted/downvoted the comment posted in payload
-    upvote       = db.IntField()
-    downvote     = db.IntField()
-
-    # actual comment
-    payload      = db.StringField()
+    upvote       = db.IntField(required=True)
+    downvote     = db.IntField(required=True)
+    payload      = db.StringField(required=True)
 
     def __str__(self):
+        """ Returns a formatting string for printing comments """
         return """
             author: {}
             createDt: {}
@@ -67,13 +54,23 @@ class Comment(db.EmbeddedDocument):
             self.section, self.upvote, self.downvote, self.payload)
 
 class CommentsPerSection(db.EmbeddedDocument):
-    _id         = db.ObjectIdField()
+    """
+    CommentsPerSection Data model behaves as follows:
+        1.  How many comments included in the section (required)
+        2.  ID of the section being tracked
+        3.  Name of section being tracked (required)
+    """
 
-    num_comments = db.IntField()
+    _id         = db.ObjectIdField(required=True)
+
+    num_comments = db.IntField(required=True)
     index_num    = db.IntField()
-    section_name = db.StringField()
+    section_name = db.StringField(required=True)
 
     def __str__(self):
+        """ Returns a formatting string for printing objects that
+        maintain the number of comments in a given section
+        """
         return """
             num_comments: {}
             index_num: {}
@@ -81,13 +78,23 @@ class CommentsPerSection(db.EmbeddedDocument):
         """.format(self.num_comments, self.index_num, self.section_name)
     
 class ToDosPerSection(db.EmbeddedDocument):
-    _id         = db.ObjectIdField()
+    """
+    ToDosPerSection Data model behaves as follows:
+        1.  How many to-dos included in the section (required)
+        2.  ID of the section being tracked
+        3.  Name of section being tracked (required)
+    """
 
-    num_todos    = db.IntField()
+    _id         = db.ObjectIdField(required=True)
+
+    num_todos    = db.IntField(required=True)
     index_num    = db.IntField()
-    section_name = db.StringField()
+    section_name = db.StringField(required=True)
 
     def __str__(self):
+        """ Returns a formatting string for printing objects that
+        maintain the number of to-dos in a given section
+        """
         return """
             num_todos: {}
             index_num: {}

@@ -30,6 +30,9 @@ from scrapy.selector import Selector
 from scraper.items import ResumeItem, WorkItem, SchoolItem, ItemList
 
 class ResumeIndeedSpider(CrawlSpider):
+    """Spider that traverses from starting URLs on Indeed and populates
+    Resumes DB (Mongo back-end) with pages scraped
+    """
     name = "resume"
     allowed_domains = ["indeed.com"]
     start_urls = [
@@ -58,6 +61,7 @@ class ResumeIndeedSpider(CrawlSpider):
             #'http://www.indeed.com/resumes/animator'
     ]
 
+    # Specifies how to traverse from one page to the next
     rules = (
         Rule(LinkExtractor(
             restrict_xpaths = ('//a[@class="confirm-nav next"]')), 
@@ -65,6 +69,12 @@ class ResumeIndeedSpider(CrawlSpider):
     )
 
     def parse_start_url(self, response):
+        """Parses through the URLs given in the start_urls instance
+
+        Keyword arguments:
+        response -- Required per Scrapy API: HTML response from server
+        """
+
         hxs     =   Selector(response)
         digest  =   hxs.xpath('//ol[@class="resultsList"]')
         
@@ -77,16 +87,20 @@ class ResumeIndeedSpider(CrawlSpider):
         count = 0
         for name, link in zip(names, links):
             if name not in 'Feedback':
-                # link = link.split()[0]
                 if "http://" not in link:
                     link =   url_prefix + link
                 records = self.parse_node(requests.get(link))
 
                 if records:
                     yield records
-                    # return records
 
     def get_work(self, hxs):
+        """Parses through selected HTML segment of the page (specified in the
+        hxs) and creates WorkItem objects per extracted elements
+
+        Keyword arguments:
+        hxs -- HtmlXPathSelector of section of the page
+        """
         workHistory =   []
         experience  =   hxs.xpath('//div[@id="work-experience-items"]/div')
         for elem in experience:
@@ -128,6 +142,12 @@ class ResumeIndeedSpider(CrawlSpider):
         return workHistory
 
     def get_edu(self, hxs):
+        """Parses through selected HTML segment of the page (specified in the
+        hxs) and creates Education objects per extracted elements
+
+        Keyword arguments:
+        hxs -- HtmlXPathSelector of section of the page
+        """
         eduHistory =   []
         education  =   hxs.xpath('//div[@id="education-items" '
             'and @class="items-container"]/div')
@@ -180,6 +200,12 @@ class ResumeIndeedSpider(CrawlSpider):
         return eduHistory
 
     def parse_node(self, response):
+        """Parses through the server response and creates resume object
+        associated with page (populated with work/education items)
+
+        Keyword arguments:
+        response -- HTML response from server for requesting URL
+        """
         hxs     =   Selector(response)
         name        =   hxs.xpath('//h1[@id="resume-contact"]/text()').extract()
 
