@@ -69,7 +69,11 @@ Version Control:
 
 Comments:
 	Integrated on Resumes -- another field in Mongo
+	Use on separate Redis DB: prevents resumes from become huge
+		Indexed by <ResumeID, Comment>
 
 To-Do List:
 	Auto-Populate with the comments
 	Another field in users
+	Use on separate Redis DB: prevents resumes from become huge
+		Indexed by <UserID, To-do>
