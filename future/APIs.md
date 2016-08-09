@@ -53,11 +53,23 @@ temporary call "game"):
 		Should update synchronously (would be too chaotic to see names 
 			flying around while on page)
 
-Version Control: 
+	Expert Charges:
+		Integrate through "/experts" route
+		Add feature that uses this DB and sorts by points attribute (roughly
+			corresponds to "experience")
+		Make a request feature that pushes request to user
+		User reviews and accepts/rejects the request (equivalent to making changes
+			to the resume)
+		If accepts, transfers the coins over from one to another account (must
+			be very secure) -- also MUST check that the balance > request amount
+
+Version Control:
+	Interface through "/resume" route on main app
+	Pulls from separate Resume Mongo DB
 
 Comments:
+	Integrated on Resumes -- another field in Mongo
 
 To-Do List:
-	Auto-Populate
-
-Matching:
+	Auto-Populate with the comments
+	Another field in users

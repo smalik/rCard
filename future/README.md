@@ -90,44 +90,57 @@ Usage
 			- Created First Resume: 50 pts
 			- Forked First Resume: 50 pts
 			- Reviewed First Resume: 50 pts
-			- Accepted Your Changes: 100 pts
+			- Owner accepted Your Changes: 100 pts
 			- Became Primary Commenter on Resume: 100 pts
+			- Owner gets accepted to job with you 
+				as editor: 150 pts (varies on how much of the resume you edited)
 			- etc...
 
-		- Using Coins:
-			- Whenever you create a resume, you'll have the option to either watch an 
-				ad or pay a certain number (50) of coins
-			- Have an overhead fee when transferring money out of the system --
-				a certain number to transfer coins -> real money (50)
-			- Promoting your resume -- we'll have a "public resume board." This
-				board will be accessible by everybody, meaning having your resume 
-				displayed on the top of that board will attract a lot of attention 
-				and get people looking into your resume. Each resume will have a
-				"priority" value associated with it, which you can boost by pumping
-				in coins (i.e. 500 coins -> "priority score" of 5), and the board will
-				simply display all the resumes filtered by this value. This score can
-				go arbitraily high, meaning people can spend as much as they wish. 
-				Further, these priority scores will depreciate over time, meaning,
-				if you pump in 500 coins one morning, the next it'll be 400, then 300, 
-				and so on. In this way, you can also "revive" your resume to the top
-				by spending more coins.
+	- Using Coins:
+		- Whenever you create a resume, you'll have the option to either watch an 
+			ad or pay a certain number (50) of coins
+		- Have an overhead fee when transferring money out of the system --
+			a certain number to transfer coins -> real money (50)
+		- Promoting your resume -- we'll have a "public resume board." This
+			board will be accessible by everybody, meaning having your resume 
+			displayed on the top of that board will attract a lot of attention 
+			and get people looking into your resume. Each resume will have a
+			"priority" value associated with it, which you can boost by pumping
+			in coins (i.e. 500 coins -> "priority score" of 5), and the board will
+			simply display all the resumes filtered by this value. This score can
+			go arbitraily high, meaning people can spend as much as they wish. 
+			Further, these priority scores will depreciate over time, meaning,
+			if you pump in 500 coins one morning, the next it'll be 400, then 300, 
+			and so on. In this way, you can also "revive" your resume to the top
+			by spending more coins.
 
-		- As for upgrading levels and unlocking abilities, people prefer to get
-			constant feedback reminding them that they're actually accomplishing
-			something. So, it's better to have more, less separated levels. 
-			Here are some large benchmark points, with their associated unlocks 
-			(the in-between things can have small unlocks, such as unlocking
-			different app backgrounds or avatar customizations). Also, every 
-			level you increase, you get 250 coins:
-			- Level 1 (Novice): 0 pts
-				- Create/edit/review/revise/comment on resumes (basic)
-			- Level 5 (Apprentice): 250 pts
-				- Cash out coins -> real money
-			- Level 15 (Mighty): 1000 pts
-				- Free "Publicity Upgrade" (one-time use thing that boosts you
-					to the top of the resume board)
-			- Level 25 (Master): 10000 pts
-			- Level 50 (Legend): 100000 pts
+	- As for upgrading levels and unlocking abilities, people prefer to get
+		constant feedback reminding them that they're actually accomplishing
+		something. So, it's better to have more, less separated levels. 
+		Here are some large benchmark points, with their associated unlocks 
+		(the in-between things can have small unlocks, such as unlocking
+		different app backgrounds or avatar customizations). Also, every 
+		level you increase, you get 250 coins:
+		- Level 1 (Novice): 0 pts
+			- Create/edit/review/revise/comment on resumes (basic)
+		- Level 5 (Apprentice): 250 pts
+			- Cash out coins -> real money
+		- Level 15 (Mighty): 1000 pts
+			- Free "Publicity Upgrade" (one-time use thing that boosts you
+				to the top of the resume board)
+		- Level 25 (Master): 10000 pts
+			- Ability to add an additional "Expert Cost" (explained below)
+		- Level 50 (Legend): 100000 pts
+
+	- "Expert Cost" is the ability for users to charge an overhead fee (i.e.
+		they'll send requests to users to make edits, saying "I want 50 coins"
+		extra). The intention is that people who achieve this ability are
+		sufficiently experienced with editing resumes and have proven themselves
+		enough to be able to charge extra
+			- Leaderboard system of users will be implemented (ordered by scores)
+			- Can "hire" these editors -- will charge coins from account (we
+				can charge an overhead fee here)
+			- Editors can do opposite and "request" to do work from you
 
 5. Jobs Matching: Jobs matching algorithm -- not too much to say here that hasn't
 been said already. Not sure how in-depth the current matching thoughts are, but what
