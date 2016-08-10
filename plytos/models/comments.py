@@ -53,6 +53,37 @@ class Comment(db.EmbeddedDocument):
         """.format(self.author_user, self.createDt, self.topic, 
             self.section, self.upvote, self.downvote, self.payload)
 
+class ToDo(db.EmbeddedDocument):
+    """
+    Comment Data model behaves as follows:
+        1.  User name of commenter (required)
+        2.  When the comment was posted (required)
+        3.  What topic the comment is about (heading)
+        4.  Where the comment is posted (required)
+        5.  How many upvotes ("likes") comment received (required)
+        6.  How many downvotes ("dislikes") received (required)
+        7.  The text content of the comment (required)
+    """
+
+    meta = {'collection': 'comments'}
+
+    _id         = db.ObjectIdField(required=True)
+
+    createDt    = db.DateTimeField()
+
+    topic       = db.StringField()
+    section     = db.StringField(required=True)
+    payload      = db.StringField(required=True)
+
+    def __str__(self):
+        """ Returns a formatting string for printing comments """
+        return """
+            createDt: {}
+            topic: {}
+            section: {}
+            payload: {}
+        """.format(self.createDt, self.topic, self.section, self.payload)
+
 class CommentsPerSection(db.EmbeddedDocument):
     """
     CommentsPerSection Data model behaves as follows:

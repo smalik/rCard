@@ -29,41 +29,45 @@ from scrapy.selector import Selector
 
 from scraper.items import ResumeItem, WorkItem, SchoolItem, ItemList
 
+NUM_PAGES = 500
+PAGE_STEP = 50
+
 class ResumeIndeedSpider(CrawlSpider):
     """Spider that traverses from starting URLs on Indeed and populates
     Resumes DB (Mongo back-end) with pages scraped
     """
     name = "resume"
     allowed_domains = ["indeed.com"]
-    start_urls = [
-            'http://www.indeed.com/resumes/statistics-python?start=0',
-            'http://www.indeed.com/resumes/statistics-python?start=50',
-            'http://www.indeed.com/resumes/statistics-python?start=100',
-            'http://www.indeed.com/resumes/statistics-python?start=150',
-            'http://www.indeed.com/resumes/statistics-python?start=200',
-            #'http://www.indeed.com/resumes/data-scientist',
-            #'http://www.indeed.com/resumes/python',
-            #'http://www.indeed.com/resumes/java',
-            #'http://www.indeed.com/resumes/SAS',
-            #'http://www.indeed.com/resumes/javascript',
-            #'http://www.indeed.com/resumes/marketing-analyst',
-            #'http://www.indeed.com/resumes/biomedical',
-            #'http://www.indeed.com/resumes/physicist',
-            #'http://www.indeed.com/resumes/business-analyst',
-            #'http://www.indeed.com/resumes/writer',
-            #'http://www.indeed.com/resumes/product-manager',
-            #'http://www.indeed.com/resumes/produce-manager',
-            #'http://www.indeed.com/resumes/technical-writer',
-            #'http://www.indeed.com/resumes/photographer',
-            #'http://www.indeed.com/resumes/dev-ops',
-            #'http://www.indeed.com/resumes/architect',
-            #'http://www.indeed.com/resumes/civil-engineer',
-            #'http://www.indeed.com/resumes/graphic-designer',
-            #'http://www.indeed.com/resumes/electrical-engineer',
-            #'http://www.indeed.com/resumes/server',
-            #'http://www.indeed.com/resumes/translator',
-            #'http://www.indeed.com/resumes/animator'
+    start_roots = [
+            'http://www.indeed.com/resumes/statistics-python',
+            'http://www.indeed.com/resumes/data-scientist',
+            'http://www.indeed.com/resumes/python',
+            'http://www.indeed.com/resumes/java',
+            'http://www.indeed.com/resumes/SAS',
+            'http://www.indeed.com/resumes/javascript',
+            'http://www.indeed.com/resumes/marketing-analyst',
+            'http://www.indeed.com/resumes/biomedical',
+            'http://www.indeed.com/resumes/physicist',
+            'http://www.indeed.com/resumes/business-analyst',
+            'http://www.indeed.com/resumes/writer',
+            'http://www.indeed.com/resumes/product-manager',
+            'http://www.indeed.com/resumes/produce-manager',
+            'http://www.indeed.com/resumes/technical-writer',
+            'http://www.indeed.com/resumes/photographer',
+            'http://www.indeed.com/resumes/dev-ops',
+            'http://www.indeed.com/resumes/architect',
+            'http://www.indeed.com/resumes/civil-engineer',
+            'http://www.indeed.com/resumes/graphic-designer',
+            'http://www.indeed.com/resumes/electrical-engineer',
+            'http://www.indeed.com/resumes/server',
+            'http://www.indeed.com/resumes/translator',
+            'http://www.indeed.com/resumes/animator'
     ]
+
+    start_urls = []
+    for root in start_roots:
+        for start_page in range(0, NUM_PAGES, PAGE_STEP):
+            start_urls.append("{}?start={}".format(root, start_page))
 
     # Specifies how to traverse from one page to the next
     rules = (
