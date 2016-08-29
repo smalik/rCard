@@ -9,7 +9,8 @@ Jinja and WTForms
 MongoDB and MongoEngine
 JavaScript, JQuery, Leaflet.js
 Bootstrap 3, Font Awesome
-# resume_collab
+
+# rCard
 
 Usage
 =======
