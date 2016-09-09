@@ -16,18 +16,11 @@ __email__ = "ypatel@princeton.edu"
 from flask import (render_template, request, redirect, 
     url_for, g, abort, session)
 from flask.views import View
-from mongoengine.context_managers import switch_db
 
 from bson.objectid import ObjectId
 
-from plytos.models.comments import Comment, CommentsPerSection
-from plytos.models.todo import ToDosPerSection
 from plytos.decorators import login_required
-from plytos.forms import (ResumeForm, CommentForm, WorkForm, VolunteerForm, 
-    EducationForm, AwardForm)
-
 from plytos.models.resume import Resume
-from plytos.models.person import Person
 from plytos.views.get import (person_with_username, 
     resume_with_id, resume_with_ids)
 

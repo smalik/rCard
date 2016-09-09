@@ -80,7 +80,6 @@ class WorkItem(db.EmbeddedDocument):
     startDate     = db.DateTimeField()
     endDate       = db.DateTimeField()
     website       = db.StringField()
-   # summary       = db.StringField()
 
     highlights    = db.ListField(db.StringField())
 
@@ -286,6 +285,7 @@ class Work(db.EmbeddedDocument):
     _id          = db.ObjectIdField(required=True)
 
     items       = db.ListField(db.EmbeddedDocumentField('WorkItem'))
+    deleted_items = db.ListField(db.EmbeddedDocumentField('WorkItem'))
     comments    = db.ListField(db.ObjectIdField())
 
     def __str__(self):
@@ -306,6 +306,7 @@ class Volunteer(db.EmbeddedDocument):
     _id          = db.ObjectIdField(required=True)
 
     items       = db.ListField(db.EmbeddedDocumentField('VolunteerItem'))
+    deleted_items = db.ListField(db.EmbeddedDocumentField('VolunteerItem'))
     comments    = db.ListField(db.ObjectIdField())
 
     def __str__(self):
@@ -325,6 +326,7 @@ class Education(db.EmbeddedDocument):
     _id          = db.ObjectIdField(required=True)
 
     items       = db.ListField(db.EmbeddedDocumentField('EducationItem'))
+    deleted_items = db.ListField(db.EmbeddedDocumentField('EducationItem'))
     comments    = db.ListField(db.ObjectIdField())
 
     def __str__(self):
@@ -344,6 +346,7 @@ class Awards(db.EmbeddedDocument):
     _id          = db.ObjectIdField(required=True)
 
     items       = db.ListField(db.EmbeddedDocumentField('AwardItem'))
+    deleted_items = db.ListField(db.EmbeddedDocumentField('AwardItem'))
     comments    = db.ListField(db.ObjectIdField())
 
     def __str__(self):
@@ -363,6 +366,7 @@ class Publications(db.EmbeddedDocument):
     _id          = db.ObjectIdField(required=True)
     
     items       = db.ListField(db.EmbeddedDocumentField('PublicationItem'))
+    deleted_items = db.ListField(db.EmbeddedDocumentField('PublicationItem'))
     comments    = db.ListField(db.ObjectIdField())
 
     def __str__(self):
@@ -382,6 +386,7 @@ class Interests(db.EmbeddedDocument):
     _id          = db.ObjectIdField(required=True)
     
     items       = db.ListField(db.EmbeddedDocumentField('InterestItem'))
+    deleted_items = db.ListField(db.EmbeddedDocumentField('InterestItem'))
     comments    = db.ListField(db.ObjectIdField())
 
     def __str__(self):
@@ -401,6 +406,7 @@ class Languages(db.EmbeddedDocument):
     _id          = db.ObjectIdField(required=True)
     
     items       = db.ListField(db.EmbeddedDocumentField('LanguageItem'))
+    deleted_items = db.ListField(db.EmbeddedDocumentField('LanguageItem'))
     comments    = db.ListField(db.ObjectIdField())
 
     def __str__(self):
@@ -420,6 +426,7 @@ class Skills(db.EmbeddedDocument):
     _id          = db.ObjectIdField(required=True)    
     
     items       = db.ListField(db.EmbeddedDocumentField('SkillItem'))
+    deleted_items = db.ListField(db.EmbeddedDocumentField('SkillItem'))
     comments    = db.ListField(db.ObjectIdField())
 
     def __str__(self):

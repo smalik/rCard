@@ -12,11 +12,15 @@
 
 {% block body %}
   {% for job in jobs %}
-    {{ job }}
+  	<div class="col-md-12">
+  		<div class="col-md-3">
+	    	{{ job }}
+	    </div>
 
-    <a class="btn btn-primary"  href="{{ url_for('jobs_app.apply',
-      _external=True) }}">
-      Apply </a>
+	    <a class="btn btn-primary col-md-6"  href="{{ url_for('jobs_app.apply',
+	      _external=True) }}">
+	      Apply </a>
+    </div>
   {% endfor %}
 
   {% include 'footer.html' %}

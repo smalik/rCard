@@ -220,6 +220,8 @@ class Person(db.Document):
 
         # case where an original item was deleted was added
         elif which_edit_form is None:
+            delete_value = working_resume[form_type].items[which_orig_form]
+            working_resume[form_type].deleted_items.append(delete_value)
             working_resume[form_type].items.pop(which_orig_form)
 
         if which_edit_form is not None and is_new:

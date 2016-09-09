@@ -73,6 +73,26 @@
                 </div>
               {% endfor %}
             </ul>
+
+            <div class="col-md-12">
+              {% if resumes[i][form].deleted_items|length > 0 %}
+                <br><hr>
+              {% endif %}
+              <ul>
+                {% for j in range(resumes[i][form].deleted_items|length) %}
+                  <div class="col-md-3">
+                    {{ form|title }} {{ j + 1 }}
+                  </div>
+                  <a class="btn btn-primary col-md-9"  
+                    href="{{ url_for('resume_app.restore', delete=j, slug=resumes[i]._id, field=form, _external=True) }}">
+                    Restore
+                  </a>
+                {% endfor %}
+              </ul>
+              {% if resumes[i][form].deleted_items|length > 0 %}
+                <br><hr>
+              {% endif %}
+            </div>
           {% endfor %}
           <hr>
 

@@ -20,7 +20,6 @@ from flask.views import View
 from bson.objectid import ObjectId
 
 from plytos.decorators import login_required
-from plytos.models.person import Person
 from plytos.views.get import (person_with_username, resume_with_id)
 from plytos.views.personal import new_resume
 

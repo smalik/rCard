@@ -41,7 +41,30 @@ class RevertView(View):
             return self.post(_id)
         return "Improper method used: {}".format(request.method)
 
+class RestoreView(View):
+    decorators = [login_required]
+    def get(self, field, delete, slug):
+        _id = ObjectId(slug)
+        delete = int(delete)
+
+        resume = resume_with_id(_id)
+        restored_value = resume[field].deleted_items[delete]
+        resume[field].items.append(restored_value)
+        resume[field].deleted_items.pop(delete)
+
+        resume.switch_db("resumes")
+        resume.save()
+
+        return redirect(url_for('resume_app.list', view='history'))
+
+    def dispatch_request(self, field, delete, slug):
+        if request.method.lower() == 'get':
+            return self.get(field, delete, slug)
+        return "Improper method used: {}".format(request.method)
+
 def setup_history(resume_app):
     # for viewing the finalized resumes
     resume_app.add_url_rule('/history/<field>/<slug>', 
         view_func=RevertView.as_view('revert'), methods=['GET', 'POST'])
+    resume_app.add_url_rule('/history/<field>/<delete>/<slug>', 
+        view_func=RestoreView.as_view('restore'), methods=['GET'])

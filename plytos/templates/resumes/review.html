@@ -20,8 +20,10 @@
   {{ review_pairs(orig, edit, comments, interests, "interests") }}
   {{ review_pairs(orig, edit, comments, languages, "languages") }}
   
-  <a href="{{ url_for('resume_app.list', view='review', _external=True) }}" 
-      class="btn btn-default col-md-6 col-md-offset-3">Return</a>
+  <div class="col-md-12">
+    <a href="{{ url_for('resume_app.list', view='review', _external=True) }}" 
+      class="btn btn-default col-md-6 col-md-offset-3">Return</a><br>
+  </div>
   {% include 'footer.html' %}
 
 {% endblock %}

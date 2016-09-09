@@ -34,12 +34,6 @@ from plytos.models.personal import Personal
 from plytos.views.get import (resume_with_id, comments_with_id,
     resume_with_ids, person_with_username)
 
-def _form_to_dict(form):
-    form_dict = {}
-    for field in form:
-        form_dict[field.name] = field._value()
-    return form_dict
-
 def new_resume(_id, work=[], volunteer=[], education=[], 
         awards=[], publications=[], interests=[], 
         languages=[], skills=[]):
@@ -59,41 +53,49 @@ def new_resume(_id, work=[], volunteer=[], education=[],
     resume.work = resume_model.Work(
         _id = ObjectId(),
         items = work,
+        deleted_items = [],
         comments = []
     )
     resume.volunteer = resume_model.Volunteer(
         _id = ObjectId(),
         items = volunteer,
+        deleted_items = [],
         comments = []
     )
     resume.education = resume_model.Education(
         _id = ObjectId(),
         items = education,
+        deleted_items = [],
         comments = []
     )
     resume.awards = resume_model.Awards(
         _id = ObjectId(),
         items = awards,
+        deleted_items = [],
         comments = []
     )
     resume.publications = resume_model.Publications(
         _id = ObjectId(),
         items = publications,
+        deleted_items = [],
         comments = []
     )
     resume.interests = resume_model.Interests(
         _id = ObjectId(),
         items = interests,
+        deleted_items = [],
         comments = []
     )
     resume.languages = resume_model.Languages(
         _id = ObjectId(),
         items = languages,
+        deleted_items = [],
         comments = []
     )
     resume.skills = resume_model.Skills(
         _id = ObjectId(),
         items = skills,
+        deleted_items = [],
         comments = []
     )
 
@@ -107,7 +109,6 @@ def new_resume(_id, work=[], volunteer=[], education=[],
     comments_per_section = CommentsPerSection()
     for form in forms:
         comments_per_section[form] = 0
-
     comments_per_section._id    = ObjectId()
     resume.comments_per_section = comments_per_section
 
@@ -292,6 +293,9 @@ class CreateView(View):
             values = request.form["location"].split("_")
             edit_field = values[0]
             edit_index = int(values[1])
+
+            delete_value = resume[edit_field].items[edit_index]
+            resume[edit_field].deleted_items.append(delete_value)
             resume[edit_field].items.pop(edit_index)
 
         elif submit_type == "edit":
@@ -397,7 +401,6 @@ class CreateView(View):
                 comment._id = \
                     resume[edit_field].comments[int(values[1])]
 
-            print(values)
             comment.switch_db("{}_comments".format(edit_field))
             comment.save()
 
