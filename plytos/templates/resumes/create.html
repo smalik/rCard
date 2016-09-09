@@ -1,5 +1,5 @@
 {% extends 'layouts/layout.html' %}
-{% from "util.html" import render_form %}
+{% from "util.html" import render_form, form_modal, edit_forms %}
 {% from 'util.html' import link_tag, script_tag %}
 
 {% if create %}
@@ -14,54 +14,58 @@
 
 
 {% block body %}
-  <h2>
-    {% if create %}
-      Add new Resume -- Separate values by commas
-    {% else %}
-      Edit Resume
-    {% endif %}
-  </h2>
+  {{ form_modal(work_form, "work", "green") }}
+  {{ form_modal(volunteer_form, "volunteer", "red") }}
+  {{ form_modal(education_form, "education", "brown") }}
+  {{ form_modal(award_form, "awards", "pink") }}
+  {{ form_modal(skill_form, "skills", "purple") }}
+  {{ form_modal(publication_form, "publications", "aqua") }}
+  {{ form_modal(interest_form, "interests", "teal") }}
+  {{ form_modal(language_form, "languages", "orange") }}
+  <br><br><br><br><br><hr>
+
+  {{ edit_forms(work_comment_forms,
+      work_forms, comment_form, "work", "green") }}
+  
+  {{ edit_forms(volunteer_comment_forms,
+      volunteer_forms, comment_form, "volunteer", "red") }}
+  
+  {{ edit_forms(education_comment_forms,
+      education_forms, comment_form, "education", "brown") }}
+  
+  {{ edit_forms(award_comment_forms,
+      award_forms, comment_form, "awards", "pink") }}
+  
+  {{ edit_forms(skill_comment_forms,
+      skill_forms, comment_form, "skills", "purple") }}
+  
+  {{ edit_forms(publication_comment_forms,
+      publication_forms, comment_form, "publications", "aqua") }}
+  
+  {{ edit_forms(interest_comment_forms,
+      interest_forms, comment_form, "interests", "teal") }}
+  
+  {{ edit_forms(language_comment_forms,
+      language_forms, comment_form, "languages", "orange") }}
 
   <form class="form" method="post">
-    {{ render_form(work_form) }}
-    <input type="submit" class="btn btn-primary" name="submit"
-      value="Create New Work">
-  </form>
-
-  <hr>
-
-  <form class="form" method="post">
-    {{ render_form(volunteer_form) }}
-    <input type="submit" class="btn btn-primary" name="submit"
-      value="Create New Volunteer">
-  </form>
-
-  <hr>
-
-  <form class="form" method="post">
-    {{ render_form(education_form) }}
-    <input type="submit" class="btn btn-primary" name="submit"
-      value="Create New Education">
-  </form>
-
-  <hr>
-
-  <form class="form" method="post">
-    {{ render_form(award_form) }}
-    <input type="submit" class="btn btn-primary" name="submit"
-      value="Create New Award">
-  </form>
-
-  <hr><form class="form" method="post">
-    {{ render_form(form) }}
-    <div class="actions">
-      <input type="submit" class="btn btn-primary" name="submit" value="Save">
-      <a href="{{ url_for('resume_app.list', _external=True) }}" 
-        class="btn btn-default">Cancel</a>
+    {{ render_form(basic_form) }}
+    <input type="hidden" name="location" value="save">
+    <div class="col-md-12">
+      <br>
+      {% if view != "finalized" %}
+        <input type="submit" class="btn btn-primary col-md-3 col-md-offset-3" 
+          name="submit" value="Create">
+        <a href="{{ url_for('resume_app.list', view=view, _external=True) }}" 
+          class="btn btn-default col-md-3">Cancel</a>
+      {% else %}
+        <a href="{{ url_for('resume_app.list', view=view, _external=True) }}" 
+          class="btn btn-default  col-md-6 col-md-offset-3">Return</a>
+      {% endif %}
     </div>
   </form>
-  {% include 'footer.html' %}
 
+  {% include 'footer.html' %}
 {% endblock %}
 
 {% block js %}

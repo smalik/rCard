@@ -1,0 +1,37 @@
+{% extends 'layouts/layout.html' %}
+{% from "util.html" import review_pairs %}
+
+{% from 'util.html' import link_tag, script_tag %}
+
+{% set title = 'Review Resume' %}
+
+{% block css %}
+  {{ link_tag('forms') }}
+{% endblock %}
+
+
+{% block body %}
+  {% for i in range(resumes|length) %}
+ 	<div class="col-md-12">
+	  	<div class="col-md-4">
+		  <a class="btn btn-primary"  href="{{ url_for('jobs_app.apply',
+		    _external=True) }}">
+		    Apply w/ Resume {{ i + 1 }} 
+		  </a><br>
+		</div>
+	</div>
+  {% endfor %}
+
+  <div class="col-md-12">
+  	<a class="col-md-6 col-md-offset-3 btn btn-lg btn-info"  href="{{ url_for('jobs_app.create',
+	  _external=True) }}">
+	  Create Custom Resume
+	</a><br>
+  </div>
+
+  {% include 'footer.html' %}
+{% endblock %}
+
+{% block js %}
+  {{ script_tag('cookies') }}
+{% endblock %}

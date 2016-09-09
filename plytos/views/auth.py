@@ -15,7 +15,8 @@ __email__ = "ypatel@princeton.edu"
 
 from flask import (Blueprint, render_template, request, current_app, flash,
                    redirect, url_for, session, g)
-from flask.ext.login import (login_user, 
+from flask.views import View
+from flask.ext.login import (login_user, UserMixin,
     logout_user, confirm_login, current_user)
 from flask.ext.principal import Identity, AnonymousIdentity, identity_changed
 from flask.ext.mail import Message
@@ -23,30 +24,35 @@ from bson.objectid import ObjectId
 
 from uuid import uuid4
 from datetime import datetime
+import json
 
 from plytos import login_manager, flask_bcrypt, mail, app
 from plytos.decorators import async, login_required
 
+from plytos.oauth import OAuthSignIn
 from plytos.models.resume import Skills
 from plytos.models.comments import Comment
 from plytos.models.person import Person
+from plytos.models.personal import Location, SocialMediaItem, Personal
 from plytos.models.reset import PasswordResetRequest
-from plytos.forms import LoginForm, RegisterForm, ForgotForm, ResetPassForm
+from plytos.forms import (LoginForm, RegisterForm, ForgotForm, ResetPassForm,
+    BasicForm, LocationForm, SocialProfileForm)
+
+from plytos.views.get import person_with_username
 
 MIN_PASSWORD_LENGTH = 4
-auth_login = Blueprint('auth_login', __name__, template_folder='templates')
 
-def get_with_username(username):
-    """Returns DB user object associated to the passed in username
+@login_manager.unauthorized_handler
+def unauthorized_callback():
+    flash('Please login', 'warning')
+    return redirect('/login?next=' + request.path)
 
-    Keyword arguments:
-    username (string) -- Name of the user to be retrieved
-    """
-    
-    dbPerson = Person.objects.get_or_404(username=username)
-    if dbPerson: 
-        return dbPerson
-    return None
+@login_manager.user_loader
+def load_user(uname):
+    if uname is None or uname.strip() == "None":
+        return redirect(url_for('auth_app.home'))
+    user = person_with_username(uname)
+    return user
 
 # General Request Handlers
 @app.before_request
@@ -55,107 +61,138 @@ def before_request():
     associated with the current session user
     """
     if "user_id" in session and session["user_id"]:
-        g.user = get_with_username(username=session["user_id"])
+        g.user = person_with_username(username=session["user_id"])
     else:
         g.user = current_user
+
+@app.route('/authorize/<provider>')
+def oauth_authorize(provider):
+    if not current_user.is_anonymous:
+        return redirect(url_for('auth_app.home'))
+    oauth = OAuthSignIn.get_provider(provider)
+    return oauth.authorize()
+
+@app.route('/callback/<provider>')
+def oauth_callback(provider):
+    if not current_user.is_anonymous:
+       return redirect(url_for('auth_app.home'))
+    oauth = OAuthSignIn.get_provider(provider)
+    social_id, username, email = oauth.callback()
+    if social_id is None:
+        flash('Authentication failed.')
+        return redirect(url_for('auth_app.home'))
     
-@app.route('/')
-def home():
-    """ Returns the index page when accessing home """
-    return render_template("index.html")
+    user = create_user(email, social_id)
+    login_user(user, True)
+    session["user_id"] = username
+    
+    return redirect(url_for('auth_app.home'))
 
-@auth_login.route('/register', methods=["GET", "POST"])
-def register():
-    """ Returns the registration page when accessing without
-    having logged in. If submitting, validates form and creates user
-    in the DB appropriately
-    """
-
-    form = RegisterForm()
-
-    # Case where someone is already logged in and is trying to access
-    if g.user is not None and g.user.is_authenticated:
-        return redirect(url_for("resume_app.list"))
-
-    if request.method == "POST" and form.validate() == False:
-        current_app.logger.info(form.errors)
-        return "Registration Error"
-
-    elif request.method == "POST" and form.validate():
-        email = request.form['email']
-        username = request.form['username']
-
-        # generate password hash
-        password_hash = flask_bcrypt.generate_password_hash(
-            request.form['password'])
-        try:
-            user = Person()
+def create_user(email, username, password_hash=None):
+    user = Person()
             
-            user._id = ObjectId()
-            user.email = email
-            user.password_hash = password_hash
-            user.active = True
-            user.username = username
-            user.info = ""
+    user._id = ObjectId()
+    user.email = email
+    user.password_hash = password_hash
+    user.active = True
+    user.username = username
+    
+    user.final_resumes = []
+    user.working_resumes = []
 
-            user.final_resumes = []
-            user.working_resumes = []
+    user.current_edits = []
+    user.editing_resumes = []
 
-            user.current_edits = []
-            user.editing_resumes = []
-            user.comments = []
+    user.comments = []
+    user.friends = []
 
-            user.skills = Skills(
-               _id = ObjectId(),
-               items = [],
-               comments = []
-            )
+    user.coins   = 500
+    user.points  = 0
 
-            user.save()
-            if login_user(user, remember="no"):
-                session["user_id"] = username
-                flash("Logged in!")
-                return redirect(url_for("resume_app.list"))
-            else:
-                flash("Unable to log you in")
-        except:
-            flash("Unable to register with that email address")
-            current_app.logger.error("Error on registration - "
-                "possible duplicate emails")
+    user.switch_db("users")
+    user.save()
+    return user
 
-    return render_template('forms/register.html', form=form)
+def user_register(request):
+    email = request.form['email']
+    username = request.form['username']
 
-@auth_login.route('/login', methods=["GET", "POST"])
-def login():
-    """ Returns the login page when accessing without
-    having logged in. If submitting, checks that the specified
-    login username and password exist in the DB
-    """
+    # generate password hash
+    password_hash = flask_bcrypt.generate_password_hash(
+        request.form['password'])
+    try:
+        user = create_user(email, username, password_hash)
 
-    form = LoginForm()
+        if login_user(user, remember="no"):
+            session["user_id"] = username
+            flash("Logged in!")
+            return redirect(url_for("auth_app.profile"))
+        else:
+            flash("Unable to log you in")
+    except:
+        flash("Unable to register with that email address")
+        current_app.logger.error("Error on registration - "
+            "possible duplicate emails")
 
-    # Case where someone is already logged in and is trying to access
-    if g.user is not None and g.user.is_authenticated:
-        return redirect(url_for("resume_app.list"))
+def user_login(request):
+    username = request.form["username"]
+    user = person_with_username(username)
+    if user and user.is_active() and flask_bcrypt.\
+        check_password_hash(user.password_hash, request.form["password"]):
+        remember = request.form.get("remember", "no") == "yes"
 
-    if request.method == "POST" and "username" in request.form:
-        username = request.form["username"]
-        user = get_with_username(username)
-        if user and user.is_active() and flask_bcrypt.\
-            check_password_hash(user.password_hash, request.form["password"]):
-            remember = request.form.get("remember", "no") == "yes"
+        if login_user(user, remember=remember):
+            session["user_id"] = username
+            flash("Logged In!")
 
-            if login_user(user, remember=remember):
-                session["user_id"] = username
-                flash("Logged In!")
+            identity_changed.send(current_app._get_current_object(),
+                                  identity = Identity(user.id))
+            return redirect(url_for("auth_app.profile"))
+        else:
+            flash("Unable to log you in")
 
-                identity_changed.send(current_app._get_current_object(),
-                                      identity = Identity(user.id))
-                return redirect(url_for("resume_app.list"))
-            else:
-                flash("Unable to log you in")
-    return render_template('forms/login.html', form=form)
+class RegisterLoginView(View):
+    def get_context(self):
+        context = {
+            "registration_form" : RegisterForm(),
+            "login_form"        : LoginForm()
+        }
+        return context
 
+    def get(self):
+        """ Returns the index page when accessing home """
+        context = self.get_context()
+        registration_form = context.get("registration_form")
+        login_form        = context.get("login_form")
+
+        # case where already did login
+        if g.user is not None and g.user.is_authenticated:
+            return redirect(url_for("auth_app.profile")) 
+
+        return render_template("index.html",
+            registration_form=registration_form, login_form=login_form)
+
+    def post(self):
+        context = self.get_context()
+        registration_form = context.get("registration_form")
+
+        if "confirm" in request.form:
+            if registration_form.validate():
+                user_register(request)
+                return redirect(url_for("auth_app.profile"))
+            else: return "Registration Error" 
+
+        # case where submitted a login request
+        user_login(request)
+        return redirect(url_for("auth_app.profile"))
+
+    def dispatch_request(self):
+        if request.method.lower() == 'get':
+            return self.get()
+        elif request.method.lower() == 'post':
+            return self.post()
+        return "Improper method used: {}".format(request.method)
+    
 def generate_password_reset_link(user_id):
     """ Returns a link for resetting the password of the account
     associated with DB object with user_id ID value
@@ -178,7 +215,7 @@ def generate_password_reset_link(user_id):
     session.update({user_id : reset_code})
 
     # Return the reset password link
-    return url_for('auth_login.reset_password', _external=True,
+    return url_for('auth_app.reset_password', _external=True,
         id=reset_request.id, reset_code=reset_code)
 
 @async
@@ -206,64 +243,92 @@ def send_email(subject, sender, recipients, text_body, html_body):
     message.html = html_body
     mail.send(message)
 
-@auth_login.route('/forgot', methods=["GET", "POST"])
-def forgot():
-    form = ForgotForm()
-    if request.method == "POST" and "username" in request.form:
-        user = get_with_username(request.form["username"])
-        if user:
-            reset_link = generate_password_reset_link(str(user.id))
-            subject = "Plytos Password Reset"
-            recipients = [user.email]
-            body = ("Hello {name}! We received a password reset request "
-                    "from you. If you did not make this request, please "
-                    "ignore this email.\n"
-                    "\n"
-                    "You can reset your password using this link:\n"
-                    "{reset_link}\n"
-                    "\n"
-                    "Thank you,\n"
-                    "\n"
-                    "Plytos Team"
-                    ).format(name="placeholder", reset_link=reset_link)
-            
-            send_email(subject=subject,
-                       sender="team@plytos.com",
-                       recipients=recipients,
-                       text_body=body,
-                       html_body=None)
-            
-            flash("Request has been sent! Check your email for a link "
-                  "to reset your password.", "success")
-            return render_template('forms/forgot.html', form=form)
+class ForgotView(View):
+    def get_context(self):
+        context = {
+            "forgot_form" : ForgotForm()
+        }
+        return context
 
-        else:
-            flash("Email not found", "danger")
-    return render_template('forms/forgot.html', form=form)
+    def get(self):
+        context = self.get_context()
+        forgot_form = context.get("forgot_form")
+        return render_template('forms/forgot.html', form=forgot_form) 
 
+    def post(self):
+        if "username" in request.form:
+            user = person_with_username(request.form["username"])
+            if user:
+                reset_link = generate_password_reset_link(str(user.id))
+                subject = "Plytos Password Reset"
+                recipients = [user.email]
+                body = ("Hello {name}! We received a password reset request "
+                        "from you. If you did not make this request, please "
+                        "ignore this email.\n"
+                        "\n"
+                        "You can reset your password using this link:\n"
+                        "{reset_link}\n"
+                        "\n"
+                        "Thank you,\n"
+                        "\n"
+                        "Plytos Team"
+                        ).format(name="placeholder", reset_link=reset_link)
+                
+                send_email(subject=subject,
+                           sender="team@plytos.com",
+                           recipients=recipients,
+                           text_body=body,
+                           html_body=None)
+                
+                flash("Request has been sent! Check your email for a link "
+                      "to reset your password.", "success")
+                return render_template('forms/forgot.html', form=forgot_form)
 
-@auth_login.route('/reset_password', methods=['GET', 'POST'])
-def reset_password():
-    form = ResetPassForm()
-    reset_request_id = request.args.get('id')
-    reset_code = request.args.get('reset_code')
+            else:
+                flash("Email not found", "danger") 
+        return render_template('forms/forgot.html', form=forgot_form)
 
-    reset_request = PasswordResetRequest.objects.get_or_404(
-        id=reset_request_id)
+    def dispatch_request(self):
+        if request.method.lower() == 'get':
+            return self.get()
+        elif request.method.lower() == 'post':
+            return self.post()
+        return "Improper method used: {}".format(request.method)
 
-    if not reset_request:
-        flash("You do not have access to that page.", "danger")
-        return render_template("index.html")
+class ResetView(View):
+    def get_context(self):
+        context = {
+            "reset_form" : ResetPassForm()
+        }
+        return context
 
-    if not reset_request.validate_reset_code(reset_code):
-        flash("You do not have access to that page", "danger")
-        return render_template("index.html")
+    def get(self):
+        context = self.get_context()
+        reset_form = context.get("reset_form")
 
-    if not reset_request.validate_timestamp():
-        flash("Password reset has expired", "danger")
-        return render_template("index.html")
+        reset_request_id = request.args.get('id')
+        reset_code = request.args.get('reset_code')
 
-    if request.method == "POST":
+        reset_request = PasswordResetRequest.objects.get_or_404(
+            id=reset_request_id)
+
+        if not reset_request:
+            flash("You do not have access to that page.", "danger")
+            return render_template("index.html")
+
+        if not reset_request.validate_reset_code(reset_code):
+            flash("You do not have access to that page", "danger")
+            return render_template("index.html")
+
+        if not reset_request.validate_timestamp():
+            flash("Password reset has expired", "danger")
+            return render_template("index.html")
+        return render_template('forms/reset_password.html', form=reset_form) 
+
+    def post(self):
+        context = self.get_context()
+        reset_form = context.get("reset_form")
+
         password = request.form.get('password').strip()
         confirm = request.form.get('confirm').strip()
 
@@ -277,60 +342,125 @@ def reset_password():
             has_errors = True
 
         if not has_errors:
-            user = get_with_username(g.user.username)
+            user = person_with_username(g.user.username)
             password_hash = flask_bcrypt.generate_password_hash(password)
             try:
                 user.reset_password(reset_request.user_id, password_hash)
                 reset_request.delete()
                 session.pop(reset_request.user_id, None)
                 flash("You have successfully reset your password!", "success")
-                return redirect(url_for('auth_login.login'))
+                return redirect(url_for('auth_app.home'))
             except:
                 flash("Unable to reset password", "danger")
                 current_app.logger.error("Error on registration - "
-                    "possible duplicate emails")               
+                    "possible duplicate emails") 
+        return render_template('forms/reset_password.html', form=reset_form)
 
-    return render_template('forms/reset_password.html', form=form)
+    def dispatch_request(self):
+        if request.method.lower() == 'get':
+            return self.get()
+        elif request.method.lower() == 'post':
+            return self.post()
+        return "Improper method used: {}".format(request.method)
 
-@auth_login.route("/logout")
-@login_required
-def logout():
-    logout_user()
-    for key in ('identity.name', 'identity.auth_type'):
-        session.pop(key, None)
-    identity_changed.send(current_app._get_current_object(),
-                          identity=AnonymousIdentity())
-    flash("Logged out.")
-    return redirect(request.args.get('next') or '/')
+class LogoutView(View):
+    def get(self):
+        logout_user()
+        for key in ('identity.name', 'identity.auth_type'):
+            session.pop(key, None)
+        identity_changed.send(current_app._get_current_object(),
+                              identity=AnonymousIdentity())
+        flash("Logged out.")
+        return redirect(url_for("auth_app.home"))
 
-@auth_login.route('/<username>/')
-@login_required
-def profile(username):
-    user = get_with_username(username)
+    def dispatch_request(self):
+        if request.method.lower() == 'get':
+            return self.get()
+        return "Improper method used: {}".format(request.method)
 
-    if user == None:
-        flash('User ' + username + ' not found.')
-        return render_template("index.html")
+class ProfileView(View):
+    def get_context(self):
+        user = person_with_username(g.user.username)
 
-    #FIXME: just mock data
-    posts = [
-        { 'author': user, 'body': 'Test post #1' },
-        { 'author': user, 'body': 'Test post #2' }
-    ]
-    return render_template('profile/user.html',
-        user = user,
-        posts = posts)
+        context = {
+            "basic_form": BasicForm(obj=user.personal),
+            "location_form": LocationForm(),
+            "social_profile_form": SocialProfileForm()
+        }
+        return context
 
-@login_manager.unauthorized_handler
-def unauthorized_callback():
-    flash('Please login', 'warning')
-    return redirect('/login?next=' + request.path)
+    def get(self):
+        context = self.get_context()
+        user = person_with_username(g.user.username)
 
-@login_manager.user_loader
-def load_user(uname):
-    if uname is None:
-        redirect('/login')
-    user = get_with_username(uname)
-    if user.is_active():
-        return user
-    else: return None
+        if user.personal is not None:
+            self.locations       = user.personal.location
+            self.social_profiles = user.personal.profiles
+
+        basic_form = context.get('basic_form')
+        location_form = context.get('location_form')
+        social_profile_form = context.get('social_profile_form')
+
+        return render_template("forms/profile.html", user=user,
+            basic_form=basic_form, 
+            location_form=location_form, 
+            social_profile_form=social_profile_form)
+
+    def post(self):
+        context = self.get_context()
+        user = person_with_username(g.user.username)
+
+        basic_form = context.get('basic_form')
+        location_form = context.get('location_form')
+        social_profile_form = context.get('social_profile_form')
+
+        if user.personal is None:
+            personal_info           = Personal()
+            personal_info._id       = ObjectId()
+            user.personal           = personal_info
+
+        if "submit" in request.form and "Location" in request.form["submit"]\
+            and location_form.validate():
+
+            new_location           = Location()
+            new_location._id       = ObjectId()
+            location_form.populate_obj(new_location)
+            user.personal.location.append(new_location)
+
+        elif "submit" in request.form and "Profile" in request.form["submit"]\
+            and social_profile_form.validate():
+            
+            new_social              = SocialMediaItem()
+            new_social._id          = ObjectId()
+            social_profile_form.populate_obj(new_social)
+            user.personal.profiles.append(new_social)
+
+        elif basic_form.validate():
+            basic_form.populate_obj(user.personal)
+
+        user.switch_db("users")
+        user.save()
+        
+        return redirect(url_for('auth_app.profile'))
+
+    def dispatch_request(self):
+        if request.method.lower() == 'get':
+            return self.get()
+        elif request.method.lower() == 'post':
+            return self.post()
+        return "Improper method used: {}".format(request.method)
+
+def setup_auth(auth_app):
+    auth_app.add_url_rule('/', view_func=RegisterLoginView.as_view('home'), 
+        methods=['GET', 'POST'])
+    auth_app.add_url_rule('/profile', view_func=ProfileView.as_view('profile'), 
+        methods=['GET', 'POST'])
+    auth_app.add_url_rule('/logout', view_func=LogoutView.as_view('logout'), 
+        methods=['GET'])
+    auth_app.add_url_rule('/reset_password', 
+        view_func=ResetView.as_view('reset_password'), methods=['GET', 'POST'])
+    auth_app.add_url_rule('/forgot', view_func=ForgotView.as_view('forgot'), 
+        methods=['GET', 'POST'])
+
+auth_app = Blueprint('auth_app', __name__, template_folder='templates')
+setup_auth(auth_app)

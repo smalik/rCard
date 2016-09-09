@@ -1,5 +1,5 @@
 {% extends 'layouts/layout.html' %}
-{% from 'util.html' import link_tag, script_tag %}
+{% from 'util.html' import link_tag, script_tag, render_modal %}
 
 {% set title = 'Resumes' %}
 
@@ -8,104 +8,84 @@
 {% endblock %}
 
 {% block body %}
+  
+  <div class="col-md-12">
+    {% if view == 'revise' %}
+      <a class="btn btn-lg btn-primary col-md-6 col-md-offset-3" 
+        href="{{ url_for('resume_app.find', _external=True) }}" >
+        Edit New Resume </a>
+    {% elif view == 'edit' %}
+      <a class="btn btn-lg btn-primary col-md-6 col-md-offset-3"  
+        href="{{ url_for('resume_app.create', _external=True) }}">
+        Create Resume </a>
+    {% endif %}
+  </div>
 
-<div class="row">
-          <div class="col-lg-4">
-            <div class="panel panel-info">
-              <div class="panel-heading">
-                <div class="row">
-                  <div class="col-xs-6">
-                    <i class="fa fa-comments fa-5x"></i>
-                  </div>
-                  <div class="col-xs-6 text-right">
-                    <p class="announcement-heading">456</p>
-                    <p class="announcement-text">Total Comments</p>
-                  </div>
-                </div>
-              </div>
-              <a href="#">
-                <div class="panel-footer announcement-bottom">
-                  <div class="row">
-                    <div class="col-xs-6">
-                      View Details
-                    </div>
-                    <div class="col-xs-6 text-right">
-                      <i class="fa fa-arrow-circle-right"></i>
-                    </div>
-                  </div>
-                </div>
-              </a>
-            </div>
-          </div>
-          <div class="col-lg-4">
-            <div class="panel panel-warning">
-              <div class="panel-heading">
-                <div class="row">
-                  <div class="col-xs-6">
-                    <i class="fa fa-check fa-5x"></i>
-                  </div>
-                  <div class="col-xs-6 text-right">
-                    <p class="announcement-heading">12</p>
-                    <p class="announcement-text">Action Items</p>
-                  </div>
-                </div>
-              </div>
-              <a href="#">
-                <div class="panel-footer announcement-bottom">
-                  <div class="row">
-                    <div class="col-xs-6">
-                      Complete Tasks
-                    </div>
-                    <div class="col-xs-6 text-right">
-                      <i class="fa fa-arrow-circle-right"></i>
-                    </div>
-                  </div>
-                </div>
-              </a>
-            </div>
-          </div>
+  {% for i in range(resumes|length) %}
+    <div class="col-md-12">
+      <br>
+      <div class="col-md-3">
+        {{ resumes[i]._id }}
+      </div>
+      <div class="col-md-6">
+        {% if view == 'revise' %}
+          <form class="form" method="post">
+            <a class="btn btn-primary col-md-6" href="{{ url_for('resume_app.revise', edit='revise', slug=resumes[i]._id, _external=True) }}">
+              Edit Resume {{ i + 1 }}
+            </a>
+            <input type="hidden" name="location" value="{{ i }}">
+            <input type="submit" class="btn btn-success col-md-6" 
+              name="submit" value="Publish">
+          </form>
 
-          <div class="col-lg-4">
-            <div class="panel panel-success">
-              <div class="panel-heading">
-                <div class="row">
-                  <div class="col-xs-6">
-                    <i class="fa fa-users fa-5x"></i>
-                  </div>
-                  <div class="col-xs-6 text-right">
-                    <p class="announcement-heading">112</p>
-                    <p class="announcement-text">Profile views</p>
-                  </div>
-                </div>
-              </div>
-              <a href="#">
-                <div class="panel-footer announcement-bottom">
-                  <div class="row">
-                    <div class="col-xs-6">
-                      View Details
-                    </div>
-                    <div class="col-xs-6 text-right">
-                      <i class="fa fa-arrow-circle-right"></i>
-                    </div>
-                  </div>
-                </div>
-              </a>
-            </div>
-          </div>
-        </div><!-- /.row -->
+        {% elif view == 'review' %}
+          <a class="btn btn-primary col-md-12" href="{{ url_for('resume_app.review',
+            slug=resumes[i]._id, _external=True) }}">
+            Review Resume {{ i + 1 }}
+          </a>
 
-  {% for resume in resumes %}
-    <h2>{{ resume.title }}</a></h2>
-    <p><h1>Name: </h1>{{ resume.slug }} </p>
-    <p><h3>Skills: </h3>{{ resume.skills|truncate(100) }} </p>
-    <p><h3>Experience: </h3>{{ resume.experience|truncate(100) }} </p>
-    <p><h3>Education: </h3>{{ resume.education|truncate(100) }}</p>
-  <p>
-    |
-    {% with total=resume.comments|length %}
-      {{ total }} comment {%- if total > 1 %}s{%- endif -%}
-    {% endwith %}
-  </p>
+        {% elif view == 'edit' %}
+          <a class="btn btn-primary col-md-6"  href="{{ url_for('resume_app.revise',
+            edit='edit', slug=resumes[i]._id, _external=True) }}">
+            Edit Resume {{ i + 1 }}
+          </a>
+          <a class="btn btn-primary col-md-6"  href="{{ url_for('resume_app.publish',
+            slug=resumes[i]._id, _external=True) }}"> Publish </a>
+
+        {% elif view == 'history' %}
+          {% for form in resumes[i] %}
+            <ul>
+              {% for j in range(resumes[i][form].items|length) %}
+                <div class="col-md-3">
+                  {{ form|title }} {{ j + 1 }}
+                </div>
+                <div class="col-md-9">
+                  <ul style="list-style: none;">
+                    {% for k in range(resumes[i][form].items[j].edit_ids|length) %}
+                      <li>
+                        <a class="btn btn-primary col-md-8"  
+                        href="{{ url_for('resume_app.revert', slug=resumes[i][form].items[j].edit_ids[k], field=form, _external=True) }}">
+                          Version {{ k + 1 }}
+                        </a>
+                      </li>
+                    {% endfor %}
+                  </ul>
+                </div>
+              {% endfor %}
+            </ul>
+          {% endfor %}
+          <hr>
+
+        {% elif view == 'finalized' %}
+          <a class="btn btn-primary col-md-12"  href="{{ url_for('resume_app.revise', edit='finalized', slug=resumes[i]._id, _external=True) }}">
+            View Resume {{ i + 1 }}
+          </a>
+        {% endif %}
+      </div>
+      <div class="col-md-3">
+        {{ render_modal(resumes[i].comments_per_section, "Comments") }} 
+      </div> 
+    </div>
 
   {% endfor %}   
   {% include 'footer.html' %}
@@ -113,6 +93,6 @@
 {% endblock %}
 
 {% block js %}
-        {{ script_tag('cookies') }}
+  {{ script_tag('cookies') }}
 {% endblock %}
 

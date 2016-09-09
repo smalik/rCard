@@ -1,77 +1,72 @@
+<html lang="en" class="no-js">
+<head>
+    <meta charset="UTF-8">
+    <title>Plytos</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+    
+    <!-- Bootstrap 3.3.2 -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/font-awesome.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/slick.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='js/rs-plugin/css/settings.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
 
-<!DOCTYPE html>
-<html lang="en">
-<title>{% block title %}{% endblock %}</title>
+    <script type="text/javascript" src="{{ url_for('static', filename='js/modernizr.custom.32033.js') }}"></script>
+</head>
 
-    <head>
+<body>
+    <header>  
+            <nav class="navbar navbar-default scrolled" role="navigation">
+                <div class="container">
+                    <!-- Brand and toggle get grouped for better mobile display -->
+                    <div class="navbar-header">
+                        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target="#bs-example-navbar-collapse-1">
+                            <span class="fa fa-bars fa-lg"></span>
+                        </button>
+                        <img src="{{ url_for('static', filename='img/logo.png') }}" width="10%" height="10%">
+                    </div>
 
-        <meta charset="utf-8">
-        <meta http-equiv="X-UA-Compatible" content="IE=edge">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>Plytos Resume</title>
+                    <!-- Collect the nav links, forms, and other content for toggling -->
+                    <div class="collapse navbar-collapse" id="bs-example-navbar-collapse-1">
 
-        <!-- CSS -->
-        <link rel="stylesheet" href="http://fonts.googleapis.com/css?family=Roboto:400,100,300,500">
-        <link rel="stylesheet" href="{{ url_for('static', filename='bootstrap/css/bootstrap.min.css') }}">
-        <link rel="stylesheet" href="{{ url_for('static', filename='font-awesome/css/font-awesome.min.css') }}">
-        <link rel="stylesheet" href="{{ url_for('static', filename='css/form-elements.css') }}">
+                        <ul class="nav navbar-nav navbar-right">
+                            <li><a href="/user/logout">Logout</a></li> 
+                            <li><a href="/user/profile">Profile</a></li> 
 
-        <!-- HTML5 Shim and Respond.js IE8 support of HTML5 elements and media queries -->
-        <!-- WARNING: Respond.js doesn't work if you view the page via file:// -->
-        <!--[if lt IE 9]>
-            <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
-            <script src="https://oss.maxcdn.com/libs/respond.js/1.4.2/respond.min.js"></script>
-        <![endif]-->
+                            <li><a href="/resumes/edit">Create</a></li>
+                            <li><a href="/resumes/revise">Edit</a></li>
+                            <li><a href="/resumes/history">History</a></li>
+                            <li><a href="/resumes/review">Review</a></li> 
+                            <li><a href="/resumes/final">Published</a></li>
 
-        <!-- Favicon and touch icons -->
-        <link rel="shortcut icon" href="{{ url_for('static', filename='ico/favicon.png') }}">
-        <link rel="apple-touch-icon-precomposed" sizes="144x144" 
-            href="{{ url_for('static', filename='ico/apple-touch-icon-144-precomposed.png') }}">
-        <link rel="apple-touch-icon-precomposed" sizes="114x114" 
-            href="{{ url_for('static', filename='ico/apple-touch-icon-114-precomposed.png') }}">
-        <link rel="apple-touch-icon-precomposed" sizes="72x72" 
-            href="{{ url_for('static', filename='ico/apple-touch-icon-72-precomposed.png') }}">
-        <link rel="apple-touch-icon-precomposed" 
-            href="{{ url_for('static', filename='ico/apple-touch-icon-57-precomposed.png') }}">
+                            <li><a href="/jobs/">Jobs</a></li>
+                        </ul>
+                    </div>
+                        <!-- /.navbar-collapse -->
+                </div>
+                    <!-- /.container-->
+            </nav>
 
-    </head>
+    </header>
 
-    <body>
-        <nav class="navbar navbar-default">
-          <div class="container-fluid">
-            <div class="navbar-header">
-              <a class="navbar-brand" href="/">Plytos</a>
-            </div>
-            <ul class="nav navbar-nav">
-              <li><a href="/user/login" style="color: blue;">Login</a></li>
-              <li><a href="/user/register" style="color: blue;">Register</a></li> 
-              <li><a href="/user/logout" style="color: blue;">Logout</a></li> 
-
-              <li><a href="/resumes" style="color: red;">View</a></li> 
-              <li><a href="/resumes/create" style="color: red;">Create</a></li> 
-
-              <li><a href="/resumes/find" style="color: purple;">Find</a></li> 
-              <li><a href="/resumes/edits" style="color: purple;">Edit</a></li>
-               
-              <li><a href="/resumes/review" style="color: green;">Review</a></li> 
-
-              <li><a href="/resumes/final" style="color: orange;">Finalized</a></li> 
-            </ul>
-          </div>
-        </nav>
-
+    <div class="wrapper">
         {% block body %}{% endblock %}
+    </div>
 
-        <!-- Javascript -->
-        <script src="{{ url_for('static', filename='js/jquery-1.11.1.min.js') }}"></script>
-        <script src="{{ url_for('static', filename='bootstrap/js/bootstrap.min.js') }}"></script>
-        <script src="{{ url_for('static', filename='js/jquery.backstretch.min.js') }}"></script>
-        <script src="{{ url_for('static', filename='js/scripts.js') }}"></script>
-        
-        <!--[if lt IE 10]>
-            <script src="{{ url_for('static', filename='js/placeholder.js') }}"></script>
-        <![endif]-->
-
-    </body>
+    <script src="{{ url_for('static', filename='js/jquery-1.11.1.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/bootstrap.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/slick.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/placeholdem.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/rs-plugin/js/jquery.themepunch.plugins.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/rs-plugin/js/jquery.themepunch.revolution.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/waypoints.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/scripts_layout.js') }}"></script>
+    <script>
+        $(document).ready(function() {
+            appMaster.preLoader();
+        });
+    </script>
+</body>
 
 </html>

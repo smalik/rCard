@@ -1,0 +1,23 @@
+{% extends 'layouts/layout.html' %}
+{% set title = 'Edit Resume' %}
+
+{% block css %}
+{% endblock %}
+
+{% block body %}
+
+<form action="" class="form" method="post">
+	{% for friend in requests %}
+		<input name="user" value="{{ friend.username }}"> </input>
+		<div class="actions">
+		    <input type="submit" class="btn btn-success" value="accept" name="submit">
+		    <input type="submit" class="btn btn-danger" value="reject" name="submit">
+		</div>
+	{% endfor %}
+</form>
+
+{% include 'footer.html' %}
+{% endblock %}
+
+{% block js %}
+{% endblock %}

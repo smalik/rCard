@@ -1,0 +1,48 @@
+{% extends 'layouts/layout.html' %}
+{% from "util.html" import render_form %}
+
+{% from 'util.html' import link_tag, script_tag %}
+
+{% if create %}
+  {% set title = 'Create Resume' %}
+{% else %}
+  {% set title = 'Edit Resume' %}
+{% endif %}
+
+{% block css %}
+  {{ link_tag('forms') }}
+{% endblock %}
+
+
+{% block body %}
+  <h2> Incompleted Todos </h2>
+  <ul>
+    {% for todo in incomplete_todos %}
+      <form action="" class="form" method="post">
+        <li>
+          <input value="{{ todo._id }}" name="todo">
+          <input type="submit" class="btn btn-success" value="Completed" name="complete">
+        </li>
+      </form>
+    {% endfor %}
+  </ul>
+
+  <h2> Completed Todos </h2>
+  {% for todo in complete_todos %}
+    <li> {{ todo.payload }} </li>
+  {% endfor %}
+
+  <form action="" class="form" method="post">
+    <h3>Add Todo</h3>
+    {{ render_form(todo_form) }}
+    <input type="submit" class="btn btn-primary" value="Create" name="create">
+  </form>
+  <hr>
+
+  {% include 'footer.html' %}
+
+{% endblock %}
+
+{% block js %}
+        {{ script_tag('cookies') }}
+{% endblock %}

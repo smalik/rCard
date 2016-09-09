@@ -19,14 +19,15 @@ from flask.views import View
 from plytos.decorators import login_required
 from plytos.models.person import Person
 
+from plytos.views.get import (person_with_username, resume_with_ids)
+
 class FinalView(View):
     decorators = [login_required]
 
     def get(self):
         # Listview only show particular user's resume
-        creator = Person.objects.get_or_404(email=g.user.email)
-        return render_template('resumes/list.html', 
-            resumes=creator.final_resumes)
+        creator = person_with_username(g.user.username)
+        return redirect(url_for('resume_app.list', view='finalized'))
 
     def dispatch_request(self):
         if request.method.lower() == 'get':

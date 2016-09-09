@@ -16,123 +16,117 @@ from flask import (render_template, request, redirect,
     url_for, g, abort, session)
 from flask.views import View
 
+from bson.objectid import ObjectId
+
 from plytos.decorators import login_required
 from plytos.models.person import Person
+from plytos.views.get import (person_with_username, 
+    resume_with_id, comments_with_id)
 
-# Fields that hold multiple values in a single slot
-MULTIPLE = ["highlights", "skills", "courses", 
-    "pubs", "interests", "languages"]
+def get_pairs(edit, original):
+    edit_ids     = [item._id for item in edit]
+    original_ids = [item._id for item in original]
+    new_fields   = list(range(len(edit_ids)))
+
+    pairs = []
+    for item in range(len(original_ids)):
+        original_id = original_ids[item]
+        if original_id in edit_ids:
+            copy_index = edit_ids.index(original_id)
+            pairs.append([item, copy_index])
+            new_fields.remove(copy_index)
+        else: pairs.append([item, None])
+
+    for field in new_fields:
+        pairs.append([None, field])
+    return pairs
+
+def save_edit(request, _id, is_new=True):
+    dbUser = person_with_username(g.user.username)
+    values = request.form["location"].split("_")
+    form_type = values[0]
+    try:
+        which_orig_form = int(values[1])
+    except: which_orig_form = None
+    try:
+        which_edit_form = int(values[2])
+    except: which_edit_form = None
+
+    # case where only accepting a particular field
+    if request.form["submit"] == "accept":
+        which_field = values[3]
+        dbUser.internal_accept(_id, form_type, which_orig_form, 
+            which_edit_form, which_field, is_new)
+
+    # case where accepting the whole revision
+    else: dbUser.overall_accept(_id, form_type, which_orig_form,
+        which_edit_form, is_new)
+
+def populate_comments(resume):
+    forms = ['work', 'volunteer', 'education', 'awards', 'skills', 
+        'publications', 'interests', 'languages']
+
+    comments = {}
+    for form in forms:
+        comments[form] = [comments_with_id(comment, form) for
+            comment in resume[form].comments]
+    return comments
+
+def review_view(_id, forms):
+    dbUser = person_with_username(g.user.username)
+    current_edit = resume_with_id(_id)
+    working_resume = resume_with_id(current_edit.parent_resume)
+    comments = populate_comments(current_edit)
+
+    context = {}
+    for field in forms:
+        context[field] = get_pairs(current_edit[field].items, 
+            working_resume[field].items)
+
+    return render_template('resumes/review.html',
+        edit=current_edit, orig=working_resume, forms=forms, 
+        comments=comments, **context)
 
 class ReviewView(View):
     #Also need a decorator to verify this is the owner of resume
     decorators = [login_required]
 
-    def get(self):
-        session['slug'] = None
-        dbUser = Person.objects.get_or_404(
-            username=g.user.username)
-        sorted_edits = dbUser.get_sorted_edits()
-        return render_template('resumes/list_review.html',
-            resumes=sorted_edits)
+    def get(self, _id):
+        forms = ['work', 'volunteer', 'education', 'awards', 'skills', 
+            'publications', 'interests', 'languages']
+        return review_view(_id, forms)
 
-    def post(self):
-        slug = list(request.form.keys())[0]
-        return redirect(url_for('resume_app.review_single',
-            slug=slug))
+    def post(self, _id):
+        save_edit(request, _id)
+        return redirect(url_for('resume_app.review', slug=str(_id)))
 
-    def dispatch_request(self):
+    def dispatch_request(self, slug):
+        _id = ObjectId(slug)
+
         if request.method.lower() == 'get':
-            return self.get()
+            return self.get(_id)
         if request.method.lower() == 'post':
-            return self.post()
+            return self.post(_id)
         return "Improper method used: {}".format(request.method)
 
-class OneReviewView(View):
+class PublishView(View):
     #Also need a decorator to verify this is the owner of resume
     decorators = [login_required]
 
-    def get(self, slug):
-        dbUser = Person.objects.get_or_404(
-            username=g.user.username)
-        if 'Publish ' in slug:
-            dbUser.resume_publish(slug.replace('Publish ',''))
-            return redirect(url_for('resume_app.review'))
-
-        works = dbUser.working_resumes
-        edits = dbUser.current_edits
-
-        working_resume = works[dbUser.which_contain_doc(works, slug)]
-        current_edit = edits[dbUser.which_contain_doc(edits, slug)]
-
-        lists = ['experience', 'volunteer', 'education', 'awards']
-        edit_fields = ['skills', 'pubs', 'interests', 'languages']
-        return render_template('resumes/review.html',
-            edit=current_edit, orig=working_resume, 
-            fields=edit_fields, lists=lists)
-
-    def post(self, slug):
-        dbUser = Person.objects.get_or_404(
-            username=g.user.username)
-        if 'submit' in request.form:
-            if request.form['submit'] == 'accept':
-                field = request.form['field']
-                edit_value = request.form['edit']
-                dbUser.resume_accept(slug, field, edit_value)
-            elif request.form['submit'] == 'accept_list':
-                for field in request.form.keys():
-                    separated = field.split("/")
-
-                    if "edit" in separated and len(request.form[field].strip()) != 0:
-                        form_type = separated[1]
-                        which_form = int(separated[2])
-                        field_name = separated[3]
-
-                        edit_val = request.form[field]
-                        
-                        if field_name != "_id" and edit_val != "None":
-                            if field_name in MULTIPLE:
-                                edit_val = edit_val.split()
-
-                            dbUser.internal_accept(slug, form_type, 
-                                which_form, field_name, edit_val)
-            return redirect(url_for('resume_app.review'))
+    def get(self, _id):
+        dbUser = person_with_username(g.user.username)
+        dbUser.resume_publish(_id)
+        return redirect(url_for('resume_app.list', view='edit'))
 
     def dispatch_request(self, slug):
-        session['slug'] = slug
+        _id = ObjectId(slug)
         if request.method.lower() == 'get':
-            return self.get(session['slug'])
-        if request.method.lower() == 'post':
-            return self.post(session['slug'])
+            return self.get(_id)
         return "Improper method used: {}".format(request.method)
-
-# both the below are pulled (implements git diff) from
-# https://en.wikibooks.org/wiki/Algorithm_Implementation/Strings/
-# Longest_common_subsequence
-def LCS(X, Y):
-    m = len(X)
-    n = len(Y)
-    # An (m+1) times (n+1) matrix
-    C = [[0] * (n + 1) for _ in range(m + 1)]
-    for i in range(1, m+1):
-        for j in range(1, n+1):
-            if X[i-1] == Y[j-1]: 
-                C[i][j] = C[i-1][j-1] + 1
-            else:
-                C[i][j] = max(C[i][j-1], C[i-1][j])
-    return C
-
-def get_diff(C, X, Y, i, j):
-    if i > 0 and j > 0 and X[i-1] == Y[j-1]:
-        return get_diff(C, X, Y, i-1, j-1) + "  " + X[i-1]
-    else:
-        if j > 0 and (i == 0 or C[i][j-1] >= C[i-1][j]):
-            return get_diff(C, X, Y, i, j-1) +  "+ " + Y[j-1]
-        elif i > 0 and (j == 0 or C[i][j-1] < C[i-1][j]):
-            return get_diff(C, X, Y, i-1, j) + "- " + X[i-1]
 
 def setup_review(resume_app):
     # used for accepting/reviewing edits that have been proposed
-    resume_app.add_url_rule('/review', view_func=ReviewView.as_view('review'), 
-        methods=['GET', 'POST'])
     resume_app.add_url_rule('/review/<slug>', 
-        view_func=OneReviewView.as_view('review_single'), methods=['GET', 'POST'])
+        view_func=ReviewView.as_view('review'), methods=['GET', 'POST'])
+    resume_app.add_url_rule('/publish/<slug>', 
+        view_func=PublishView.as_view('publish'), methods=['GET'])

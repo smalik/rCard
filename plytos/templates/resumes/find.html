@@ -6,11 +6,13 @@
 
 {% block body %}
 
-<form class="form" method="post">
-  Resume ID: <br>
-  <input type="text" name="resume_id"><br>
-  <input type="submit" name="finish"><br>
-</form>
+<div class="col-md-12">
+	<form class="form" method="post">
+	  <input class="col-md-6 col-md-offset" name="resume_id" 
+	  	placeholder="Enter edit resume ID">
+	  <input class="col-md-3 col-md-offset-1 btn btn-primary" type="submit" name="finish">
+	</form>
+</div>
 
 {% include 'footer.html' %}
 {% endblock %}

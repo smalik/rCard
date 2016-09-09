@@ -14,7 +14,7 @@ __email__ = "ypatel@princeton.edu"
 from datetime import datetime
 from plytos import db
 
-class JobDescription(db.Document):
+class Job(db.Document):
     """
     Job description Data model behaves as follows:
         1.  Company Name (required)
@@ -66,5 +66,5 @@ class JobDescription(db.Document):
             skills: {}
         """.format(self._id, self.companyName, self.title, self.isPaid, 
             self.minPay, self.maxPay, self.skills, self.description, 
-            self.quals, self.startDt, self.isRemote, self.benefits
+            self.quals, self.startDt, self.isRemote, self.benefits,
             self.skills)

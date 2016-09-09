@@ -1,11 +1,11 @@
 {% extends 'layouts/layout.html' %}
 {% block title %}Reset Password{% endblock %}
 {% block body %}
-  <form method="post" class="form form-reset" action="{{ url_for('auth_login.forgot', _external=True) }}">
+  <form method="post" class="form form-reset" action="{{ url_for('auth_app.forgot', _external=True) }}">
     <h3 class="form-heading">Forgot Password <i class="fa fa-home pull-right"></i></a></h3>
     {{ form.username(class_ = 'form-control first-input last-input', placeholder = form.username.label.text) }}
-    <p class="pull-left"><a href="{{ url_for('auth_login.login', _external=True) }}">Login</a></p>
-    <p class="pull-right"><a href="{{ url_for('auth_login.register', _external=True) }}">Register</a></p>
+    <p class="pull-left"><a href="{{ url_for('auth_app.home', _external=True) }}">Login</a></p>
+    <p class="pull-right"><a href="{{ url_for('auth_app.home', _external=True) }}">Register</a></p>
     <input type="submit" value="Submit" class="btn btn-lg btn-primary btn-block">
   </form>
   {% include 'footer.html' %}

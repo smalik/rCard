@@ -11,8 +11,12 @@ __maintainer__ = "Yash Patel"
 __email__ = "ypatel@princeton.edu"
 """
 
+from mongoengine.queryset import QuerySet
+
 from plytos import db
-from plytos.models.comments import CommentsPerSection, ToDosPerSection, Comment
+from plytos.models.personal import Personal
+from plytos.models.comments import CommentsPerSection
+from plytos.models.todo import ToDosPerSection
 
 class VolunteerItem(db.EmbeddedDocument):
     """
@@ -22,33 +26,39 @@ class VolunteerItem(db.EmbeddedDocument):
         3.  Date volunteering started
         4.  Date volunteering ended
         5.  URL of the volunteer organization/opportunity
-        6.  Impact description of experience
+        6.  Summary description of experience
         7.  List of highlights from volunteer experience
     """
 
     _id          = db.ObjectIdField(required=True)
 
-    org           = db.StringField(required=True)
-    title         = db.StringField()
-    startDt       = db.StringField()
-    endDt         = db.StringField()
-    url           = db.StringField()
-    impact        = db.StringField()
+    organization     = db.StringField(required=True)
+    position         = db.StringField()
+    startDate        = db.DateTimeField()
+    endDate          = db.DateTimeField()
+    website          = db.StringField()
+    summary          = db.StringField()
 
     highlights    = db.ListField(db.StringField())
+
+    # used to identify who is responsible for the item
+    parent_id     = db.ObjectIdField(required=True)
+    edit_ids      = db.ListField(db.ObjectIdField(required=True))
 
     def __str__(self):
         """ Returns a formatting string for printing volunteer instances """
         return """
-            org: {}
-            title: {}
-            startDt: {}
-            endDt: {}
-            url: {}
-            impact: {}
+            parent_id: {}
+            organization: {}
+            position: {}
+            startDate: {}
+            endDate: {}
+            website: {}
+            summary: {}
             highlights: {}
-        """.format(self.org, self.title, self.startDt, 
-            self.endDt, self.url, self.impact, self.highlights)
+        """.format(self.parent_id, self.organization, self.position, 
+            self.startDate, self.endDate, self.website, 
+            self.summary, self.highlights)
 
 class WorkItem(db.EmbeddedDocument):
     """
@@ -58,7 +68,7 @@ class WorkItem(db.EmbeddedDocument):
         3.  Date volunteering started
         4.  Date volunteering ended
         5.  URL of the volunteer organization/opportunity
-        6.  Impact description of experience
+        6.  Summary description of experience
         7.  List of highlights from volunteer experience
         8.  Skills gained as a result of work
     """
@@ -67,28 +77,29 @@ class WorkItem(db.EmbeddedDocument):
 
     company       = db.StringField(required=True)
     position      = db.StringField()
-    startDt       = db.DateTimeField()
-    endDt         = db.DateTimeField()
-    url           = db.StringField()
-    impact        = db.StringField()
+    startDate     = db.DateTimeField()
+    endDate       = db.DateTimeField()
+    website       = db.StringField()
+   # summary       = db.StringField()
 
     highlights    = db.ListField(db.StringField())
-    skills        = db.ListField(db.StringField())
+
+    # used to identify who is responsible for the item
+    parent_id     = db.ObjectIdField(required=True)
+    edit_ids      = db.ListField(db.ObjectIdField(required=True))
 
     def __str__(self):
         """ Returns a formatting string for printing work instances """
         return """
+                parent_id: {}
                 company: {}
-                startDt: {}
-                endDt: {}
+                startDate: {}
+                endDate: {}
                 position: {}
-                url: {}
-                impact: {}
+                website: {}
                 highlights: {}
-                skills: {}
-            """.format(self.company, self.startDt, self.endDt, 
-                self.position, self.url, self.impact, 
-                self.highlights, self.skills)
+            """.format(self.parent_id, self.company, self.startDate, 
+                self.endDate, self.position, self.website, self.highlights)
 
 class EducationItem(db.EmbeddedDocument):
     """
@@ -104,13 +115,18 @@ class EducationItem(db.EmbeddedDocument):
     
     _id          = db.ObjectIdField(required=True)
 
-    school       = db.StringField(required=True)
-    degree       = db.StringField()
-    major        = db.StringField()
-    startDt      = db.DateTimeField()
-    gradDt       = db.DateTimeField()
-    gpa          = db.FloatField()
-    courses      = db.ListField(db.StringField())
+    institution    = db.StringField(required=True)
+    studyType      = db.StringField()
+    area           = db.StringField()
+    startDate      = db.DateTimeField()
+    endDate        = db.DateTimeField()
+    gpa            = db.FloatField()
+
+    courses        = db.ListField(db.StringField())
+
+    # used to identify who is responsible for the item
+    parent_id     = db.ObjectIdField(required=True)
+    edit_ids      = db.ListField(db.ObjectIdField(required=True))
 
     def push_course(self, course):
         self.courses.append(course)
@@ -118,15 +134,16 @@ class EducationItem(db.EmbeddedDocument):
     def __str__(self):
         """ Returns a formatting string for printing education instances """
         return """
-                school: {}
-                degree: {}
-                major: {}
-                startDt: {}
-                gradDt: {}
+                parent_id: {}
+                institution: {}
+                studyType: {}
+                area: {}
+                startDate: {}
+                endDate: {}
                 gpa: {}
                 courses: {}
-            """.format(self.school, self.degree, self.major, 
-                self.startDt, self.gradDt, self.gpa, self.courses)
+            """.format(self.parent_id, self.institution, self.studyType, self.area, 
+                self.startDate, self.endDate, self.gpa, self.courses)
 
 class AwardItem(db.EmbeddedDocument):
     """
@@ -139,27 +156,129 @@ class AwardItem(db.EmbeddedDocument):
     """
     
     _id          = db.ObjectIdField(required=True)
-
+    
     title        = db.StringField(required=True)
     date         = db.DateTimeField()
-    issuer       = db.StringField()
-    desc         = db.StringField()
-    url          = db.StringField()
+    awarder      = db.StringField()
+    summary      = db.StringField()
+
+    # used to identify who is responsible for the item
+    parent_id     = db.ObjectIdField(required=True)
+    edit_ids      = db.ListField(db.ObjectIdField(required=True))
 
     def __str__(self):
         """ Returns a formatting string for printing award instances """
         return """
+                parent_id: {}
                 title: {}
                 date: {}
                 issuer: {}
                 desc: {}
-                url: {}
-            """.format(self.title, self.date, self.issuer, 
-                self.desc, self.url)
+            """.format(self.parent_id, self.title, self.date, 
+                self.awarder, self.summary)
 
-class Experience(db.EmbeddedDocument):
+class SkillItem(db.EmbeddedDocument):
     """
-    Experience Data model behaves as follows:
+    SkillItem Data model behaves as follows:
+        1.  Name of the skill possessed
+        2.  Level of performance of this skill (expert/intermediate...)
+    """
+
+    _id          = db.ObjectIdField(required=True)
+
+    name         = db.StringField(required=True)
+    level        = db.StringField()
+    
+    # used to identify who is responsible for the item
+    parent_id     = db.ObjectIdField(required=True)
+    edit_ids      = db.ListField(db.ObjectIdField(required=True))
+
+    def __str__(self):
+        """ Returns a formatting string for printing skill instances """
+        return """
+            name: {}
+            level: {}
+        """.format(self.name, self.level)
+
+class PublicationItem(db.EmbeddedDocument):
+    """
+    PublicationItem Data model behaves as follows:
+        1.  Name of the publication
+        2.  Who published the work (i.e. which journal)
+        3.  When the work was published
+        4.  The URL or website where it can be accessed
+        5.  A summary/abstract of the paper
+    """
+
+    _id          = db.ObjectIdField(required=True)
+
+    name            = db.StringField(required=True)
+    publisher       = db.StringField()
+    releaseDate    = db.DateTimeField()
+    website         = db.StringField()
+    summary         = db.StringField()
+
+    # used to identify who is responsible for the item
+    parent_id     = db.ObjectIdField(required=True)
+    edit_ids      = db.ListField(db.ObjectIdField(required=True))
+
+    def __str__(self):
+        """ Returns a formatting string for printing publication instances """
+        return """
+            name: {}
+            publisher: {}
+            releaseDate: {}
+            website: {}
+            summary: {}
+        """.format(self.name, self.publisher, 
+            self.releaseDate, self.website, self.summary)
+
+class InterestItem(db.EmbeddedDocument):
+    """
+    InterestItem Data model behaves as follows:
+        1.  Name of the interest
+    """
+
+    _id          = db.ObjectIdField(required=True)
+
+    name         = db.StringField(required=True)
+
+    # used to identify who is responsible for the item
+    parent_id     = db.ObjectIdField(required=True)
+    edit_ids      = db.ListField(db.ObjectIdField(required=True))
+
+    def __str__(self):
+        """ Returns a formatting string for printing interest instances """
+        return """
+            name: {}
+        """.format(self.name)
+
+class LanguageItem(db.EmbeddedDocument):
+    """
+    LanguageItem Data model behaves as follows:
+        1.  Which language you have fluency in
+        2.  The level of fluency of said language
+    """
+
+    _id          = db.ObjectIdField(required=True)
+
+    language     = db.StringField(required=True)
+    fluency      = db.StringField(required=True)
+
+    # used to identify who is responsible for the item
+    parent_id     = db.ObjectIdField(required=True)
+    edit_ids      = db.ListField(db.ObjectIdField(required=True))
+
+    def __str__(self):
+        """ Returns a formatting string for printing language instances """
+        return """
+            language: {}
+            fluency: {}
+        """.format(self.language, self.fluency)
+
+class Work(db.EmbeddedDocument):
+    """
+    Work Data model behaves as follows:
         1.  List of work experiences
         2.  Comments others have about this list of experiences
     """
@@ -167,14 +286,15 @@ class Experience(db.EmbeddedDocument):
     _id          = db.ObjectIdField(required=True)
 
     items       = db.ListField(db.EmbeddedDocumentField('WorkItem'))
-    comments    = db.ListField(db.EmbeddedDocumentField('Comment'))
+    comments    = db.ListField(db.ObjectIdField())
 
     def __str__(self):
         """ Returns a formatting string for printing experience lists """
         return """
+                _id: {}
                 items: {}
                 comments: {}
-            """.format(self.items, self.comments)
+            """.format(self._id, self.items, self.comments)
 
 class Volunteer(db.EmbeddedDocument):
     """
@@ -186,7 +306,7 @@ class Volunteer(db.EmbeddedDocument):
     _id          = db.ObjectIdField(required=True)
 
     items       = db.ListField(db.EmbeddedDocumentField('VolunteerItem'))
-    comments    = db.ListField(db.EmbeddedDocumentField('Comment'))
+    comments    = db.ListField(db.ObjectIdField())
 
     def __str__(self):
         """ Returns a formatting string for printing volunteer lists """
@@ -205,7 +325,7 @@ class Education(db.EmbeddedDocument):
     _id          = db.ObjectIdField(required=True)
 
     items       = db.ListField(db.EmbeddedDocumentField('EducationItem'))
-    comments    = db.ListField(db.EmbeddedDocumentField('Comment'))
+    comments    = db.ListField(db.ObjectIdField())
 
     def __str__(self):
         """ Returns a formatting string for printing education lists """
@@ -224,7 +344,7 @@ class Awards(db.EmbeddedDocument):
     _id          = db.ObjectIdField(required=True)
 
     items       = db.ListField(db.EmbeddedDocumentField('AwardItem'))
-    comments    = db.ListField(db.EmbeddedDocumentField('Comment'))
+    comments    = db.ListField(db.ObjectIdField())
 
     def __str__(self):
         """ Returns a formatting string for printing awards lists """
@@ -241,9 +361,9 @@ class Publications(db.EmbeddedDocument):
     """
 
     _id          = db.ObjectIdField(required=True)
-
-    items       = db.ListField(db.StringField(), required=True)
-    comments    = db.ListField(db.IntField())
+    
+    items       = db.ListField(db.EmbeddedDocumentField('PublicationItem'))
+    comments    = db.ListField(db.ObjectIdField())
 
     def __str__(self):
         """ Returns a formatting string for printing publication lists """
@@ -260,9 +380,9 @@ class Interests(db.EmbeddedDocument):
     """
 
     _id          = db.ObjectIdField(required=True)
-
-    items       = db.ListField(db.StringField(), required=True)
-    comments    = db.ListField(db.IntField())
+    
+    items       = db.ListField(db.EmbeddedDocumentField('InterestItem'))
+    comments    = db.ListField(db.ObjectIdField())
 
     def __str__(self):
         """ Returns a formatting string for printing interest lists """
@@ -279,9 +399,9 @@ class Languages(db.EmbeddedDocument):
     """
 
     _id          = db.ObjectIdField(required=True)
-
-    items       = db.ListField(db.StringField(), required=True)
-    comments    = db.ListField(db.IntField())
+    
+    items       = db.ListField(db.EmbeddedDocumentField('LanguageItem'))
+    comments    = db.ListField(db.ObjectIdField())
 
     def __str__(self):
         """ Returns a formatting string for printing language lists """
@@ -299,8 +419,8 @@ class Skills(db.EmbeddedDocument):
 
     _id          = db.ObjectIdField(required=True)    
     
-    items       = db.ListField(db.StringField(), required=True)
-    comments    = db.ListField(db.IntField())
+    items       = db.ListField(db.EmbeddedDocumentField('SkillItem'))
+    comments    = db.ListField(db.ObjectIdField())
 
     def __str__(self):
         """ Returns a formatting string for printing skills lists """
@@ -333,53 +453,60 @@ class Resume(db.Document):
 
     meta = {'collection': 'resumes'}
 
-    # _id          = db.ObjectIdField(required=True)    
-    parent_user   = db.StringField(required=True)
-    experience    = db.EmbeddedDocumentField(Experience, required=True)
+    _id          = db.ObjectIdField(required=True)    
+
+    # ID of resume from which branched; None if original resume
+    parent_resume = db.ObjectIdField()
+    parent_user   = db.ObjectIdField()
+
+    personal      = db.EmbeddedDocumentField(Personal, required=True)
+    work          = db.EmbeddedDocumentField(Work, required=True)
     volunteer     = db.EmbeddedDocumentField(Volunteer, required=True)
     education     = db.EmbeddedDocumentField(Education, required=True)
     awards        = db.EmbeddedDocumentField(Awards, required=True)
     
-    skills        = db.EmbeddedDocumentField(Skills)
-    pubs          = db.EmbeddedDocumentField(Publications)
-    interests     = db.EmbeddedDocumentField(Interests)
-    languages     = db.EmbeddedDocumentField(Languages)
+    skills        = db.EmbeddedDocumentField(Skills, required=True)
+    publications  = db.EmbeddedDocumentField(Publications, required=True)
+    interests     = db.EmbeddedDocumentField(Interests, required=True)
+    languages     = db.EmbeddedDocumentField(Languages, required=True)
 
     comments_per_section = db.EmbeddedDocumentField(CommentsPerSection)
     todos_per_section    = db.EmbeddedDocumentField(ToDosPerSection)
 
-    comments      = db.ListField(db.EmbeddedDocumentField('Comment'))
+    complete_todos       = db.ListField(db.ObjectIdField())
+    incomplete_todos     = db.ListField(db.ObjectIdField())
 
-    # which edit the current resume is -- only applicable for "edit" docs
-    # None if referring to original
-    version     = db.IntField()
-    
-    # number of edits that resume has -- only applicable for original
-    # None if referring to a derived doc (i.e. an edit)
-    num_edits    = db.IntField()
-    editDt      = db.ListField(db.DateTimeField())
-
-    slug        = db.StringField(required=True)
+    comments       = db.ListField(db.ObjectIdField())
+    edit_date      = db.ListField(db.DateTimeField())
 
     def __str__(self):
         """ Returns a formatting string for printing resumes """
         return """
-            experience: {}
+            _id: {}
+            parent_resume: {}
+            parent_user: {}
+
+            personal: {}
+            work: {}
             volunteer: {}
             education: {}
             skills: {}
             awards: {}
-            pubs: {}
+            publications: {}
             interests: {}
             languages: {}
+
             comments_per_section: {}
             todos_per_section: {}
-            version: {}
-            num_edits: {}
-            editDt: {}
-            slug: {}
-        """.format(self.experience, self.volunteer, self.education, 
-            self.skills, self.awards, self.pubs, self.interests, 
+
+            complete_todos: {}
+            incomplete_todos: {}
+
+            comments: {}
+            edit_date: {}
+        """.format(self._id, self.parent_resume, self.parent_user, 
+            self.personal, self.work, self.volunteer, self.education, 
+            self.skills, self.awards, self.publications, self.interests, 
             self.languages, self.comments_per_section, 
-            self.todos_per_section, self.version, self.num_edits, 
-            self.editDt, self.slug)
+            self.todos_per_section, self.complete_todos,
+            self.incomplete_todos, self.comments, self.edit_date)

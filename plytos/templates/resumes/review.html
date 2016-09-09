@@ -1,5 +1,5 @@
 {% extends 'layouts/layout.html' %}
-{% from "util.html" import render_form %}
+{% from "util.html" import review_pairs %}
 
 {% from 'util.html' import link_tag, script_tag %}
 
@@ -11,61 +11,17 @@
 
 
 {% block body %}
-  <h2>
-    Review Resume
-  </h2>
-
-  {% for form in lists %}
-    {% for i in range(orig[form].items|length) %}
-      {% set original_item = orig[form].items[i] %}
-      {% set edit_item = edit[form].items[i] %}
-
-      <form action="?{{ request.query_string }}" class="form" method="post">
-      Original: 
-        {% for field in original_item %}
-          {{ field }}: 
-          <input color="red" name="original/{{ form }}/{{ i }}/{{ field }}" 
-            value="{{ original_item[field] }}"> </input> <br>
-        {% endfor %}
-      <br>
-      Edit: 
-        {% for field in original_item %}
-          {{ field }}: {{ form }}
-          <input color="green" name="edit/{{ form }}/{{ i }}/{{ field }}" 
-            value="{{ edit_item[field] }}"></input> <br>
-        {% endfor %}
-
-        <div class="actions">
-          <input type="submit" class="btn btn-success" value="accept_list" name="submit">
-          <input type="submit" class="btn btn-danger" value="reject" name="submit">
-        </div>
-      </form>
-      <hr>
-      
-    {% endfor %}
-    <hr style="height:5px;border:none;color:#333;background-color:#333;">
-  {% endfor %}
-
-<hr style="height:5px;border:none;color:#333;background-color:#333;">
-  {% for field in fields %}
-  <form action="?{{ request.query_string }}" class="form" method="post">
-    <input name="field" value="{{ field }}"> </input>
-    <br>
-
-    Original: <input color="red" name="original" value="{{ orig[field].items }}"> </input>
-    <br>
-
-    Edit: <input color="green" name="edit" value="{{ edit[field].items }}"></input>
-    <br>
-
-    <div class="actions">
-      <input type="submit" class="btn btn-success" value="accept" name="submit">
-      <input type="submit" class="btn btn-danger" value="reject" name="submit">
-    </div>
-  </form>
-  <hr>
-  {% endfor %}
+  {{ review_pairs(orig, edit, comments, work, "work") }}
+  {{ review_pairs(orig, edit, comments, volunteer, "volunteer") }}
+  {{ review_pairs(orig, edit, comments, education, "education") }}
+  {{ review_pairs(orig, edit, comments, awards, "awards") }}
+  {{ review_pairs(orig, edit, comments, skills, "skills") }}
+  {{ review_pairs(orig, edit, comments, publications, "publications") }}
+  {{ review_pairs(orig, edit, comments, interests, "interests") }}
+  {{ review_pairs(orig, edit, comments, languages, "languages") }}
   
+  <a href="{{ url_for('resume_app.list', view='review', _external=True) }}" 
+      class="btn btn-default col-md-6 col-md-offset-3">Return</a>
   {% include 'footer.html' %}
 
 {% endblock %}

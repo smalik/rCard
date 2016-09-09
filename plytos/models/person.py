@@ -13,137 +13,12 @@ __email__ = "ypatel@princeton.edu"
 
 from bson.objectid import ObjectId
 from collections import OrderedDict
+from copy import deepcopy
 
 from plytos import db
-from plytos.models.comments import Comment
+from plytos.models.comments import Comment, CommentsPerSection
+from plytos.models.personal import Personal
 import plytos.models.resume as resume_model
-
-class Location(db.EmbeddedDocument):
-    """
-    ToDosPerSection Data model behaves as follows:
-        1.  First line of the address (required)
-        2.  Second line of address
-        3.  Zip code of location
-        4.  City of location
-        5.  Country of location
-        6.  Region of location
-    """
-
-    _id          = db.ObjectIdField(required=True) 
-
-    address1    = db.StringField(required=True)
-    address2    = db.StringField()
-    zipcode     = db.StringField()
-    city        = db.StringField()
-    country     = db.StringField()
-    region      = db.StringField()
-
-    def __str__(self):
-        """ Returns a formatting string for printing locations """
-        return """
-                address1: {}
-                address2: {}
-                zipcode: {}
-                city: {}
-                country: {}
-                region: {}
-                comments: {}
-            """.format(self.address1, self.address2, self.zipcode, 
-                self.city, self.country, self.region, self.comments)
-
-class SocialMediaItem(db.EmbeddedDocument):
-    """
-    SocialMediaItem Data model behaves as follows:
-        1.  Name of the social media network (required)
-        2.  Username on the network
-        3.  URL of personal profile page (required)
-    """
-
-    _id          = db.ObjectIdField(required=True)
-
-    network       = db.StringField(required=True)
-    uname         = db.StringField()
-    url           = db.StringField()
-
-    def __str__(self):
-        """ Returns a formatting string for printing social media """
-        return """
-                network: {}
-                uname: {}
-                url: {}
-            """.format(self.network, self.uname, self.url)
-
-class SocialProfile(db.EmbeddedDocument):
-    """
-    SocialProfile Data model behaves as follows:
-        1.  List of all social media pages (required)
-        2.  List of comments associated to profile
-    """
-
-    _id          = db.ObjectIdField(required=True)
-
-    items       = db.ListField(db.EmbeddedDocumentField('SocialMediaItem'),
-        required=True)
-    comments    = db.ListField(db.IntField())
-
-    def __str__(self):
-        """ Returns a formatting string for printing profiles """
-        return """
-                items: {}
-                comments: {}
-            """.format(self.items, self.comments)
-
-class Personal(db.EmbeddedDocument):
-    """
-    Personal Data model behaves as follows:
-        1.  Username to whom the personal info belonds 
-        2.  Location associated with the user
-        3.  Social profiles of the user
-        4.  First name (required)
-        5.  Last name
-        6.  Middle name
-        7.  One-line description of person
-        8.  User picture/snapshot
-        9.  Phone number
-        10. Homepage/URL of the user (i.e. profile)
-        11. Text description self (extension of headline)
-        12. List of comments associated to personal info
-    """
-
-    _id          = db.ObjectIdField(required=True)    
-    parent      = db.ReferenceField('Person')
-
-    location    = db.EmbeddedDocumentField(Location)
-    profiles    = db.EmbeddedDocumentField(SocialProfile)
-
-    firstName   = db.StringField(required=True)
-    lastName    = db.StringField()
-    middleName  = db.StringField()
-    headline    = db.StringField()
-    picture     = db.StringField()
-    phone       = db.StringField()
-    url         = db.StringField()
-    summary     = db.StringField()
-
-    comments    = db.ListField(db.IntField())
-
-    def __str__(self):
-        """ Returns a formatting string for printing personal attributes """
-        return """
-            location: {}
-            profiles: {}
-            firstName: {}
-            lastName: {}
-            middleName: {}
-            headline: {}
-            picture: {}
-            phone: {}
-            url: {}
-            summary: {}
-            comments: {}
-        """.format(self.location, self.profiles, self.firstName, 
-            self.lastName, self.middleName, self.headline, self.picture, 
-            self.phone, self.url, self.summary, self.comments)
 
 class Person(db.Document):
     """
@@ -167,17 +42,30 @@ class Person(db.Document):
     active        = db.BooleanField()
     email         = db.StringField(required=True) 
     username      = db.StringField(required=True) 
-    password_hash = db.BinaryField(required=True)
+    password_hash = db.BinaryField()
 
-    info          = db.StringField(required=True) # db.EmbeddedDocumentField(Personal)
+    info          = db.StringField()
+    personal      = db.EmbeddedDocumentField('Personal')
 
-    final_resumes      = db.ListField(db.ReferenceField(resume_model.Resume))
-    working_resumes    = db.ListField(db.ReferenceField(resume_model.Resume))\
-    current_edits     = db.ListField(db.ReferenceField(resume_model.Resume))
-    editing_resumes   = db.ListField(db.ReferenceField(resume_model.Resume))
+    comments          = db.ListField(db.ObjectIdField())
+    requests          = db.ListField(db.ObjectIdField())
+    friends           = db.ListField(db.ObjectIdField())
 
-    comments      = db.ListField(db.IntField())
-    skills        = db.EmbeddedDocumentField('Skills')
+    # list of all resumes that have been published
+    final_resumes     = db.ListField(db.ObjectIdField())
+
+    # list of resumes that are currently in the works
+    working_resumes   = db.ListField(db.ObjectIdField())
+
+    # list of resumes that have been submitted back (pending review)
+    current_edits     = db.ListField(db.ObjectIdField())
+
+    # list of resumes that are being edited
+    editing_resumes   = db.ListField(db.ObjectIdField())
+
+    # gamification attributes (used for exchange/monetization)
+    coins         = db.IntField()
+    points        = db.IntField()
 
     # Get total number of skills
     def getSkillsCount(self):
@@ -189,6 +77,8 @@ class Person(db.Document):
 
     def reset_password(self, password):
         self.password_hash = password
+
+        self.switch_db("users")
         self.save()
 
     def is_active(self):
@@ -206,6 +96,7 @@ class Person(db.Document):
     def __str__(self):
         """ Returns a formatting string for printing a user """
         return """
+                personal: {}
                 active: {}
                 email: {}
                 username: {}
@@ -216,111 +107,189 @@ class Person(db.Document):
                 current_edits: {}
                 editing_resumes: {}
                 comments: {}
-                skills: {}
-            """.format(self.active, self.email,  self.username, 
+            """.format(self.personal, self.active, self.email,  self.username, 
                 self.password_hash, self.info, self.final_resumes, 
                 self.working_resumes, self.current_edits, self.editing_resumes, 
-                self.comments, self.skills)
+                self.comments)
 
-    ################## Editor Version Control Funcs ##########################
-    # used to determine (for final_resumes, working_resumes, and
-    # editing_resumes) if the resume is contained
-    def which_contain_doc(self, which, slug):
-        for i in range(len(which)):
-            if which[i].slug == slug:
-                return i
-        return None
-
-    # deletes an instance of an object with "slug" and in the particular
-    # array (typically working_resumes etc...) that is specified
-    def del_existing(self, which, slug):
-        which = [item for item in which if item.slug != slug]
-        return which
-
+    ################## Editor Version Control Funcs #########################
     def resume_fork(self, resume):
-        resume.num_edits += 1
-        resume.save()
+        from plytos.views.get import resume_with_id
+        forms = ['work', 'volunteer', 'education', 'awards', 'skills', 
+            'publications', 'interests', 'languages']
 
-        self.editing_resumes = self.del_existing(self.editing_resumes, 
-            resume.slug)
-        edit_version = resume_model.Resume()
+        for edit_id in self.editing_resumes:
+            if resume_with_id(edit_id).parent_resume == resume._id:
+                return
 
         # makes an editing copy of the resume and saves it
+        edit_version = resume_model.Resume()
         for field in resume:
-            if field != 'id':
-                edit_version[field] = resume[field]
+            edit_version[field] = resume[field]
+            try:
+                edit_version[field].comments = []
+            except: pass
 
-        edit_version.num_edits = None
-        edit_version.version = resume.num_edits
+        comments_per_section = CommentsPerSection()
+        for form in forms:
+            comments_per_section[form] = 0
+        comments_per_section._id    = ObjectId()
+        edit_version.comments_per_section = comments_per_section
+
+        edit_version._id = ObjectId()
+        edit_version.parent_resume = resume._id
+        edit_version.switch_db("resumes")
         edit_version.save()
-        
+
         # adds this editing copy to the list of resumes 
         # being edited by the user at hand
-        self.editing_resumes.append(edit_version)
-        self.save()
+        self.editing_resumes.append(edit_version._id)
 
-    def resume_save(self, resume):
-        self.editing_resumes = self.del_existing(self.editing_resumes, 
-            resume.slug)
-        self.editing_resumes.append(resume)
+        self.switch_db("users")
         self.save()
 
     def resume_submit(self, resume):
-        parent = Person.objects.get_or_404(username=resume.parent_user)
-        parent.current_edits.append(resume)
+        from plytos.views.get import person_with_id, resume_with_id
+        forms = ['work', 'volunteer', 'education', 'awards', 'skills', 
+            'publications', 'interests', 'languages']
+
+        # updates the analytics on comments
+        working_resume = resume_with_id(resume.parent_resume)
+        for form in forms:
+            working_resume.comments_per_section[form] += \
+                len(resume[form].comments)
+        working_resume.switch_db("resumes")
+        working_resume.save()
+
+        parent = person_with_id(resume.parent_user)
+        parent.current_edits.append(resume._id)
+        parent.switch_db("users")
         parent.save()
+
+        self.editing_resumes.remove(resume._id)
+        self.switch_db("users")
+        self.save()
 
     ################## Owner Version Control Funcs #############################
     def get_sorted_edits(self):
+        from plytos.views.get import resume_with_id
         sorted_edits = OrderedDict()
         for resume in self.current_edits:
-            try:
-                if resume.slug not in sorted_edits:
-                    sorted_edits[resume.slug] = []
-                sorted_edits[resume.slug].append(resume)
-            except:
-                pass
+            parent_id =  resume_with_id(resume).parent_resume
+            if parent_id not in sorted_edits:
+                sorted_edits[parent_id] = []
+            sorted_edits[parent_id].append(str(resume))
         return sorted_edits
 
-    def resume_accept(self, slug, field, edit_value):
-        field_class_lookup = {
-            'skills': resume_model.Skills,
-            'pubs': resume_model.Publications,
-            'interests': resume_model.Interests,
-            'languages': resume_model.Languages,
+    def overall_accept(self, _id, form_type, which_orig_form, 
+        which_edit_form, is_new):
+
+        from plytos.views.get import resume_with_id
+        obj_lookup = {
+            'work'          : resume_model.WorkItem,
+            'volunteer'     : resume_model.VolunteerItem,
+            'education'     : resume_model.EducationItem,
+            'awards'        : resume_model.AwardItem,
+            'skills'        : resume_model.SkillItem,
+            'publications'  : resume_model.PublicationItem,
+            'interests'     : resume_model.InterestItem,
+            'languages'     : resume_model.LanguageItem,
         }
 
-        working_index = self.which_contain_doc(self.working_resumes, slug)
-        db_obj = field_class_lookup[field]()
+        current_edit   = resume_with_id(_id)
+        working_resume = resume_with_id(current_edit.parent_resume)
 
-        db_obj._id = ObjectId()
-        db_obj.items = edit_value.split(',')
-        db_obj.comments = []
+        # case where the original form was directly edited -- no deletes
+        if which_orig_form is not None and which_edit_form is not None:
+            transfer_form  = current_edit[form_type].items[which_edit_form]
+            for field in transfer_form:
+                working_resume[form_type].items[which_orig_form][field] \
+                    = transfer_form[field]
 
-        self.working_resumes[working_index][field] = db_obj
-        self.working_resumes[working_index].save()
+        # case where a new item was added
+        elif which_orig_form is None:
+            new_obj     = obj_lookup[form_type]()
+            new_obj._id        = ObjectId()
+            new_obj.parent_id  = ObjectId(_id)
+            new_obj.edit_ids   = []
 
-    def internal_accept(self, slug, form_type, which_form, field, edit):
-        field_class_lookup = {
-            'experience': resume_model.WorkItem,
-            'volunteer': resume_model.VolunteerItem,
-            'education': resume_model.EducationItem,
-            'awards': resume_model.AwardItem
-        } 
+            transfer_form  = current_edit[form_type].items[which_edit_form]
+            for field in transfer_form:
+                new_obj[field] = transfer_form[field]
+            working_resume[form_type].items.append(new_obj)
 
-        working_index = self.which_contain_doc(self.working_resumes, slug)
-        self.working_resumes[working_index][form_type].items[which_form][field] = edit
-        self.working_resumes[working_index].save()
+        # case where an original item was deleted was added
+        elif which_edit_form is None:
+            working_resume[form_type].items.pop(which_orig_form)
 
-    def resume_publish(self, slug):
+        if which_edit_form is not None and is_new:
+            working_resume[form_type].items[which_edit_form].edit_ids.append(_id)
+
+        working_resume.switch_db("resumes")
+        working_resume.save()
+
+    def internal_accept(self, _id, form_type, which_orig_form, 
+        which_edit_form, field, is_new):
+
+        from plytos.views.get import resume_with_id
+        obj_lookup = {
+            'work'          : resume_model.WorkItem,
+            'volunteer'     : resume_model.VolunteerItem,
+            'education'     : resume_model.EducationItem,
+            'awards'        : resume_model.AwardItem,
+            'skills'        : resume_model.SkillItem,
+            'publications'  : resume_model.PublicationItem,
+            'interests'     : resume_model.InterestItem,
+            'languages'     : resume_model.LanguageItem,
+        }
+
+        current_edit   = resume_with_id(_id)
+        working_resume = resume_with_id(current_edit.parent_resume) 
+
+        # case where the original form was directly edited -- no deletes
+        if which_orig_form is not None and which_edit_form is not None:
+            edit = current_edit[form_type].items[which_edit_form][field]
+            working_resume[form_type].items[which_orig_form][field] = edit
+
+        # case where a new item was added
+        elif which_orig_form is None:
+            new_obj = obj_lookup[form_type]()
+            new_obj._id = current_edit[form_type].items[which_edit_form]._id
+            new_obj.parent_id  = ObjectId(_id)
+            new_obj.edit_ids   = []
+
+            new_obj[field] = current_edit[form_type].items[which_edit_form][field]
+            working_resume[form_type].items.append(new_obj)
+
+        # case where an original item was deleted was added
+        elif which_edit_form is None:
+            working_resume[form_type].items[which_orig_form][field] = None
+
+        if which_edit_form is not None and is_new:
+            working_resume[form_type].items[which_edit_form].edit_ids.append(_id)
+        working_resume.switch_db("resumes")
+        working_resume.save()
+
+    def resume_publish(self, _id):
         # finds the working resume and sees if there is already a finalized
         # version corresponding to it -- deletes if exists
-        working_resume = self.which_contain_doc(self.working_resumes, slug)
-        
-        self.del_existing(self.final_resumes, slug)
-        self.final_resumes.append(self.working_resumes[working_resume])
+        from plytos.views.personal import new_resume
+        from plytos.views.get import resume_with_id
 
-        # removes all edits corresponding to it
-        self.current_edits = [edit for edit in 
-            self.current_edits if slug != edit.slug]
+        to_publish = resume_with_id(_id)
+        finalized_resume = new_resume(ObjectId(), 
+            work=to_publish.work.items, 
+            volunteer=to_publish.volunteer.items, 
+            education=to_publish.education.items, 
+            awards=to_publish.awards.items, 
+            publications=to_publish.publications.items, 
+            interests=to_publish.interests.items, 
+            languages=to_publish.languages.items, 
+            skills=to_publish.skills.items)
+        finalized_resume.parent_resume = _id
+        finalized_resume.switch_db("resumes")
+        finalized_resume.save()
+        
+        self.final_resumes.append(finalized_resume._id)
+        self.switch_db("users")
         self.save()

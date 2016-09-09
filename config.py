@@ -19,3 +19,22 @@ DEBUG = True
 
 # Secret key used for WTForms -- prevents XSS
 SECRET_KEY = "s3cretk3yish3r3"
+
+####################### Login Configuration #########################
+GOOGLE_LOGIN_CLIENT_ID = "98849433232-irun3c89tjctk1higgr47nn83h4tbn51.apps.googleusercontent.com"
+GOOGLE_LOGIN_CLIENT_SECRET = "gHgZtilK3i2wChSYkKr4ipUE"
+
+OAUTH_CREDENTIALS = {
+    'facebook': {
+        'id': '1125818364132179',
+        'secret': 'e135fef3b3440213df503faa4bd62359'
+    },
+    'twitter': {
+        'id': 'iCcTHaxdjJo4yXIxNtBkkuOxC',
+        'secret': 'Vhc6Y4ZoMcsRG9rXHmBpziLvqgg2Z1QkimaT6QHRrvpFtKxkFO'
+    },
+    'google': {
+        'id': GOOGLE_LOGIN_CLIENT_ID,
+        'secret': GOOGLE_LOGIN_CLIENT_SECRET
+    }
+}

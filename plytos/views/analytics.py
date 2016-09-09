@@ -20,6 +20,7 @@ from flask.ext.login import login_required
 import json
 
 from plytos.models.person import Person
+from plytos.views.get import person_with_username
 
 analytics_app = Blueprint('analytics_app', __name__, 
     template_folder='templates', static_folder='static', 
@@ -29,7 +30,7 @@ class AnalyticsView(MethodView):
     decorators = [login_required]
 
     def get(self):
-        curr_user = Person.objects.get_or_404(email=g.user.email)
+        curr_user = person_with_username(g.user.username)
         return render_template('analytics/dash.html', user=curr_user)
 
 class SkillAPI(MethodView):

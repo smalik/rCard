@@ -17,6 +17,8 @@ from wtforms import (TextField, BooleanField, PasswordField,
     DateTimeField, FloatField, FormField, FieldList, validators)
 from flask.ext.mongoengine.wtf.orm import validators
 
+####################### Authentication Forms #################################
+
 class LoginForm(Form):
     """ Login form for authenticating previously-registered user """
     username = TextField('Username', validators=[validators.Required()])
@@ -49,54 +51,103 @@ class SocialMediaForm(Form):
     """ Adds a new social media hook to user profile/account """
     network       = TextField("Network")
     uname         = TextField("Username")
-    url           = TextField("URL")
+    website           = TextField("URL")
+
+############################ Profile Forms #################################
+
+class BasicForm(Form):
+    """ Adds a new personal (basics) entry to user """
+    firstName   = TextField('First Name', validators=(validators.Optional(),))
+    lastName    = TextField('Last Name', validators=(validators.Optional(),))
+    middleName  = TextField('Middle Name', validators=(validators.Optional(),))
+    headline    = TextField('Headline', validators=(validators.Optional(),))
+    picture     = TextField('Picture', validators=(validators.Optional(),))
+    phone       = TextField('Phone', validators=(validators.Optional(),))
+    url         = TextField('URL', validators=(validators.Optional(),))
+
+class LocationForm(Form):
+    address1    = TextField('Address 1', validators=(validators.Optional(),))
+    address2    = TextField('Address 2', validators=(validators.Optional(),))
+    zipcode     = TextField('Zipcode')
+    city        = TextField('City', validators=(validators.Optional(),))
+    country     = TextField('Country', validators=(validators.Optional(),))
+    region      = TextField('Region', validators=(validators.Optional(),))
+
+class SocialProfileForm(Form):
+    network     = TextField('Network')
+    uname       = TextField('Username', validators=(validators.Optional(),))
+    url         = TextField('URL', validators=(validators.Optional(),))
+
+############################ Editing Forms #################################
 
 class VolunteerForm(Form):
     """ Adds a new volunteer entry to user resume """
-    org           = TextField("Organization")
-    title         = TextField("Title")
-    startDt       = TextField("Start Date")
-    endDt         = TextField("End Date")
-    url           = TextField("URL")
-    impact        = TextField("Impact")
+    organization  = TextField("Organization")
 
-    highlights    = TextField("Highlights")
+    position         = TextField("Title", validators=(validators.Optional(),))
+    startDate    = DateTimeField("Start Date", format='%m/%d/%Y', 
+        validators=(validators.Optional(),))
+    endDate      = DateTimeField("End Date", format='%m/%d/%Y', 
+        validators=(validators.Optional(),))
+    website           = TextField("URL", validators=(validators.Optional(),))
+    highlights        = TextField("Highlights", validators=(validators.Optional(),))
 
 class WorkForm(Form):
     """ Adds a new work entry to user resume """
     company       = TextField("Company")
-    startDt       = DateTimeField("Start Date", format='%m/%d/%Y', 
-        validators=(validators.Optional(),))
-    endDt         = DateTimeField("End Date", format='%m/%d/%Y', 
-        validators=(validators.Optional(),))
-    position      = TextField("Position")
-    url           = TextField("URL")
-    impact        = TextField("Impact")
 
-    highlights    = TextField("Highlights")
-    skills        = TextField("Skills")
+    startDate       = DateTimeField("Start Date", format='%m/%d/%Y', 
+        validators=(validators.Optional(),))
+    endDate         = DateTimeField("End Date", format='%m/%d/%Y', 
+        validators=(validators.Optional(),))
+    position      = TextField("Position", validators=(validators.Optional(),))
+    website       = TextField("URL", validators=(validators.Optional(),))
+    highlights    = TextField("Highlights", validators=(validators.Optional(),))
 
 class EducationForm(Form):
     """ Adds a new education entry to user resume """
-    school       = TextField("School")
-    degree       = TextField("Degree")
-    major        = TextField("Major")
-    startDt      = DateTimeField("Start Date", format='%m/%d/%Y', 
+    institution       = TextField("School")
+    
+    studyType       = TextField("Degree", validators=(validators.Optional(),))
+    area            = TextField("Major", validators=(validators.Optional(),))
+    start_date      = DateTimeField("Start Date", format='%m/%d/%Y',
         validators=(validators.Optional(),))
-    gradDt       = DateTimeField("End Date", format='%m/%d/%Y', 
+    grad_date       = DateTimeField("End Date", format='%m/%d/%Y',
         validators=(validators.Optional(),))
-    gpa          = FloatField("GPA")
-
-    courses      = TextField("Courses")
+    gpa             = FloatField("GPA", validators=(validators.Optional(),))
+    courses         = TextField("Courses", validators=(validators.Optional(),))
 
 class AwardForm(Form):
     """ Adds a new awards entry to user resume """
     title        = TextField("Title")
+    
     date         = DateTimeField("Date", format='%m/%d/%Y', 
         validators=(validators.Optional(),))
-    issuer       = TextField("Issuer")
-    desc         = TextField("Description")
-    url          = TextField("URL")
+    awarder       = TextField("Issuer", validators=(validators.Optional(),))
+    summary       = TextField("Description", validators=(validators.Optional(),))
+    
+class SkillForm(Form):
+    """ Adds a new skills entry to user resume """
+    name         = TextField("Name")
+    level        = TextField("Level", validators=(validators.Optional(),))
+
+class PublicationForm(Form):
+    """ Adds a new publication entry to user resume """
+    name            = TextField("Name")
+    publisher       = TextField("Publisher", validators=(validators.Optional(),))
+    releaseDate    = DateTimeField("Publication Date", format='%m/%d/%Y', 
+        validators=(validators.Optional(),))
+    website         = TextField("Website", validators=(validators.Optional(),))
+    summary         = TextField("Summary", validators=(validators.Optional(),))
+
+class InterestForm(Form):
+    """ Adds a new interest entry to user resume """
+    name         = TextField("Name")
+
+class LanguageForm(Form):
+    """ Adds a new language entry to user resume """
+    language     = TextField("Language")
+    fluency      = TextField("Fluency", validators=(validators.Optional(),))
 
 class ResumeForm(Form):
     """ Adds a new resume entry to user """
@@ -105,8 +156,14 @@ class ResumeForm(Form):
     interests    = TextField('Interests')
     languages    = TextField('Languages')
 
+############################ Editing Forms #################################
+
 class CommentForm(Form):
     """ Adds a new comment entry to any relevant object """
     topic        = TextField('Topic')
     section      = TextField('Section')
+    payload      = TextField('Payload')
+
+class TodoForm(Form):
+    """ Adds a new todo entry to any relevant object """
     payload      = TextField('Payload')

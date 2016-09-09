@@ -1,0 +1,28 @@
+{% extends 'layouts/layout.html' %}
+{% from "util.html" import review_pairs %}
+
+{% from 'util.html' import link_tag, script_tag %}
+
+{% set title = 'Review Resume' %}
+
+{% block css %}
+  {{ link_tag('forms') }}
+{% endblock %}
+
+
+{% block body %}
+	{{ work }}
+	{{ volunteer }}
+	{{ education }}
+	{{ awards }}
+	{{ publications }}
+	{{ interests }}
+	{{ languages }}
+	{{ skills }}
+
+  {% include 'footer.html' %}
+{% endblock %}
+
+{% block js %}
+  {{ script_tag('cookies') }}
+{% endblock %}

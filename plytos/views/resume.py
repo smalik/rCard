@@ -39,8 +39,9 @@ from plytos.models.person import Person
 from plytos.views.final import setup_final
 from plytos.views.review import setup_review
 from plytos.views.edit import setup_edit
-from plytos.views.self_resume import setup_self
+from plytos.views.personal import setup_self
 from plytos.views.todos import setup_todos
+from plytos.views.history import setup_history
 
 ResumeNeed = namedtuple('resume', ['method', 'value'])
 EditResumeNeed = partial(ResumeNeed, 'edit')
@@ -51,6 +52,7 @@ setup_review(resume_app)
 setup_edit(resume_app)
 setup_self(resume_app)
 setup_todos(resume_app)
+setup_history(resume_app)
 
 @identity_loaded.connect_via(app)
 def on_identity_loaded(sender, identity):

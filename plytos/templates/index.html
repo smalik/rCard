@@ -1,66 +1,72 @@
 {% extends 'layouts/layout.html' %}
-
-{% set title = 'Home' %}
-
-{% block css %}
-{% endblock %}
+{% from "util.html" import render_form %}
+{% block title %}Login{% endblock %}
 
 {% block body %}
-  <div class="row">
-        <div class="col-lg-4">
-          <h1><b>Plytos</b></h1>        
+        <link rel="stylesheet"
+          href="{{ url_for('static', filename='css/bootstrap-social.css') }}">
 
-          <h3><i>Play to your strengths</i></h3>
-          <br>
-          <p>Get jobs that you will love. Get instant feedback on your Resume. Get feedback on where you stand in the pool of candidates. Get moving today. </p>
+        <!-- Top content -->
+        <div class="top-content">
+          
+            <div class="inner-bg">
+                <div class="container">
+                    <div class="row">
+                        <div class="col-sm-5">
+                          
+                          <div class="form-box">
+                            <div class="form-bottom">
+                            <form method="post" class="form">
+                                <h3 class="form-heading">Login <i class="fa fa-lock pull-right"></i></a></h3>
+                                {{ login_form.username(class_ = 'form-control', placeholder = login_form.username.label.text, required = true, autofocus = true) }} <br>
+                                {{ login_form.password(class_ = 'form-control last-input', placeholder = login_form.password.label.text, required = true) }}
+                                <a href="{{ url_for('auth_app.forgot', _external=True) }}">Forgot Password?</a>
+                                <input type="submit" value="Submit" class="btn btn-primary btn-lg btn-block">
+                            </form><br>
 
-          <!-- Button trigger modal -->
-          <button class="btn btn-primary btn-lg pull-right" data-toggle="modal" 
-            data-target="#myModal">
-            <span class="glyphicon glyphicon-upload"></span> Upload Resume
-          </button>
+                            <a class="btn btn-block btn-social btn-facebook" href="{{ url_for('oauth_authorize', provider='facebook') }}">
+                              <span class="fa fa-facebook"></span> Sign in with Facebook
+                            </a>
+                            
+                            <a class="btn btn-block btn-social btn-twitter" href="{{ url_for('oauth_authorize', provider='twitter') }}">
+                              <span class="fa fa-twitter"></span> Sign in with Twitter
+                            </a>
 
-        </div>
-      </div>
-    
-      <hr>
-      
-      <div class="row">
-        <div class="col-lg-12">
-          <div class="well text-center">  <!-- bootstrap well class is css it creates a depth well like box -->
-            We would love to hear from you at Plytos! Email mail@plytos.com and let us know your feedback!
-          </div>
-        </div>
-      </div>
+                            <a class="btn btn-block btn-social btn-google" 
+                              href="{{ url_for('oauth_authorize', provider='google') }}">
+                              <span class="fa fa-google"></span> Sign in with Google
+                            </a>
 
-      <div class="row">
-        <div class="col-lg-4">
-          <h2>Improve your odds</h2>
-          <p>Ever wonder why those job applications do not result in a call from the company? With Plytos, you can measure your strengths against the other applications and let you know where you stand! Not only that, we give you actionable items that will improve your chances!</p>
-          <a class="btn btn-default" href="#">More Info</a>
+                            </div>
+                        </div>
+                          
+                        </div>
+                        
+                        <div class="col-sm-1 middle-border"></div>
+                        <div class="col-sm-1"></div>
+                          
+                        <div class="col-sm-5">
+                          
+                          <div class="form-box">
+                              <div class="form-bottom">
+                            <form method="post" class="form">
+                              {{ registration_form.csrf_token }}
+                              <h3 class="form-heading">Register <i class="fa fa-home pull-right"></i></a></h3>
+                              {{ registration_form.username(class_ = 'form-control first-input', placeholder = registration_form.username.label.text, required = true, autofocus = true) }} <br>
+                              {{ registration_form.email(class_ = 'form-control', placeholder = registration_form.email.label.text, required = true) }} <br>
+                              {{ registration_form.password(class_ = 'form-control', placeholder = registration_form.password.label.text, required = true) }} <br>
+                              {{ registration_form.confirm(class_ = 'form-control last-input', placeholder = registration_form.confirm.label.text, required = true) }} <br>
+                              <input type="submit" value="Register" class="btn btn-primary btn-lg btn-block">
+                            </form>
+                          </div>
+                          </div>
+                          
+                        </div>
+                    </div>
+                    
+                </div>
+            </div>
+            
         </div>
-        <div class="col-lg-4">
-          <h2>Invite your friends!</h2>
-          <p>We all have that friend who is super organized and writes great resumes. With Plytos, you can pool the collective experience of Plytos users and get feedback from the Resume experts. While you are at it, give back some feedback too!</p>
-          <a class="btn btn-default" href="#">More Info</a>
-        </div>
-        <div class="col-lg-4">
-          <h2>Get jobs you will love</h2>
-          <p>Plytos uses cutting edge machine learning and information extration tool that goes beyond simple keyword matching and only gives you jobs that will match yours and the employers needs.</p>
-          <a class="btn btn-default" href="#">More Info</a>
-        </div>
-      </div>s
-      {% include 'footer.html' %}
-{% endblock %}
-
-{% block js %}
-    <script type="text/javascript" src="http://platform.linkedin.com/in.js">
-      api_key: 5huabac53ff0
-      //onLoad:  Linkedin.init
-      authorize: true
-    </script>
-        {{ script_tag('cookies') }}
-        {{ script_tag('lin_login') }}
-        {{ script_tag('firstuser') }}
-        {{ script_tag('main') }}
+        {% include 'footer.html' %}
 {% endblock %}
