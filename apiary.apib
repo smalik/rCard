@@ -3,13 +3,44 @@ HOST: http://rcard.apiblueprint.org/
 
 # rCard
 
-Polls is a simple API allowing consumers to view polls and vote in them.
+The basic functionality revolves around being able to create resumes and for other people to "fork" off these resumes in a git-like fashion, allowing them to make revisions and push back to the original user for approval. 
+Currently, the system is set up with 8 main tabs of functionality.  
 
-## Resumes [/resumes]
 
-### List All Questions [GET]
+## Resume [/resume]
 
-+ Response 200 (application/json)
+The central object around which the application revolves, this resume has pre-defined fields, allowing for well-defined collaboration and iterative progression  
+
+### This is resume function  
+
+This is a resume function  
+
++ Request (application/json)
+
+        {
+            "question": "Favourite programming language?",
+            "choices": [
+                "Swift",
+                "Python",
+                "Objective-C",
+                "Ruby"
+            ]
+        }
+
+## Person [/person]
+User objects for people who register for the website. These users have their personal information along with connections to each of the other objects (can select jobs, leave comments, make reset requests for their account, and own/edit resumes).  
+
+
+## Comments [/comments]
+
+Comment object for each section that is editable by users. 
+These objects allow people who are forking other users' resumes to not only make direct edits, but suggest where they should concentrate their efforts for future iterations.  
+
+
+### Comments test
+THis is dummy text   
+
++ Response 200  (application/json)  
 
         [
             {
@@ -32,6 +63,9 @@ Polls is a simple API allowing consumers to view polls and vote in them.
                 ]
             }
         ]
+
+
+## Jobs [/jobs]
 
 ### Create a New Question [POST]
 
