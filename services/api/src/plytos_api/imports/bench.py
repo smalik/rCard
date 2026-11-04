@@ -37,12 +37,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import os
 import random
 import statistics
 import sys
 import threading
 import time
+import traceback
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
@@ -54,6 +56,7 @@ from plytos_api.imports.ai import ResumeReader
 from plytos_api.imports.extract import UnsupportedFileError
 from plytos_api.imports.model import ImportResult, ProposedCard
 from plytos_api.imports.pipeline import import_resume
+from plytos_api.imports.usage import AiUsage
 
 SUFFIXES = (".pdf", ".docx")
 STEPS = ("pictures", "structure", "placement", "facts", "proofread")
@@ -212,11 +215,25 @@ def measure(
         return record, None
     except Exception as exc:  # one bad file mustn't end the run
         record.update(error=type(exc).__name__, seconds=round(time.monotonic() - started, 2))
+        record["where"] = _where(exc)
+        # Claude calls made before the failure were billed: count them.
+        calls = getattr(exc, "ai_calls", None) or []
+        record["cost_usd"] = round(AiUsage(calls=calls).estimated_cost_usd, 6)
         return record, None
     record["seconds"] = round(time.monotonic() - started, 2)
     record.update(_numbers(result))
     record["reading"] = result.model_dump_json()
     return record, _index_entry(rid, path, category, result, run_id)
+
+
+def _where(exc: BaseException) -> str:
+    """Where an error was raised: the last frame's file, line and function. Never the
+    message, which may quote the resume."""
+    frames = traceback.extract_tb(exc.__traceback__)
+    if not frames:
+        return ""
+    last = frames[-1]
+    return f"{Path(last.filename).name}:{last.lineno} in {last.name}"
 
 
 def _numbers(result: ImportResult) -> dict[str, Any]:
@@ -645,6 +662,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--label", help="a name for this run's variant, kept with its results")
     parser.add_argument("--compare", nargs=2, metavar="RUN", help="compare two runs' readings")
     args = parser.parse_args(argv)
+    # Warnings, and the numbers-only line on how many facts landed, go to stderr.
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    logging.getLogger("plytos_api.imports.facts").setLevel(logging.INFO)
 
     if args.compare:
         sys.stdout.write(compare(args.out, *args.compare))

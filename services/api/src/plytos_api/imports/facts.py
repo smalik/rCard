@@ -35,8 +35,10 @@ def words(card: ProposedCard) -> str:
 def add_result_facts(asked: dict[str, ProposedCard], found: AiFacts) -> None:
     """Puts each fact Claude found on its card, if the card's words hold it."""
     matched = offered = kept = 0
+    by_words = {_plain(words(card)): card for card in asked.values()}
     for item in found.results:
-        card = asked.get(_ref(item.result))
+        # The ref, or failing that the accomplishment's own words given in its place.
+        card = asked.get(_ref(item.ref)) or by_words.get(_plain(item.ref))
         if card is None:
             continue
         matched += 1
@@ -68,8 +70,12 @@ def add_result_facts(asked: dict[str, ProposedCard], found: AiFacts) -> None:
 
 def _ref(written: str) -> str:
     """R3 however the reply writes it: "R3", "[R3]", "r03" or "3"."""
-    number = re.search(r"\d+", written)
-    return f"R{int(number.group())}" if number else written.strip().upper()
+    number = re.fullmatch(r"\W*R?\W*(\d+)\W*", written.strip(), re.IGNORECASE)
+    return f"R{int(number.group(1))}" if number else written.strip().upper()
+
+
+def _plain(text: str) -> str:
+    return " ".join(re.sub(r"[^\w%$]+", " ", text.lower()).split())
 
 
 def _kept(values: list[str], text: list[str], most: int) -> list[str]:

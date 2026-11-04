@@ -68,18 +68,18 @@ def _facts(results: list[tuple[str, str]]) -> list[dict[str, Any]]:
     """What a reader might say: some facts in the words, some not."""
     return [
         {
-            "result": _ref(results, "ER wait"),
+            "ref": _ref(results, "ER wait"),
             "skills": ["patient access", "Epic"],  # neither is in the words
             "scope": ["across 4 sites"],
             "outcome": "Cut average ER wait times by 18%",
         },
         {
-            "result": _ref(results, "billing").lower(),
+            "ref": _ref(results, "billing").lower(),
             "skills": ["billing", "Billing"],
             "scope": ["3 clinics", "$2.4M a year"],
             "outcome": "",
         },
-        {"result": "R99", "skills": ["Python"], "scope": [], "outcome": ""},
+        {"ref": "R99", "skills": ["Python"], "scope": [], "outcome": ""},
     ]
 
 
@@ -172,7 +172,7 @@ def test_skill_names_the_audit_flags_arent_flagged_again() -> None:
 
 def test_claude_is_asked_for_facts_at_low_effort() -> None:
     sent: list[dict[str, Any]] = []
-    answer = {"results": [{"result": "R1", "skills": [], "scope": [], "outcome": ""}]}
+    answer = {"results": [{"ref": "R1", "skills": [], "scope": [], "outcome": ""}]}
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         sent.append(json.loads(request.content))
@@ -198,7 +198,7 @@ def test_claude_is_asked_for_facts_at_low_effort() -> None:
     )
     reader = ClaudeReader(client, "claude-haiku-5-5", "medium")
     found = reader.read_facts([("R1", "Ran  billing\nfor 3 clinics.")])
-    assert found is not None and found.results[0].result == "R1"
+    assert found is not None and found.results[0].ref == "R1"
     assert sent[0]["system"] == FACTS_INSTRUCTIONS
     assert sent[0]["output_config"]["effort"] == "low"
     assert sent[0]["messages"][0]["content"] == "Accomplishments:\n[R1] Ran billing for 3 clinics."
@@ -208,10 +208,32 @@ def test_facts_find_their_card_however_the_ref_is_written() -> None:
     def answers(results: list[tuple[str, str]]) -> list[dict[str, Any]]:
         er, scheduling = _ref(results, "ER wait"), _ref(results, "scheduling")
         return [
-            {"result": f"[{er}]", "skills": [], "scope": ["across 4 sites"], "outcome": ""},
-            {"result": scheduling[1:], "skills": ["scheduling"], "scope": [], "outcome": ""},
+            {"ref": f"[{er}]", "skills": [], "scope": ["across 4 sites"], "outcome": ""},
+            {"ref": scheduling[1:], "skills": ["scheduling"], "scope": [], "outcome": ""},
         ]
 
     result = _import(FakeReader(reading(), facts=answers))
     assert _card(result, "ER wait").content.facts["scope"] == ["across 4 sites"]
     assert _card(result, "scheduling").content.facts["skills"] == ["scheduling"]
+
+
+def test_facts_given_the_accomplishments_words_in_place_of_its_ref_still_land() -> None:
+    def answers(results: list[tuple[str, str]]) -> list[dict[str, Any]]:
+        # As Claude did once: the sentence itself where the ref belongs. Its number
+        # (18%) mustn't be read as ref R18.
+        return [
+            {"ref": text, "skills": [], "scope": ["across 4 sites"], "outcome": ""}
+            for _, text in results
+            if "ER wait" in text
+        ]
+
+    result = _import(FakeReader(reading(), facts=answers))
+    assert _card(result, "ER wait").content.facts["scope"] == ["across 4 sites"]
+
+
+def test_the_facts_schema_says_what_a_ref_is() -> None:
+    from plytos_api.imports.ai import _json_format
+
+    schema = _json_format(AiFacts)["schema"]
+    ref = schema["$defs"]["AiResultFacts"]["properties"]["ref"]
+    assert "R3" in ref["description"]

@@ -38,7 +38,7 @@ from anthropic.types import (
     UserMessageParam,
 )
 from anthropic.types.message_content_param import MessageContentParam
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from plytos_api.imports.dates import find_range, strip_range
 from plytos_api.imports.model import (
@@ -152,7 +152,8 @@ class AiPlacementCheck(BaseModel):
 
 
 class AiResultFacts(BaseModel):
-    result: str  # the accomplishment's ref, like R3
+    # Named "result" once, Claude often wrote the accomplishment's words here.
+    ref: str = Field(description="The accomplishment's ref as given, such as R3.")
     skills: list[str]
     scope: list[str]
     outcome: str
@@ -320,6 +321,7 @@ You pull facts out of a person's accomplishments for Plytos, an app where job se
 keep each accomplishment from their resume as a card. You get them as refs (R1, R2...) \
 with their words. For each one, give:
 
+- ref: its ref exactly as given, such as R3, not its words.
 - skills: the skills, tools, methods or fields of knowledge its words name, such as \
 "Python", "demand forecast" or "contract negotiation". Each is a short phrase.
 - scope: phrases that show its size or reach: a team, a budget, a number of people, \

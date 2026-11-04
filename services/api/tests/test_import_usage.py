@@ -250,3 +250,27 @@ def test_an_answer_cut_off_for_length_is_asked_again_at_low_effort() -> None:
     first, second = reader.calls
     assert (first.ok, first.error, first.stop_reason) == (False, "max_tokens", "max_tokens")
     assert first.cost_usd is not None and second.ok
+
+
+class FailingFake(MeteredFake):
+    """Charges for a reading, then fails, as a crash partway through an import would."""
+
+    def metered(self) -> "FailingFake":
+        return FailingFake(self.charge)
+
+    def read(self, doc: ExtractedDocument) -> None:
+        super().read(doc)
+        raise RuntimeError("something about the resume")
+
+
+def test_a_failed_import_still_counts_what_it_spent(tmp_path: Path) -> None:
+    root = _folders(tmp_path)
+    out = tmp_path / "bench"
+    items = pick(find_resumes([root]), 1, seed=1)
+    [record] = run(items, FailingFake(0.003), out, budget=1.0, run_id="crash")
+    assert record["error"] == "RuntimeError"
+    assert record["cost_usd"] == 0.003
+    assert record["where"].startswith("test_import_usage.py:")
+    # Where it failed, never what the error said.
+    assert "resume" not in json.dumps(record["where"])
+    assert json.loads((out / "spend.json").read_text())["spent_usd"] == 0.003

@@ -21,7 +21,7 @@ from plytos_api.imports.cards import propose_cards
 from plytos_api.imports.career import group_employments, settle_employments
 from plytos_api.imports.extract import extract
 from plytos_api.imports.facts import add_result_facts, to_ask, words
-from plytos_api.imports.model import ImportResult, ParsedResume
+from plytos_api.imports.model import ExtractedDocument, ImportResult, ParsedResume
 from plytos_api.imports.pictures import add_picture_lines, mark_picture_cards
 from plytos_api.imports.placement import check_placements
 from plytos_api.imports.proofread import proofread_findings
@@ -44,6 +44,21 @@ def import_resume(
         # Its own copy, so this import's calls are counted apart from any other's.
         reader = reader.metered()
         calls = reader.calls
+    try:
+        return _read(doc, reader, calls, today)
+    except Exception as exc:
+        # The calls made before it failed were billed: keep them with the error, for
+        # whoever counts the spend.
+        setattr(exc, "ai_calls", list(calls or []))  # noqa: B010 - an attribute of our own
+        raise
+
+
+def _read(
+    doc: ExtractedDocument,
+    reader: ResumeReader | None,
+    calls: list[AiCall] | None,
+    today: date | None,
+) -> ImportResult:
     if isinstance(reader, PictureReader) and doc.images:
         seen = reader.read_pictures(doc.images)
         if seen is not None:
