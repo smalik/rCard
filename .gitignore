@@ -40,3 +40,4 @@ __pycache__/
 *.tfvars
 !*.tfvars.example
 crash.log
+next-env.d.ts
