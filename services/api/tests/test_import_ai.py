@@ -13,11 +13,8 @@ import anthropic
 import httpx2
 
 from plytos_api.imports.ai import (
-    FOLDED_FACTS_INSTRUCTIONS,
     INSTRUCTIONS,
-    AiFacts,
     AiResume,
-    AiResumeFacts,
     ClaudeReader,
     reader_for,
     resume_lines,
@@ -228,57 +225,6 @@ def test_accomplishments_hold_only_their_own_facts() -> None:
     assert director.content.facts["title"] == "Director, Supply Chain Operations"
 
 
-class FoldingReader(FakeReader):
-    """With facts, gives each accomplishment line's facts with the structure. Counts
-    the times it's asked for facts in a pass of their own."""
-
-    def __init__(self, reading: dict[str, Any], facts: list[dict[str, Any]] | None) -> None:
-        super().__init__(reading)
-        self.facts = facts
-        self.asked_for_facts = 0
-
-    def read(self, doc: ExtractedDocument) -> AiResume | None:
-        if self.facts is None:
-            return super().read(doc)
-        self.seen.append(doc)
-        return AiResumeFacts.model_validate({**(self.reading or {}), "facts": self.facts})
-
-    def read_facts(self, results: list[tuple[str, str]]) -> AiFacts | None:
-        self.asked_for_facts += 1
-        return None
-
-
-def test_facts_can_come_with_the_structure_reading() -> None:
-    def item(line: int, **fields: Any) -> dict[str, Any]:
-        return {"line": line, "skills": [], "scope": [], "outcome": "", **fields}
-
-    reader = FoldingReader(
-        good_reading(),
-        [
-            item(4, skills=["Supply Chain"]),  # a title line, not an accomplishment
-            item(
-                5,
-                scope=["40-person team", "three distribution centers"],
-                outcome="cutting late shipments by 22%",
-            ),
-            # "Python" isn't in its words, so it's dropped.
-            item(6, skills=["demand forecast", "Python"], outcome="saving $3.1M in carrying costs"),
-            item(99, skills=["SQL"]),
-        ],
-    )
-    result = import_resume(promotions_text().encode(), "avery.txt", today=TODAY, reader=reader)
-    by_start = {c.content.framing.headline[:8]: c.content.facts for c in result.cards}
-    assert by_start["Led a 40"]["scope"] == ["40-person team", "three distribution centers"]
-    assert by_start["Led a 40"]["outcome"] == "cutting late shipments by 22%"
-    assert by_start["Built th"]["skills"] == ["demand forecast"]
-    assert "skills" not in by_start["Rolled o"]
-    assert reader.asked_for_facts == 0
-    # The facts step still runs for a reader that doesn't fold them in.
-    plain = FoldingReader(good_reading(), None)
-    import_resume(promotions_text().encode(), "avery.txt", today=TODAY, reader=plain)
-    assert plain.asked_for_facts == 1
-
-
 def test_promotions_dont_read_as_overlaps_or_missing_employers() -> None:
     by_rules = {f.rule for f in import_resume(promotions_text().encode(), "a.txt").findings}
     assert "ats.unclear_roles" in by_rules
@@ -395,29 +341,24 @@ def _client(handler: Any) -> anthropic.Anthropic:
 
 def test_the_schema_has_no_optional_or_nullable_fields() -> None:
     """The API compiles the schema into a grammar with a size cap; unions blow it up."""
-    for model in (AiResume, AiResumeFacts):
-        schema = json.dumps(model.model_json_schema())
-        assert "anyOf" not in schema and "null" not in schema
+    schema = json.dumps(AiResume.model_json_schema())
+    assert "anyOf" not in schema and "null" not in schema
 
 
-def test_claude_reader_can_fold_facts_in_and_skip_a_step() -> None:
-    sent: list[dict[str, Any]] = []
+def test_a_step_left_out_makes_no_call() -> None:
+    sent: list[str] = []
 
     def handler(request: httpx2.Request) -> httpx2.Response:
-        sent.append(json.loads(request.content))
-        reading = {**good_reading(), "facts": []}
-        return httpx2.Response(200, json=_message(json.dumps(reading)))
+        sent.append(json.loads(request.content)["system"])
+        return httpx2.Response(200, json=_message(json.dumps(good_reading())))
 
     reader = ClaudeReader(_client(handler), "claude-haiku-5-5", "medium")
-    reader.fold_facts = True
     reader.skip_steps = frozenset({"proofread"})
     metered = reader.metered()
     doc = extract(promotions_text().encode(), "avery.txt")
-    assert isinstance(metered.read(doc), AiResumeFacts)
     assert metered.proofread(doc) is None
-    [request] = sent
-    assert request["system"] == INSTRUCTIONS + FOLDED_FACTS_INSTRUCTIONS
-    assert "facts" in json.dumps(request["output_config"]["format"]["schema"]["properties"])
+    assert metered.read(doc) is not None
+    assert sent == [INSTRUCTIONS]
     assert [c.step for c in metered.calls] == ["structure"]
 
 
@@ -462,6 +403,26 @@ def test_claude_reader_asks_for_plain_json_when_the_schema_is_refused() -> None:
     assert len(sent) == 2
     assert sent[1]["output_config"] == {"effort": "medium"}
     assert "Reply with only a JSON object" in sent[1]["system"]
+
+
+def test_a_plain_answer_cut_off_for_length_is_asked_again_at_low_effort() -> None:
+    sent: list[dict[str, Any]] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        body = json.loads(request.content)
+        sent.append(body["output_config"])
+        if "format" in body["output_config"]:
+            error = {"type": "invalid_request_error", "message": "grammar is too large"}
+            return httpx2.Response(400, json={"type": "error", "error": error})
+        if len(sent) == 2:
+            return httpx2.Response(200, json=_message('{"name": "Av', stop_reason="max_tokens"))
+        return httpx2.Response(200, json=_message(json.dumps(good_reading())))
+
+    reader = ClaudeReader(_client(handler), "claude-haiku-5-5", "medium")
+    reading = reader.read(extract(promotions_text().encode(), "avery.txt"))
+    assert reading is not None
+    assert [c.get("effort") for c in sent] == ["medium", "medium", "low"]
+    assert [c.error for c in reader.calls] == ["BadRequestError", "max_tokens", None]
 
 
 def test_claude_reader_gives_up_quietly_on_errors_refusals_and_bad_json() -> None:

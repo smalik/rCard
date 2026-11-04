@@ -137,20 +137,6 @@ class AiResume(BaseModel):
     skipped: list[AiSkip]
 
 
-class AiLineFacts(BaseModel):
-    line: int
-    skills: list[str]
-    scope: list[str]
-    outcome: str
-
-
-class AiResumeFacts(AiResume):
-    """A structure reading that also gives each accomplishment line's facts, so the
-    separate facts pass isn't needed (ClaudeReader.fold_facts)."""
-
-    facts: list[AiLineFacts]
-
-
 class AiMisfiled(BaseModel):
     line: int
     belongs_under: str
@@ -304,20 +290,6 @@ of its own, that year). kind is one of: {", ".join(ENTRY_KINDS)}.
 (the name or contact details repeated on a later page); decoration (rules or symbols); \
 references ("References available on request"). Never skip a line that says anything \
 about the person's work, education or skills.
-"""
-
-FOLDED_FACTS_INSTRUCTIONS = """
-Facts
-- facts: one item for each bullet or description line of a role that says what the \
-person did or achieved, with line set to its number. skills: the skills, tools, methods \
-or fields of knowledge it names, such as "Python", "demand forecast" or "contract \
-negotiation", each a short phrase. scope: phrases that show its size or reach: a team, \
-a budget, a number of people, users, sites, accounts or regions, or an amount of money \
-involved. outcome: the phrase that states what it achieved, or "" when it states no \
-result.
-- Copy, don't write: every value must appear word for word on that line, and it's \
-dropped otherwise. Leave a list empty rather than stretching, and leave out a line \
-with nothing to give.
 """
 
 PLACEMENT_INSTRUCTIONS = """\
@@ -476,24 +448,18 @@ class ClaudeReader:
         self.step_efforts: dict[str, Effort] = {}
         # Steps left out of an import, such as proofreading when it's done on demand.
         self.skip_steps: frozenset[str] = frozenset()
-        # Ask for each accomplishment's facts in the structure reading, in place of a
-        # facts pass of their own.
-        self.fold_facts = False
 
     def metered(self) -> ClaudeReader:
         """A reader on the same client that records only its own calls."""
         reader = ClaudeReader(self._client, self._model, self._effort)
         reader.step_efforts = self.step_efforts
         reader.skip_steps = self.skip_steps
-        reader.fold_facts = self.fold_facts
         return reader
 
     def read(self, doc: ExtractedDocument) -> AiResume | None:
-        content = "Resume lines:\n" + resume_lines(doc)
-        if self.fold_facts:
-            system = INSTRUCTIONS + FOLDED_FACTS_INSTRUCTIONS
-            return self.ask(system, content, AiResumeFacts, step="structure")
-        return self.ask(INSTRUCTIONS, content, AiResume, step="structure")
+        return self.ask(
+            INSTRUCTIONS, "Resume lines:\n" + resume_lines(doc), AiResume, step="structure"
+        )
 
     def ask[T: BaseModel](
         self,
@@ -579,7 +545,11 @@ class ClaudeReader:
         effort: Effort,
         step: str,
         images: int,
+        _attempt: int = 1,
     ) -> T | None:
+        """The same JSON without the schema enforced, checked here. Like an enforced
+        answer, one that doesn't match is asked for once more, and one cut off for
+        length is asked for at low effort."""
         wanted = json.dumps(schema.model_json_schema())
         started = time.monotonic()
         try:
@@ -594,27 +564,37 @@ class ClaudeReader:
             log.warning("Reading the resume with Claude failed: %s", type(exc).__name__)
             self._failed(step, effort, type(exc).__name__, started)
             return None
-        self.calls.append(
-            record(
-                step,
-                self._model,
-                effort,
-                response.usage,
-                seconds=time.monotonic() - started,
-                stop_reason=response.stop_reason,
-                images=images,
-            )
+        call = record(
+            step,
+            self._model,
+            effort,
+            response.usage,
+            seconds=time.monotonic() - started,
+            stop_reason=response.stop_reason,
+            images=images,
         )
-        if response.stop_reason != "end_turn":
-            log.warning("Claude stopped without a reading: %s", response.stop_reason)
-            return None
-        text = "".join(b.text for b in response.content if b.type == "text").strip()
-        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
-        try:
-            return schema.model_validate_json(text)
-        except ValidationError as exc:
-            log.warning("Claude's reading didn't match the schema: %s", type(exc).__name__)
-            return None
+        self.calls.append(call)
+        stop = response.stop_reason
+        if stop == "end_turn":
+            text = "".join(b.text for b in response.content if b.type == "text").strip()
+            text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
+            try:
+                return schema.model_validate_json(text)
+            except ValidationError as exc:
+                call.ok, call.error = False, "ValidationError"
+                log.warning(
+                    "Claude's plain %s answer didn't match the schema (attempt %d): %s",
+                    step,
+                    _attempt,
+                    _schema_errors(exc),
+                )
+        else:
+            call.error = str(stop)
+            log.warning("Claude stopped without a reading (attempt %d): %s", _attempt, stop)
+        if _attempt == 1 and stop in ("end_turn", "max_tokens"):
+            retry: Effort = "low" if stop == "max_tokens" else effort
+            return self._ask_plain(system, content, schema, retry, step, images, _attempt=2)
+        return None
 
     def check_placements(self, doc: ExtractedDocument, tree: str) -> AiPlacementCheck | None:
         content = f"Resume lines:\n{resume_lines(doc)}\n\nHow the lines were filed:\n{tree}"

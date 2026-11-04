@@ -190,14 +190,16 @@ uv run python -m plytos_api.imports.bench --rerun RUN --effort structure=low --b
 uv run python -m plytos_api.imports.bench --compare RUN NEW_RUN
 ```
 
-Two other variants change what the import does rather than how hard it
-thinks. `--skip proofread` leaves proofreading out, to price doing it on
-demand instead of at upload. `--fold-facts` asks for each accomplishment's
-skills, scope and outcome in the structure reading, in place of a facts call of
-their own. Those facts are gathered onto each accomplishment from its lines and
-still kept only when its words hold them. The comparison then also shows how
-often the two runs give an accomplishment the same facts, and what each step
-cost.
+`--skip STEP` leaves a step out, for example `--skip proofread` to price
+proofreading on demand instead of at upload. The comparison also shows what
+each step cost and how often the two runs give an accomplishment the same
+skills, scope and outcome.
+
+Asking for the facts in the structure reading, in place of a facts call of
+their own, was tried on Nov 4, 2026 and not kept. It saved about 5% per resume.
+The longer reading was too big a schema to enforce, so every structure call was
+refused once, and 3 of 59 resumes were cut off at the length limit. The facts
+also came out a little thinner.
 
 Every answered call is recorded with the tokens it used, even when its answer
 can't be used. A reply that doesn't fit the schema is asked for once more, and

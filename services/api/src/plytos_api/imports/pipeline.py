@@ -8,8 +8,6 @@ from plytos_api.imports.accounting import account
 from plytos_api.imports.ai import (
     AiFacts,
     AiProofread,
-    AiResume,
-    AiResumeFacts,
     FactReader,
     Metered,
     PictureReader,
@@ -22,7 +20,7 @@ from plytos_api.imports.audit import audit
 from plytos_api.imports.cards import propose_cards
 from plytos_api.imports.career import group_employments, settle_employments
 from plytos_api.imports.extract import extract
-from plytos_api.imports.facts import add_result_facts, by_card, to_ask, words
+from plytos_api.imports.facts import add_result_facts, to_ask, words
 from plytos_api.imports.model import ExtractedDocument, ImportResult, ParsedResume
 from plytos_api.imports.pictures import add_picture_lines, mark_picture_cards
 from plytos_api.imports.placement import check_placements
@@ -74,7 +72,6 @@ def _read(
 
         parsed: ParsedResume | None = None
         read_by: str | None = None
-        found: AiResume | None = None
         if reader is not None:
             found = reader.read(doc)
             if found is not None:
@@ -90,20 +87,16 @@ def _read(
         findings = audit(doc, parsed, today=today)
         cards = propose_cards(parsed, findings, texts)
 
-        # Facts come out of each accomplishment while the placements are checked, or
-        # came with the structure reading.
+        # Facts come out of each accomplishment while the placements are checked.
         asked = to_ask(cards)
         facts: Future[AiFacts | None] | None = None
-        folded: AiFacts | None = None
-        if isinstance(found, AiResumeFacts) and read_by is not None:
-            folded = by_card(asked, found.facts)
-        elif isinstance(reader, FactReader) and read_by is not None and asked:
+        if isinstance(reader, FactReader) and read_by is not None and asked:
             items = [(ref, words(card)) for ref, card in asked.items()]
             facts = pool.submit(reader.read_facts, items)
         checker = reader if isinstance(reader, PlacementChecker) and read_by is not None else None
         check_placements(doc, parsed, cards, checker)
 
-        got_facts = folded if folded is not None else _result(facts)
+        got_facts = _result(facts)
         if got_facts is not None:
             add_result_facts(asked, got_facts)
         typos = _result(proofing)

@@ -27,9 +27,7 @@ To measure a change (a lower effort for a step, say) on the same resumes:
     python -m plytos_api.imports.bench --rerun RUN --effort structure=low --budget 20
     python -m plytos_api.imports.bench --compare RUN NEW_RUN
 
---skip leaves a step out (--skip proofread prices proofreading on demand), and
---fold-facts asks for each accomplishment's facts in the structure reading in
-place of a facts step of their own.
+--skip leaves a step out: --skip proofread prices proofreading on demand.
 
 --compare reads the two runs' readings and says, in numbers only, how often they
 agree on employers, titles, dates, which job each accomplishment is under and
@@ -737,11 +735,6 @@ def main(argv: list[str] | None = None) -> int:
         choices=SKIPPABLE,
         help="leave a step out, e.g. proofread to price proofreading on demand",
     )
-    parser.add_argument(
-        "--fold-facts",
-        action="store_true",
-        help="ask for facts in the structure reading instead of a facts step",
-    )
     parser.add_argument("--label", help="a name for this run's variant, kept with its results")
     parser.add_argument("--compare", nargs=2, metavar="RUN", help="compare two runs' readings")
     args = parser.parse_args(argv)
@@ -779,10 +772,7 @@ def main(argv: list[str] | None = None) -> int:
     if isinstance(reader, ClaudeReader):
         reader.step_efforts = cast(dict[str, Effort], efforts)
         reader.skip_steps = frozenset(args.skip)
-        reader.fold_facts = args.fold_facts
     variant = [f"{k}={v}" for k, v in efforts.items()] + [f"skip={s}" for s in args.skip]
-    if args.fold_facts:
-        variant.append("facts-folded")
     label = args.label or (" ".join(variant) or None)
     print(f"Trying {len(items)} resumes.", file=sys.stderr)
     run(
