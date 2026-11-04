@@ -15,7 +15,7 @@ import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 import psycopg
@@ -34,6 +34,8 @@ from plytos_api.cards.model import (
 from plytos_api.cards.rules import facts_changed, unsupported_claims
 from plytos_api.ids import uuid7
 from plytos_api.keys import UserCipher
+
+CardStatus = Literal["draft", "approved"]
 
 
 class CardNotFoundError(Exception):
@@ -158,12 +160,19 @@ class CardRepository:
 
     # -- cards and main line -------------------------------------------------
 
-    def create_card(self, kind: CardKind, content: MainContent, author: Author) -> CardDetail:
+    def create_card(
+        self,
+        kind: CardKind,
+        content: MainContent,
+        author: Author,
+        *,
+        status: CardStatus = "draft",
+    ) -> CardDetail:
         card_id = uuid7()
         line_id = uuid7()
         self._conn.execute(
-            "insert into plytos.card (id, owner_id, kind) values (%s, %s, %s)",
-            (card_id, self._user_id, kind),
+            "insert into plytos.card (id, owner_id, kind, status) values (%s, %s, %s, %s)",
+            (card_id, self._user_id, kind, status),
         )
         self._conn.execute(
             "insert into plytos.card_line (id, owner_id, card_id) values (%s, %s, %s)",

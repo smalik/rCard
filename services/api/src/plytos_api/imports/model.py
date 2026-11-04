@@ -183,6 +183,9 @@ class ParsedResume(BaseModel):
 class Location(BaseModel):
     block: int | None = None
     excerpt: str
+    # The figure this place quotes, when the finding is two places disagreeing
+    # about a number. The person settles it by picking one.
+    figure: str | None = None
 
 
 class Finding(BaseModel):
@@ -210,7 +213,8 @@ class ProposedCard(BaseModel):
 
 
 class ImportResult(BaseModel):
-    """What the person reviews. It holds their resume text, so it's never stored or logged."""
+    """What the person reviews. It holds their resume text, so it's never logged, and it's
+    stored only encrypted with the person's own data key (imports/store.py)."""
 
     facts: DocumentFacts
     contact: Contact

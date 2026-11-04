@@ -1,14 +1,19 @@
 """Rules the database enforces on its own, whatever the app code does."""
 
+from uuid import UUID
+
 import psycopg
 import pytest
 from psycopg import errors
 
 from plytos_api.cards.repository import Author, CardNotFoundError
 from plytos_api.db import Database
+from plytos_api.imports.pipeline import import_resume
+from plytos_api.imports.store import ImportNotFoundError, ImportStore
 from plytos_api.keys import KeyShreddedError, Vault
 
 from .conftest import DbUrls, RepoFor, main_content
+from .resume_samples import messy_text
 
 ME = Author("person")
 
@@ -116,6 +121,7 @@ def test_deleting_an_account_shreds_the_key_and_every_row(
         )
     with repo_for(other) as repo:
         repo.create_card("skill", main_content(), ME)
+    _import(db, vault, user)
 
     with psycopg.connect(test_db.app_url) as app, pytest.raises(errors.InsufficientPrivilege):
         app.execute("select plytos.purge_user(%s)", (user,))
@@ -133,6 +139,7 @@ def test_deleting_an_account_shreds_the_key_and_every_row(
             ("plytos.card_version", "owner_id"),
             ("plytos.target", "owner_id"),
             ("plytos.event", "owner_id"),
+            ("plytos.resume_import", "owner_id"),
         ):
             row = owner.execute(
                 f"select count(*) from {table} where {column} = %s",  # noqa: S608
@@ -145,6 +152,54 @@ def test_deleting_an_account_shreds_the_key_and_every_row(
 
     with db.as_user(user) as conn, pytest.raises(KeyShreddedError):
         vault.cipher_for(conn, user)
+
+
+def _import(db: Database, vault: Vault, user: UUID) -> UUID:
+    data = messy_text().encode()
+    with db.as_user(user) as conn:
+        store = ImportStore(conn, user, vault.cipher_for(conn, user))
+        return store.create(data, "Jordan Rivera.txt", import_resume(data, "Jordan Rivera.txt")).id
+
+
+def test_people_only_see_their_own_imports(make_user, db: Database, vault: Vault) -> None:
+    alice, bob = make_user(), make_user()
+    import_id = _import(db, vault, alice)
+    with db.as_user(bob) as conn:
+        store = ImportStore(conn, bob, vault.cipher_for(conn, bob))
+        assert store.summaries() == []
+        for read in (store.get, store.original, store.delete):
+            with pytest.raises(ImportNotFoundError):
+                read(import_id)
+        assert conn.execute("select count(*) from plytos.resume_import").fetchone() == (0,)
+    with db.as_user(alice) as conn:
+        store = ImportStore(conn, alice, vault.cipher_for(conn, alice))
+        assert [s.id for s in store.summaries()] == [import_id]
+
+
+def test_an_import_keeps_the_original_encrypted_and_unchanged(
+    make_user, db: Database, vault: Vault
+) -> None:
+    user = make_user()
+    import_id = _import(db, vault, user)
+    with db.as_user(user) as conn:
+        row = conn.execute(
+            "select file_ciphertext, name_ciphertext, result_ciphertext"
+            " from plytos.resume_import where id = %s",
+            (import_id,),
+        ).fetchone()
+        assert row is not None
+        for blob in row:
+            assert b"Jordan" not in bytes(blob)
+        store = ImportStore(conn, user, vault.cipher_for(conn, user))
+        info, data = store.original(import_id)
+        assert data == messy_text().encode()
+        assert info.name == "Jordan Rivera.txt"
+    for column in ("file_ciphertext", "name_ciphertext", "result_ciphertext", "file_format"):
+        with pytest.raises(errors.InsufficientPrivilege), db.as_user(user) as conn:
+            conn.execute(
+                f"update plytos.resume_import set {column} = {column} where id = %s",  # noqa: S608
+                (import_id,),
+            )
 
 
 def test_migrations_run_once(test_db: DbUrls) -> None:

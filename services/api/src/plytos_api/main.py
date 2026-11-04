@@ -2,12 +2,12 @@
 
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Annotated
-from urllib.parse import unquote
+from typing import Annotated, Literal
+from urllib.parse import quote, unquote
 from uuid import UUID
 
 import psycopg
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Path, Request, Response, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -30,11 +30,23 @@ from plytos_api.cards.repository import (
 from plytos_api.config import Settings, get_settings
 from plytos_api.db import Database
 from plytos_api.imports.extract import MAX_BYTES, UnsupportedFileError
-from plytos_api.imports.model import ImportResult
 from plytos_api.imports.pipeline import import_resume
+from plytos_api.imports.store import (
+    ImportConflictError,
+    ImportNotFoundError,
+    ImportProgress,
+    ImportStore,
+    ImportSummary,
+    ImportView,
+)
 from plytos_api.keys import KeyShreddedError, Vault, kek_from_setting
 
 FILENAME_HEADER = "x-plytos-filename"
+ORIGINAL_TYPES = {
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "pdf": "application/pdf",
+    "text": "text/plain; charset=utf-8",
+}
 
 # Sent on every response: nothing Plytos serves may be indexed or cached.
 SECURITY_HEADERS = {
@@ -72,8 +84,26 @@ class SaveVariantVersion(BaseModel):
     content: VariantContent
 
 
-class AcceptImport(BaseModel):
-    cards: list[CreateCard] = Field(min_length=1, max_length=300)
+CardRef = Annotated[str, Path(pattern=r"^card-[0-9]{1,4}$")]
+
+
+class Settle(BaseModel):
+    finding: int = Field(ge=0)
+    answer: Literal["chosen", "as_is", "on_card", "later"]
+    value: str | None = Field(default=None, max_length=40)
+
+
+class Decide(BaseModel):
+    state: Literal["later", "dropped", "pending"]
+
+
+class Approve(BaseModel):
+    content: MainContent | None = None
+
+
+class Approved(BaseModel):
+    card: CardDetail
+    progress: ImportProgress
 
 
 class Verification(BaseModel):
@@ -145,6 +175,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.exception_handler(UnsupportedFileError)
     async def unsupported_file(_: Request, exc: UnsupportedFileError) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=status.HTTP_422_UNPROCESSABLE_CONTENT)
+
+    @app.exception_handler(ImportNotFoundError)
+    async def import_not_found(_: Request, __: ImportNotFoundError) -> JSONResponse:
+        return JSONResponse({"detail": "Not found"}, status_code=status.HTTP_404_NOT_FOUND)
+
+    @app.exception_handler(ImportConflictError)
+    async def import_conflict(_: Request, exc: ImportConflictError) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=status.HTTP_409_CONFLICT)
 
     @app.exception_handler(KeyShreddedError)
     async def shredded(_: Request, __: KeyShreddedError) -> JSONResponse:
@@ -232,13 +270,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         with db.as_user(user_id) as conn:
             return repo(conn, user_id).create_target(body.kind, body.name, body.parent_id)
 
-    @app.post("/v1/imports/preview")
-    async def preview_import(request: Request, user_id: User) -> ImportResult:
-        """Reads a resume and returns proposed cards and an audit. Nothing is stored.
-
-        The body is the file itself. The file name comes in a header, not the
-        URL, because URLs land in request logs and resume file names carry names.
-        """
+    async def read_upload(request: Request) -> tuple[bytes, str]:
         declared = request.headers.get("content-length")
         if declared and declared.isdigit() and int(declared) > MAX_BYTES:
             raise HTTPException(
@@ -254,13 +286,73 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not data:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "The file is empty.")
         filename = unquote(request.headers.get(FILENAME_HEADER, "") or "resume")[:200]
-        return await run_in_threadpool(import_resume, bytes(data), filename)
+        return bytes(data), filename
 
-    @app.post("/v1/imports/accept", status_code=status.HTTP_201_CREATED)
-    def accept_import(body: AcceptImport, user_id: User) -> list[CardDetail]:
-        """Saves the cards the person kept from an import, all or none."""
+    def imports(conn: psycopg.Connection, user_id: UUID) -> ImportStore:
+        return ImportStore(conn, user_id, vault.cipher_for(conn, user_id))
+
+    @app.post("/v1/imports", status_code=status.HTTP_201_CREATED)
+    async def create_import(request: Request, user_id: User) -> ImportView:
+        """Reads a resume, keeps the original encrypted, and returns proposed cards
+        and an audit. No card is saved until the person approves it.
+
+        The body is the file itself. The file name comes in a header, not the
+        URL, because URLs land in request logs and resume file names carry names.
+        """
+        data, filename = await read_upload(request)
+        result = await run_in_threadpool(import_resume, data, filename)
+
+        def store() -> ImportView:
+            with db.as_user(user_id) as conn:
+                return imports(conn, user_id).create(data, filename, result)
+
+        return await run_in_threadpool(store)
+
+    @app.get("/v1/imports")
+    def list_imports(user_id: User) -> list[ImportSummary]:
         with db.as_user(user_id) as conn:
-            cards = repo(conn, user_id)
-            return [cards.create_card(c.kind, c.content, person(user_id)) for c in body.cards]
+            return imports(conn, user_id).summaries()
+
+    @app.get("/v1/imports/{import_id}")
+    def get_import(import_id: UUID, user_id: User) -> ImportView:
+        with db.as_user(user_id) as conn:
+            return imports(conn, user_id).get(import_id)
+
+    @app.get("/v1/imports/{import_id}/original")
+    def get_original(import_id: UUID, user_id: User) -> Response:
+        """The person's original file, exactly as they gave it."""
+        with db.as_user(user_id) as conn:
+            info, data = imports(conn, user_id).original(import_id)
+        return Response(
+            content=data,
+            media_type=ORIGINAL_TYPES[info.format],
+            headers={FILENAME_HEADER: quote(info.name)},
+        )
+
+    @app.delete("/v1/imports/{import_id}", status_code=status.HTTP_204_NO_CONTENT)
+    def delete_import(import_id: UUID, user_id: User) -> None:
+        """Deletes the original file and everything read from it. Approved cards stay."""
+        with db.as_user(user_id) as conn:
+            imports(conn, user_id).delete(import_id)
+
+    @app.post("/v1/imports/{import_id}/settle")
+    def settle(import_id: UUID, body: Settle, user_id: User) -> ImportProgress:
+        with db.as_user(user_id) as conn:
+            return imports(conn, user_id).settle(import_id, body.finding, body.answer, body.value)
+
+    @app.post("/v1/imports/{import_id}/cards/{ref}/decision")
+    def decide(import_id: UUID, ref: CardRef, body: Decide, user_id: User) -> ImportProgress:
+        with db.as_user(user_id) as conn:
+            return imports(conn, user_id).decide(import_id, ref, body.state)
+
+    @app.post("/v1/imports/{import_id}/cards/{ref}/approve", status_code=status.HTTP_201_CREATED)
+    def approve(import_id: UUID, ref: CardRef, body: Approve, user_id: User) -> Approved:
+        """Saves one proposed card as an approved card. AI never calls this: the
+        wording is the person's own, from their resume or as they edited it."""
+        with db.as_user(user_id) as conn:
+            card, progress = imports(conn, user_id).approve(
+                import_id, ref, body.content, repo(conn, user_id), person(user_id)
+            )
+        return Approved(card=card, progress=progress)
 
     return app

@@ -1041,10 +1041,10 @@ def _figure_conflicts(parsed: ParsedResume, blocks: dict[int, Block]) -> Iterabl
                     f"the same result ({topic}). A reader who notices will doubt both. Pick "
                     "the number you can back up and use it everywhere.",
                 )
-                finding.locations = [
-                    _quote(blocks[block], sentence),
-                    _quote(blocks[role_block], role_sentence),
-                ]
+                first = _quote(blocks[block], sentence)
+                second = _quote(blocks[role_block], role_sentence)
+                first.figure, second.figure = figure, role_figure
+                finding.locations = [first, second]
                 yield finding
 
 

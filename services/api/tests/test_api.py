@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from urllib.parse import unquote
 
 import pytest
 from fastapi.testclient import TestClient
@@ -122,42 +123,118 @@ def test_unknown_parent_target_is_not_found(client: TestClient) -> None:
     assert response.status_code == 404
 
 
-def test_resume_preview_returns_cards_and_audit_without_storing(client: TestClient) -> None:
-    from .resume_samples import messy_docx
+def test_resume_import_keeps_the_original_and_saves_only_approved_cards(
+    client: TestClient,
+) -> None:
+    from .resume_samples import consultant_docx
 
     me = as_user("importer")
     before = client.get("/v1/cards", headers=me).json()
+    data = consultant_docx()
     response = client.post(
-        "/v1/imports/preview",
-        content=messy_docx(),
-        headers={**me, "X-Plytos-Filename": "Jordan%20Rivera%20Resume.docx"},
+        "/v1/imports",
+        content=data,
+        headers={**me, "X-Plytos-Filename": "Casey%20Morgan%20Resume.docx"},
     )
-    assert response.status_code == 200, response.text
+    assert response.status_code == 201, response.text
     assert response.headers["cache-control"] == "no-store"
-    result = response.json()
-    assert result["facts"]["filename"] == "Jordan Rivera Resume.docx"
-    assert len(result["roles"]) == 4
-    assert any(f["rule"] == "consistency.tense" for f in result["findings"])
+    view = response.json()
+    import_id = view["id"]
+    assert view["file"] == {"format": "docx", "size": len(data), "name": "Casey Morgan Resume.docx"}
+    assert view["progress"] == {"settled": {}, "cards": {}, "edits": {}}
+    assert len(view["result"]["roles"]) == 4
     assert client.get("/v1/cards", headers=me).json() == before
 
-    kept = [c for c in result["cards"] if c["kind"] in ("role", "accomplishment")][:3]
-    accepted = client.post(
-        "/v1/imports/accept",
-        json={"cards": [{"kind": c["kind"], "content": c["content"]} for c in kept]},
+    original = client.get(f"/v1/imports/{import_id}/original", headers=me)
+    assert original.status_code == 200
+    assert original.content == data
+    assert original.headers["content-type"].startswith("application/vnd.openxml")
+    assert unquote(original.headers["x-plytos-filename"]) == "Casey Morgan Resume.docx"
+
+    [summary] = [s for s in client.get("/v1/imports", headers=me).json() if s["id"] == import_id]
+    assert summary["cards"] == len(view["result"]["cards"])
+    assert summary["approved"] == 0
+    assert summary["to_settle"] >= 1
+
+    # The resume quotes the same result as ~30% and 25%. Picking 25% rewrites
+    # the card that said 30%, and only that card.
+    findings = view["result"]["findings"]
+    conflict = next(i for i, f in enumerate(findings) if f["rule"] == "consistency.figures")
+    assert conflict in view["to_settle"]
+    assert all(findings[i]["about"] == "cards" for i in view["to_settle"])
+    assert [loc["figure"] for loc in findings[conflict]["locations"]] == ["30%", "25%"]
+    bad = client.post(
+        f"/v1/imports/{import_id}/settle",
+        json={"finding": conflict, "answer": "chosen", "value": "40%"},
         headers=me,
     )
-    assert accepted.status_code == 201, accepted.text
-    assert len(client.get("/v1/cards", headers=me).json()) == len(before) + 3
-
-
-def test_resume_preview_refuses_bad_files(client: TestClient) -> None:
-    me = as_user("importer")
-    old_doc = client.post(
-        "/v1/imports/preview", content=b"\xd0\xcf\x11\xe0" + b"\0" * 64, headers=me
+    assert bad.status_code == 409
+    settled = client.post(
+        f"/v1/imports/{import_id}/settle",
+        json={"finding": conflict, "answer": "chosen", "value": "25%"},
+        headers=me,
     )
+    assert settled.status_code == 200, settled.text
+    progress = settled.json()
+    [ref] = progress["settled"][str(conflict)]["changed"]
+    edited = progress["edits"][ref]
+    assert "~25%" in edited["framing"]["headline"]
+    assert edited["facts"]["figures"] == ["25%"]
+
+    # Changing the answer puts the import's own wording back.
+    unsure = client.post(
+        f"/v1/imports/{import_id}/settle",
+        json={"finding": conflict, "answer": "later"},
+        headers=me,
+    ).json()
+    assert unsure["edits"] == {}
+    client.post(
+        f"/v1/imports/{import_id}/settle",
+        json={"finding": conflict, "answer": "chosen", "value": "25%"},
+        headers=me,
+    )
+
+    approved = client.post(f"/v1/imports/{import_id}/cards/{ref}/approve", json={}, headers=me)
+    assert approved.status_code == 201, approved.text
+    card = approved.json()["card"]
+    assert card["status"] == "approved"
+    assert "~25%" in card["main"]["content"]["framing"]["headline"]
+    assert card["main"]["head"]["author_kind"] == "person"
+    again = client.post(f"/v1/imports/{import_id}/cards/{ref}/approve", json={}, headers=me)
+    assert again.status_code == 409
+
+    later = client.post(
+        f"/v1/imports/{import_id}/cards/card-1/decision", json={"state": "later"}, headers=me
+    )
+    assert later.json()["cards"]["card-1"] == {"state": "later", "card_id": None}
+    assert (
+        client.post(
+            f"/v1/imports/{import_id}/cards/card-999/decision",
+            json={"state": "later"},
+            headers=me,
+        ).status_code
+        == 404
+    )
+    assert len(client.get("/v1/cards", headers=me).json()) == len(before) + 1
+
+    someone = as_user("someone-else")
+    assert client.get(f"/v1/imports/{import_id}", headers=someone).status_code == 404
+    assert client.get(f"/v1/imports/{import_id}/original", headers=someone).status_code == 404
+    assert client.delete(f"/v1/imports/{import_id}", headers=someone).status_code == 404
+    assert client.get("/v1/imports", headers=someone).json() == []
+
+    assert client.delete(f"/v1/imports/{import_id}", headers=me).status_code == 204
+    assert client.get(f"/v1/imports/{import_id}", headers=me).status_code == 404
+    assert len(client.get("/v1/cards", headers=me).json()) == len(before) + 1
+
+
+def test_resume_import_refuses_bad_files(client: TestClient) -> None:
+    me = as_user("bad-files")
+    old_doc = client.post("/v1/imports", content=b"\xd0\xcf\x11\xe0" + b"\0" * 64, headers=me)
     assert old_doc.status_code == 422
     assert ".docx" in old_doc.json()["detail"]
-    too_big = client.post("/v1/imports/preview", content=b"x" * (5 * 1024 * 1024 + 1), headers=me)
+    too_big = client.post("/v1/imports", content=b"x" * (5 * 1024 * 1024 + 1), headers=me)
     assert too_big.status_code == 413
-    assert client.post("/v1/imports/preview", content=b"", headers=me).status_code == 422
-    assert client.post("/v1/imports/preview", content=b"hello").status_code == 401
+    assert client.post("/v1/imports", content=b"", headers=me).status_code == 422
+    assert client.post("/v1/imports", content=b"hello").status_code == 401
+    assert client.get("/v1/imports", headers=me).json() == []
