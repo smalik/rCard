@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from plytos_api.agents.assembler import Assembler
 from plytos_api.agents.check_in import CheckIn
 from plytos_api.agents.listener import Listener
 from plytos_api.agents.runtime import Agent
@@ -22,5 +23,6 @@ def crew(settings: Settings) -> dict[str, Agent]:
         Listener(thinker, settings.stitch_delay_seconds),
         Stitcher(thinker),
         CheckIn(thinker),
+        Assembler(thinker),
     ]
     return {a.name: a for a in agents}

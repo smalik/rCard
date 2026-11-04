@@ -62,6 +62,17 @@ from plytos_api.imports.store import (
     ImportView,
 )
 from plytos_api.keys import KeyShreddedError, Vault, kek_from_setting
+from plytos_api.resumes.as_written import as_written
+from plytos_api.resumes.model import ResumeChange, ResumeContent
+from plytos_api.resumes.render import RenderedResume, describe, render
+from plytos_api.resumes.store import (
+    ResumeDetail,
+    ResumeNotFoundError,
+    ResumeStore,
+    ResumeSummary,
+    ResumeVersionView,
+    StaleResumeError,
+)
 
 FILENAME_HEADER = "x-plytos-filename"
 ORIGINAL_TYPES = {
@@ -155,6 +166,86 @@ class Shared(BaseModel):
 class Kept(BaseModel):
     proposal: ProposalView
     card: CardDetail
+
+
+class MakeAsWritten(BaseModel):
+    import_id: UUID
+
+
+class SaveResume(BaseModel):
+    base_version_id: UUID
+    content: ResumeContent
+
+
+class RestoreResume(BaseModel):
+    number: int = Field(ge=1)
+    base_version_id: UUID
+
+
+class NameVersion(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+class RenameResume(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+class TakeChanges(BaseModel):
+    # The changes to take, by key. None of them passes on every change.
+    keys: list[str] = Field(max_length=1000)
+    base_version_id: UUID
+
+
+class AskForVersion(BaseModel):
+    # What the person asked, such as "Make a version for product roles at fintech companies".
+    text: str = Field(min_length=1, max_length=MAX_MESSAGE)
+
+
+class CopyResume(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    # Who the copy is for, in the person's words.
+    target: str = Field(min_length=1, max_length=200)
+    target_kind: TargetKind = "custom"
+
+
+class KeepResume(BaseModel):
+    # The person's changes to the proposed resume, if they made any first.
+    content: ResumeContent | None = None
+    # The cards whose proposed wording the person kept; None keeps them all.
+    rewordings: list[UUID] | None = None
+
+
+class Resumes(BaseModel):
+    resumes: list[ResumeSummary]
+    # Files with kept cards that no resume was made from yet.
+    ready: list[ImportSummary]
+
+
+class ResumePage(BaseModel):
+    resume: ResumeDetail
+    page: RenderedResume
+
+
+class ResumeVersionPage(BaseModel):
+    version: ResumeVersionView
+    content: ResumeContent
+    page: RenderedResume
+
+
+class LabeledChange(BaseModel):
+    change: ResumeChange
+    label: str
+
+
+class ProposedResume(BaseModel):
+    proposal: ProposalView
+    parent_name: str | None
+    page: RenderedResume
+
+
+class KeptResume(BaseModel):
+    proposal: ProposalView
+    resume: ResumeDetail
 
 
 class CheckInsSet(BaseModel):
@@ -262,6 +353,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.exception_handler(ProposalConflictError)
     async def proposal_conflict(_: Request, exc: ProposalConflictError) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=status.HTTP_409_CONFLICT)
+
+    @app.exception_handler(ResumeNotFoundError)
+    async def resume_not_found(_: Request, __: ResumeNotFoundError) -> JSONResponse:
+        return JSONResponse({"detail": "Not found"}, status_code=status.HTTP_404_NOT_FOUND)
+
+    @app.exception_handler(StaleResumeError)
+    async def stale_resume(_: Request, exc: StaleResumeError) -> JSONResponse:
+        return JSONResponse(
+            {
+                "detail": "This resume changed since you opened it. Review the latest version.",
+                "current_head_id": str(exc.current_head_id) if exc.current_head_id else None,
+            },
+            status_code=status.HTTP_409_CONFLICT,
+        )
 
     @app.exception_handler(KeyShreddedError)
     async def shredded(_: Request, __: KeyShreddedError) -> JSONResponse:
@@ -493,6 +598,171 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def dismiss(proposal_id: UUID, user_id: User) -> ProposalView:
         with db.as_user(user_id) as conn:
             return agents(conn, user_id).dismiss(proposal_id)
+
+    def resumes(conn: psycopg.Connection, user_id: UUID) -> tuple[ResumeStore, CardRepository]:
+        cipher = vault.cipher_for(conn, user_id)
+        return ResumeStore(conn, user_id, cipher), CardRepository(conn, user_id, cipher)
+
+    def page(detail: ResumeDetail, cards: CardRepository) -> ResumePage:
+        return ResumePage(resume=detail, page=render(detail.content, cards, detail.target_id))
+
+    @app.get("/v1/resumes")
+    def list_resumes(user_id: User) -> Resumes:
+        """The person's resumes, newest change first, and the files a resume
+        can still be made from as written."""
+        with db.as_user(user_id) as conn:
+            store, _ = resumes(conn, user_id)
+            made = store.imported()
+            ready = [
+                i for i in imports(conn, user_id).summaries() if i.approved > 0 and i.id not in made
+            ]
+            return Resumes(resumes=store.summaries(), ready=ready)
+
+    @app.post("/v1/resumes/as-written", status_code=status.HTTP_201_CREATED)
+    def make_as_written(body: MakeAsWritten, user_id: User) -> ResumePage:
+        """Makes the person's resume as they wrote it, from the cards they kept
+        from a file. Asking again for the same file returns the one made."""
+        with db.as_user(user_id) as conn:
+            store, cards = resumes(conn, user_id)
+            if body.import_id in store.imported():
+                made = next(r for r in store.summaries() if r.import_id == body.import_id)
+                return page(store.detail(made.id), cards)
+            view = imports(conn, user_id).get(body.import_id)
+            content = as_written(view.result, view.progress, cards.main_contents())
+            if not content.entries and not content.context:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    "Keep some cards from this file first.",
+                )
+            detail = store.create("My resume", content, person(user_id), import_id=view.id)
+            return page(detail, cards)
+
+    @app.get("/v1/resumes/{resume_id}")
+    def get_resume(resume_id: UUID, user_id: User) -> ResumePage:
+        with db.as_user(user_id) as conn:
+            store, cards = resumes(conn, user_id)
+            return page(store.detail(resume_id), cards)
+
+    @app.patch("/v1/resumes/{resume_id}")
+    def rename_resume(resume_id: UUID, body: RenameResume, user_id: User) -> ResumeDetail:
+        with db.as_user(user_id) as conn:
+            store, _ = resumes(conn, user_id)
+            return store.rename(resume_id, body.name)
+
+    @app.post("/v1/resumes/{resume_id}/versions", status_code=status.HTTP_201_CREATED)
+    def save_resume(resume_id: UUID, body: SaveResume, user_id: User) -> ResumePage:
+        """Saves a change as a new version. Every version stays and can be restored."""
+        with db.as_user(user_id) as conn:
+            store, cards = resumes(conn, user_id)
+            detail = store.save(resume_id, body.content, body.base_version_id, person(user_id))
+            return page(detail, cards)
+
+    @app.get("/v1/resumes/{resume_id}/versions/{number}")
+    def get_resume_version(resume_id: UUID, number: int, user_id: User) -> ResumeVersionPage:
+        """One earlier version, as it reads with the cards as they are now."""
+        with db.as_user(user_id) as conn:
+            store, cards = resumes(conn, user_id)
+            target_id = store.detail(resume_id).target_id
+            version, content = store.version(resume_id, number)
+            return ResumeVersionPage(
+                version=version, content=content, page=render(content, cards, target_id)
+            )
+
+    @app.post("/v1/resumes/{resume_id}/restore", status_code=status.HTTP_201_CREATED)
+    def restore_resume(resume_id: UUID, body: RestoreResume, user_id: User) -> ResumePage:
+        """Brings back an earlier version as a new one. Nothing is lost."""
+        with db.as_user(user_id) as conn:
+            store, cards = resumes(conn, user_id)
+            detail = store.restore(resume_id, body.number, body.base_version_id, person(user_id))
+            return page(detail, cards)
+
+    @app.post("/v1/resumes/{resume_id}/versions/{number}/name")
+    def name_resume_version(
+        resume_id: UUID, number: int, body: NameVersion, user_id: User
+    ) -> ResumeDetail:
+        """Names a version, such as "Sent to Contoso"."""
+        with db.as_user(user_id) as conn:
+            store, _ = resumes(conn, user_id)
+            return store.name_version(resume_id, number, body.name)
+
+    @app.get("/v1/resumes/{resume_id}/parent-changes")
+    def parent_changes(resume_id: UUID, user_id: User) -> list[LabeledChange]:
+        """Changes in the resume this one was made from that it hasn't taken."""
+        with db.as_user(user_id) as conn:
+            store, cards = resumes(conn, user_id)
+            library = cards.main_contents()
+            return [
+                LabeledChange(change=c, label=describe(c, library))
+                for c in store.parent_changes(resume_id)
+            ]
+
+    @app.post("/v1/resumes/{resume_id}/take", status_code=status.HTTP_201_CREATED)
+    def take_changes(resume_id: UUID, body: TakeChanges, user_id: User) -> ResumePage:
+        """Takes the chosen changes from the resume this one was made from, or
+        passes on them all with no keys."""
+        with db.as_user(user_id) as conn:
+            store, cards = resumes(conn, user_id)
+            detail = store.take(resume_id, body.keys, body.base_version_id, person(user_id))
+            return page(detail, cards)
+
+    @app.post("/v1/resumes/{resume_id}/copies", status_code=status.HTTP_201_CREATED)
+    def copy_resume(resume_id: UUID, body: CopyResume, user_id: User) -> ResumePage:
+        """Makes a version of a resume for a target by hand, without AI. It
+        starts the same as the resume it's made from."""
+        with db.as_user(user_id) as conn:
+            store, cards = resumes(conn, user_id)
+            source = store.detail(resume_id)
+            target = cards.create_target(body.target_kind, body.target, None)
+            content = source.content.model_copy(deep=True)
+            content.note = None
+            detail = store.create(
+                body.name,
+                content,
+                person(user_id),
+                target_id=target.id,
+                parent_id=source.id,
+                synced_parent_version_id=source.head.id,
+            )
+            return page(detail, cards)
+
+    @app.post("/v1/resumes/{resume_id}/ask", status_code=status.HTTP_201_CREATED)
+    def ask_for_version(resume_id: UUID, body: AskForVersion, user_id: User) -> MessageView:
+        """Asks Plytos, in the conversation, for a version of this resume. The
+        Assembler answers there with a proposal."""
+        with db.as_user(user_id) as conn:
+            store, _ = resumes(conn, user_id)
+            store.head_version_id(resume_id)  # 404 if it isn't theirs
+            return agents(conn, user_id).ask_for_resume(body.text, resume_id)
+
+    @app.get("/v1/proposals/{proposal_id}/resume")
+    def proposed_resume(proposal_id: UUID, user_id: User) -> ProposedResume:
+        """A proposed resume as it would read, with the wording drafted for it."""
+        with db.as_user(user_id) as conn:
+            proposal = agents(conn, user_id).proposal(proposal_id)
+            new = proposal.body.resume
+            if new is None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+            store, cards = resumes(conn, user_id)
+            try:
+                parent_name: str | None = store.detail(new.parent_id).name
+            except ResumeNotFoundError:
+                parent_name = None
+            proposed = {r.card: r.framing for r in new.rewordings}
+            return ProposedResume(
+                proposal=proposal,
+                parent_name=parent_name,
+                page=render(new.content, cards, None, proposed),
+            )
+
+    @app.post("/v1/proposals/{proposal_id}/keep-resume", status_code=status.HTTP_201_CREATED)
+    def keep_resume(proposal_id: UUID, body: KeepResume, user_id: User) -> KeptResume:
+        """Keeps a proposed resume, as proposed or as the person changed it."""
+        with db.as_user(user_id) as conn:
+            store, cards = resumes(conn, user_id)
+            proposal, resume = agents(conn, user_id).keep_resume(
+                proposal_id, cards, store, body.content, body.rewordings
+            )
+            return KeptResume(proposal=proposal, resume=resume)
 
     def check_ins(store: AgentStore) -> CheckIns:
         plan = store.check_in_plan()
