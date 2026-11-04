@@ -39,10 +39,10 @@ grant update (progress_ciphertext, updated_at) on plytos.resume_import to plytos
 -- Account deletion also removes imports.
 create or replace function plytos.purge_user(target_user uuid) returns void
 language plpgsql security definer
-set search_path = pg_catalog, plytos, vault
+set search_path = pg_catalog, plytos, plytos_vault
 as $$
 begin
-  delete from vault.user_key where user_id = target_user;
+  delete from plytos_vault.user_key where user_id = target_user;
   delete from plytos.event where owner_id = target_user;
   delete from plytos.resume_import where owner_id = target_user;
   update plytos.card_line set head_version_id = null where owner_id = target_user;

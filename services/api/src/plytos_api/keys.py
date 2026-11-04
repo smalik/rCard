@@ -126,14 +126,15 @@ class Vault:
         dek = AESGCM.generate_key(bit_length=256)
         wrapped = self._kek.wrap(dek, _key_aad(user_id))
         conn.execute(
-            "insert into vault.user_key (user_id, kek_name, wrapped_dek) values (%s, %s, %s)",
+            "insert into plytos_vault.user_key (user_id, kek_name, wrapped_dek)"
+            " values (%s, %s, %s)",
             (user_id, self._kek.name, wrapped),
         )
         return UserCipher(dek)
 
     def cipher_for(self, conn: psycopg.Connection, user_id: UUID) -> UserCipher:
         row = conn.execute(
-            "select wrapped_dek from vault.user_key where user_id = %s", (user_id,)
+            "select wrapped_dek from plytos_vault.user_key where user_id = %s", (user_id,)
         ).fetchone()
         if row is None:
             raise KeyShreddedError(str(user_id))

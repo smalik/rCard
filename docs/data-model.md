@@ -9,7 +9,7 @@ across hundreds of tailored variants. These rules make that hold. The schema is
 | Record | Table | What it is |
 | --- | --- | --- |
 | Person | `plytos.app_user` | The account. Identified by a sign-in subject, nothing else in clear text |
-| Data key | `vault.user_key` | The person's own 256-bit key, wrapped by the Cloud KMS key-encryption key |
+| Data key | `plytos_vault.user_key` | The person's own 256-bit key, wrapped by the Cloud KMS key-encryption key |
 | Card | `plytos.card` | One claim, kept for a whole career: kind, status, trust level |
 | Target | `plytos.target` | An audience that spans cards (Finance, then JP Morgan under it). Name encrypted |
 | Line | `plytos.card_line` | A card's line of versions. `target_id` null is the main line; otherwise a variant for one target |
@@ -65,6 +65,6 @@ every row they own. Any copy left in a backup is unreadable without the key.
 Backups of the main database also contain wrapped data keys, so a key deleted
 today stays recoverable from backups until they expire (7 days of
 point-in-time recovery, 14 daily backups). Before launch, either move
-`vault.user_key` to a separate store with short retention, or give each person
+`plytos_vault.user_key` to a separate store with short retention, or give each person
 a Cloud KMS key of their own and destroy it on deletion (about $0.06 per
 person per month). Account deletion should promise erasure within that window.

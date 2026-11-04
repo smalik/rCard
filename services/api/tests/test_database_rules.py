@@ -32,7 +32,7 @@ def test_people_only_see_their_own_rows(make_user, repo_for: RepoFor, db: Databa
         for table in ("card", "card_line", "card_version", "target", "event"):
             count = conn.execute(f"select count(*) from plytos.{table}").fetchone()  # noqa: S608
             assert count == (0,), table
-        assert conn.execute("select count(*) from vault.user_key").fetchone() == (1,)
+        assert conn.execute("select count(*) from plytos_vault.user_key").fetchone() == (1,)
 
 
 def test_without_a_person_set_nothing_is_visible(
@@ -42,7 +42,7 @@ def test_without_a_person_set_nothing_is_visible(
         repo.create_card("accomplishment", main_content(), ME)
     with db.pool.connection() as conn:
         assert conn.execute("select count(*) from plytos.card").fetchone() == (0,)
-        assert conn.execute("select count(*) from vault.user_key").fetchone() == (0,)
+        assert conn.execute("select count(*) from plytos_vault.user_key").fetchone() == (0,)
 
 
 def test_cannot_write_rows_for_someone_else(make_user, db: Database) -> None:
@@ -133,7 +133,7 @@ def test_deleting_an_account_shreds_the_key_and_every_row(
     with psycopg.connect(test_db.owner_url) as owner:
         for table, column in (
             ("plytos.app_user", "id"),
-            ("vault.user_key", "user_id"),
+            ("plytos_vault.user_key", "user_id"),
             ("plytos.card", "owner_id"),
             ("plytos.card_line", "owner_id"),
             ("plytos.card_version", "owner_id"),
