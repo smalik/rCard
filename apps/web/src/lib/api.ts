@@ -1,18 +1,11 @@
 import "server-only";
 
+import type { CardKind } from "./cards";
+import { type AcceptBody, FILENAME_HEADER } from "./import-review";
 import type { Session } from "./session";
 
 // The API is private: only this server talks to it, never the browser.
 const API_URL = process.env.PLYTOS_API_URL ?? "http://localhost:8000";
-
-export type CardKind =
-  | "role"
-  | "accomplishment"
-  | "skill"
-  | "project"
-  | "education"
-  | "credential"
-  | "story";
 
 export type CardSummary = {
   id: string;
@@ -28,8 +21,20 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    // The API's own explanation, when it gave one as plain text. Validation
+    // errors echo their input, so those never become a detail.
+    readonly detail: string | null = null,
   ) {
     super(message);
+  }
+}
+
+async function errorDetail(response: Response): Promise<string | null> {
+  try {
+    const body = (await response.json()) as { detail?: unknown };
+    return typeof body.detail === "string" ? body.detail : null;
+  } catch {
+    return null;
   }
 }
 
@@ -54,11 +59,41 @@ async function apiFetch<T>(path: string, session: Session, init: RequestInit = {
 
   const response = await fetch(`${API_URL}${path}`, { ...init, headers, cache: "no-store" });
   if (!response.ok) {
-    throw new ApiError(response.status, `${init.method ?? "GET"} ${path} failed`);
+    throw new ApiError(
+      response.status,
+      `${init.method ?? "GET"} ${path} failed`,
+      await errorDetail(response),
+    );
   }
   return (await response.json()) as T;
 }
 
 export function listCards(session: Session): Promise<CardSummary[]> {
   return apiFetch<CardSummary[]>("/v1/cards", session);
+}
+
+// Reads a resume and returns proposed cards and an audit. The API stores
+// nothing. The file name goes in a header, already URL-encoded, never in a URL.
+export function previewImport(
+  session: Session,
+  file: ArrayBuffer,
+  encodedFilename: string,
+): Promise<unknown> {
+  return apiFetch<unknown>("/v1/imports/preview", session, {
+    method: "POST",
+    body: file,
+    headers: {
+      "Content-Type": "application/octet-stream",
+      [FILENAME_HEADER]: encodedFilename,
+    },
+  });
+}
+
+// Saves the cards the person kept, all or none.
+export function acceptImport(session: Session, body: AcceptBody): Promise<{ id: string }[]> {
+  return apiFetch<{ id: string }[]>("/v1/imports/accept", session, {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json" },
+  });
 }

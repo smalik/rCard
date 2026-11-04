@@ -3,13 +3,17 @@
 These run on made-up resumes (tests/resume_samples.py), never a real person's.
 """
 
+import inspect
 import io
+import re
 import zipfile
 from datetime import date
 
 import pytest
 
 from plytos_api.cards.model import MainContent
+from plytos_api.imports import audit as audit_module
+from plytos_api.imports.audit import CARD_RULES
 from plytos_api.imports.dates import find_range, strip_range
 from plytos_api.imports.extract import UnsupportedFileError, _markings, extract
 from plytos_api.imports.model import ImportResult
@@ -25,6 +29,10 @@ TODAY = date(2026, 11, 4)
 @pytest.fixture(scope="module")
 def messy() -> ImportResult:
     return import_resume(messy_docx(), "Jordan Rivera Resume_NWL final.docx", today=TODAY)
+
+
+# Every rule the audit can raise, read from its source.
+ALL_RULES = set(re.findall(r'_finding\(\s*"([a-z]+\.[a-z_]+)"', inspect.getsource(audit_module)))
 
 
 def rules(result: ImportResult) -> set[str]:
@@ -124,6 +132,20 @@ def test_audit_finds_every_planted_problem(messy: ImportResult) -> None:
     assert planted <= rules(messy)
     severities = [f.severity for f in messy.findings]
     assert severities == sorted(severities, key=["fix", "improve", "note"].index)
+
+
+def test_findings_say_whether_they_travel_with_the_cards(messy: ImportResult) -> None:
+    about = {f.rule: f.about for f in messy.findings}
+    # Wording and dates come along into the cards.
+    assert about["consistency.tense"] == "cards"
+    assert about["content.weak_openers"] == "cards"
+    assert about["dates.overlap"] == "cards"
+    # Formatting and layout belong to this file only.
+    assert about["consistency.date_formats"] == "document"
+    assert about["consistency.bullets"] == "document"
+    assert about["ats.tables"] == "document"
+    assert about["file.tailored_name"] == "document"
+    assert CARD_RULES <= ALL_RULES
 
 
 def test_tense_slip_points_at_the_line(messy: ImportResult) -> None:

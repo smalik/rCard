@@ -189,6 +189,10 @@ class Finding(BaseModel):
     rule: str
     severity: Severity
     category: Category
+    # "cards" when the problem is in the words or facts that become cards, so
+    # it travels with them; "document" when it's about how this file is laid
+    # out or formatted, which goes away once the content lives in cards.
+    about: Literal["cards", "document"] = "document"
     title: str
     detail: str
     locations: list[Location] = Field(default_factory=list)

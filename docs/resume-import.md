@@ -46,6 +46,42 @@ Severity says how much it matters.
 Every finding names the lines it's about, so the review screen can show the
 problem on the card it belongs to.
 
+Each finding also says what it's `about`:
+
+- **`cards`**: the problem is in the words or facts that become cards (tense,
+  conflicting figures, duty openers, missing numbers, dates, gaps and
+  overlaps). It travels into the cards and needs fixing there.
+- **`document`**: the problem is in how this file is laid out or formatted
+  (date formats, bullet styles, fonts, text boxes, the file name). It doesn't
+  come along into the cards, because Plytos stores facts and words, not
+  formatting.
+
+The list of card rules is `CARD_RULES` in `imports/audit.py`.
+
+## Review screen
+
+`/import` in the web app (`apps/web/src/app/import`) is where a person imports
+a resume, on a phone first:
+
+1. They choose a file. The browser posts it to `/import/preview` on the web
+   server, which passes it to the private API and returns only what the
+   screen needs: the proposed cards and the findings. The resume's full text
+   and contact details stay on the server.
+2. **Audit** lists findings by severity in two groups, "In your words"
+   (`about: cards`) and "In the file" (`about: document`). A card finding
+   links to the cards it's about.
+3. **Cards** groups proposals the way a resume reads: summary, highlights,
+   each role with its accomplishments, then skills, education and the rest.
+   Each card shows its facts, the findings on its lines, and any questions
+   the import couldn't answer. The person can edit a card's headline,
+   description and facts, drop it, or drop a whole role.
+4. **Save** sends the kept cards to `/import/accept`, which saves them all or
+   none through `POST /v1/imports/accept`.
+
+On a laptop the audit and the cards sit side by side. The review lives only
+in the page: nothing goes to browser storage, and leaving asks first. Both
+route handlers refuse requests from other sites.
+
 ## Proposed cards
 
 | Resume part | Card |
@@ -79,6 +115,9 @@ numbers" rule only lets a variant use numbers its main version has.
 - Facts are compared only where a figure repeats between the summary or
   highlights and a role. Checking names and titles against each other needs
   language understanding and comes with the AI critics in M1.
+- Findings come from the uploaded file. Editing a card on the review screen
+  doesn't re-run them yet; the card marks them as found before the edit.
+- Findings don't come with proposed rewrites yet.
 
 ## Privacy
 
@@ -90,6 +129,9 @@ numbers" rule only lets a variant use numbers its main version has.
   made-up resumes in code. A real resume never enters the repo.
 
 ## Trying it
+
+Run the API and web app as in the README, then open
+<http://localhost:3000/import>. Or run the import alone:
 
 ```sh
 cd services/api

@@ -140,6 +140,37 @@ def audit(
     return findings
 
 
+# Problems in the words and facts themselves. They come along into the cards
+# and need fixing there. Every other rule is about the document: layout,
+# formatting consistency, how software reads it, or the file.
+CARD_RULES = frozenset(
+    {
+        "consistency.figures",
+        "consistency.tense",
+        "content.cliches",
+        "content.duplicates",
+        "content.first_person",
+        "content.long_bullets",
+        "content.no_bullets",
+        "content.no_numbers",
+        "content.objective",
+        "content.old_detail",
+        "content.personal_info",
+        "content.repeated_openers",
+        "content.skill_spelling",
+        "content.weak_openers",
+        "dates.end_before_start",
+        "dates.future",
+        "dates.gap",
+        "dates.many_current",
+        "dates.missing",
+        "dates.overlap",
+        "dates.undated_engagements",
+        "dates.year_only",
+    }
+)
+
+
 def _finding(
     rule: str,
     severity: Severity,
@@ -152,6 +183,7 @@ def _finding(
         rule=rule,
         severity=severity,
         category=category,
+        about="cards" if rule in CARD_RULES else "document",
         title=title,
         detail=detail,
         locations=[_loc(b) for b in where],
