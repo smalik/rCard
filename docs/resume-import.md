@@ -101,6 +101,8 @@ the card and its source side by side.
    roles, the rest). Each card shows its facts, open questions, the lines it
    came from, and wording tips. The person approves it, edits it first,
    leaves it out, or says "Not now", which keeps it as a draft for later.
+   A card that's already one of theirs says so, and approving carries on
+   that card (see "Bringing a resume in again" below).
 
 Every route handler checks the request came from Plytos's own pages. The
 screens get only the lines each card came from; the rest of the text and the
@@ -119,8 +121,39 @@ contact details stay on the server. Nothing goes to browser storage.
 | `POST /v1/imports/{id}/settle` | Answers one question. A chosen number rewrites the proposed cards that use the other |
 | `POST /v1/imports/{id}/cards/{ref}/decision` | Sets a proposed card aside for later, leaves it out, or undoes that |
 | `POST /v1/imports/{id}/cards/{ref}/place` | Answers a placement question: the card it sits under (`parent_ref`, or null for none) |
-| `POST /v1/imports/{id}/cards/{ref}/approve` | Makes the card, as proposed or in the person's edited words, as an approved card written by the person |
+| `POST /v1/imports/{id}/cards/{ref}/approve` | Makes the card, as proposed or in the person's edited words, as an approved card written by the person. For a card that matches one of theirs, `choice` says what happens: `update` (the default) saves it as that card's next version, `keep` links it to theirs as it is, `separate` makes a new card |
+| `GET /v1/imports/{id}/matches` | The person's cards that the proposed cards stand for, by ref, as their decisions stand. `GET /v1/imports/{id}` includes them too |
 | `DELETE /v1/imports/{id}` | Deletes the original file and everything read from it. Approved cards stay |
+
+## Bringing a resume in again
+
+A person brings in a resume more than once: an updated copy, or the same file
+again. Each employer, title and line they already keep as a card carries on
+as that card, so a new upload adds versions instead of duplicates
+(`imports/matching.py`).
+
+- A proposed card matches one of the person's cards of the same kind that sits
+  in the same place: under the card its parent became, or matched. It must go
+  by the same name: the employer (or its former name) for an employment, the
+  title for a position, the client and title for an engagement, the headline
+  for anything else.
+- Names are compared loosely: case, punctuation, a leading "The", company
+  suffixes such as "Inc." or "LLC", "Sr." for "Senior". Dates written on both
+  sides must overlap, so a second stint at the same employer stays its own
+  card. An employment without an employer, or a position without a title,
+  matches nothing.
+- Each of the person's cards is matched at most once per import, the oldest
+  first when two would fit.
+- Matching only proposes. On the Approve screen a matched card says which of
+  theirs it is, and the person picks:
+  - **Save as next version** (the default): the import's facts and wording
+    become the card's next main version, and the card's own facts that the
+    import doesn't mention stay. Nothing is saved when the import adds
+    nothing new.
+  - **Keep mine as it is**: the import links to their card without changing it.
+  - **Make a separate card**: as if nothing matched. The cards under it then
+    match nothing of theirs either.
+- A reworded line is a new card, under the person's matching title.
 
 ## Reading in the background
 

@@ -24,8 +24,9 @@ import psycopg
 from pydantic import BaseModel, Field
 
 from plytos_api.cards.model import MainContent, may_sit_under
-from plytos_api.cards.repository import Author, CardDetail, CardRepository
+from plytos_api.cards.repository import Author, CardDetail, CardRepository, CardText
 from plytos_api.ids import uuid7
+from plytos_api.imports.matching import CardMatch, Decided, match_cards, merged, unchanged
 from plytos_api.imports.model import DocFormat, Finding, ImportResult, ProposedCard
 from plytos_api.keys import UserCipher
 
@@ -133,6 +134,28 @@ class ImportView(BaseModel):
     progress: ImportProgress
     # Positions in result.findings of the things to settle before approving.
     to_settle: list[int]
+    # The person's cards that proposed cards stand for, by ref. Filled in by
+    # the API, which reads the person's cards (see find_matches).
+    matches: dict[str, CardMatch] = Field(default_factory=dict)
+
+
+# What to do with a proposed card that matches one of the person's cards:
+# save it as that card's next version, keep theirs as it is, or make a new card.
+MatchChoice = Literal["update", "keep", "separate"]
+
+
+def find_matches(
+    result: ImportResult,
+    progress: ImportProgress,
+    cards: dict[UUID, CardText],
+    wording: dict[str, MainContent] | None = None,
+) -> dict[str, CardMatch]:
+    """The person's card each proposed card stands for, by ref, as things stand:
+    the person's decisions, moves and edits count. `wording` overrides a card's."""
+    contents = {p.ref: progress.edits.get(p.ref) or p.content for p in result.cards}
+    contents.update(wording or {})
+    decided = {ref: Decided(state=d.state, card_id=d.card_id) for ref, d in progress.cards.items()}
+    return match_cards(result, decided, progress.moves, contents, cards)
 
 
 def to_settle(result: ImportResult | None) -> list[int]:
@@ -363,9 +386,15 @@ class ImportStore:
         content: MainContent | None,
         cards: CardRepository,
         author: Author,
+        choice: MatchChoice | None = None,
     ) -> tuple[CardDetail, ImportProgress]:
         """Saves one proposed card as an approved card, in the person's own words
-        or the wording they edited it to."""
+        or the wording they edited it to.
+
+        When it matches one of the person's cards (see matching.py), it carries
+        on as that card: saved as its next version ("update", the default), or
+        linked to it as it is ("keep"). Nothing is saved when the import adds
+        nothing new. "separate" makes a new card all the same."""
         result, progress = self._load(import_id)
         proposal = _proposal(result, ref)
         current = progress.cards.get(ref)
@@ -376,10 +405,33 @@ class ImportStore:
         chosen = content or progress.edits.get(ref) or proposal.content
         # It sits under the saved card of its nearest approved parent.
         chosen = chosen.model_copy(update={"parent": _saved_parent(result, progress, proposal)})
-        card = cards.create_card(proposal.kind, chosen, author, status="approved")
+
+        match: CardMatch | None = None
+        texts: dict[UUID, CardText] = {}
+        if choice != "separate":
+            texts = cards.main_contents()
+            match = find_matches(result, progress, texts, {ref: chosen}).get(ref)
+        if match is None and choice in ("update", "keep"):
+            raise ImportConflictError(
+                "That card doesn't match one of yours any more. Approve it as a new card."
+            )
+
+        if match is None:
+            card = cards.create_card(proposal.kind, chosen, author, status="approved")
+        else:
+            existing = texts[match.card_id].content
+            if choice != "keep" and not unchanged(existing, chosen):
+                head = cards.card_detail(match.card_id).main.head.id
+                cards.save_main_version(match.card_id, head, merged(existing, chosen), author)
+            card = cards.card_detail(match.card_id)
         progress.cards[ref] = CardDecision(state="approved", card_id=card.id)
         self._save_progress(import_id, progress)
         return card, progress
+
+    def matches(self, import_id: UUID, cards: CardRepository) -> dict[str, CardMatch]:
+        """The person's cards that this import's proposed cards stand for."""
+        result, progress = self._load(import_id)
+        return find_matches(result, progress, cards.main_contents())
 
     # -- reading -------------------------------------------------------------
 

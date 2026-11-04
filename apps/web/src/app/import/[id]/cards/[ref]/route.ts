@@ -1,6 +1,13 @@
-import { approveCard, decideCard, placeCard } from "../../../../../lib/api";
+import { approveCard, decideCard, getMatches, placeCard } from "../../../../../lib/api";
 import type { CardContent } from "../../../../../lib/cards";
-import { cleanContent, contentProblems } from "../../../../../lib/imports";
+import {
+  cleanContent,
+  contentProblems,
+  type MatchChoice,
+  type Progress,
+  toMatches,
+} from "../../../../../lib/imports";
+import type { Session } from "../../../../../lib/session";
 import {
   apiProblem,
   guard,
@@ -29,9 +36,23 @@ function isContent(value: unknown): value is CardContent {
   );
 }
 
+const CHOICES: MatchChoice[] = ["update", "keep", "separate"];
+
+// The new progress, and which of the person's cards the rest now stand for,
+// since a decision on a card changes what the cards under it can match.
+async function decided(
+  session: Session,
+  id: string,
+  progress: Progress,
+  status = 200,
+): Promise<Response> {
+  return ok({ progress, matches: toMatches(await getMatches(session, id)) }, status);
+}
+
 // The person's decision on one proposed card: approve it (as it is, or in
 // their edited words), set it aside for later, leave it out, or undo that.
-// "place" answers where it belongs: which job a result is from.
+// "place" answers where it belongs: which job a result is from. A card that
+// matches one of theirs can carry on as it ("choice").
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string; ref: string }> },
@@ -42,7 +63,7 @@ export async function POST(
   if (!isImportId(id) || !isCardRef(ref)) return problem(404, "That card isn't here any more.");
 
   const body = (await readJson(request)) as
-    | { action?: unknown; content?: unknown; parent_ref?: unknown }
+    | { action?: unknown; content?: unknown; parent_ref?: unknown; choice?: unknown }
     | undefined;
   const action = body?.action;
   try {
@@ -51,7 +72,7 @@ export async function POST(
       if (parentRef !== null && (typeof parentRef !== "string" || !isCardRef(parentRef))) {
         return problem(400, "That didn't come through. Try again.");
       }
-      return ok(await placeCard(session, id, ref, parentRef));
+      return await decided(session, id, await placeCard(session, id, ref, parentRef));
     }
     if (action === "approve") {
       const content = body?.content ?? null;
@@ -60,11 +81,16 @@ export async function POST(
         const problems = contentProblems(content);
         if (problems.length > 0) return problem(422, problems.join(" "));
       }
-      const result = await approveCard(session, id, ref, content && cleanContent(content));
-      return ok(result.progress, 201);
+      const choice = body?.choice ?? null;
+      if (choice !== null && !CHOICES.includes(choice as MatchChoice)) {
+        return problem(400, "That didn't come through. Try again.");
+      }
+      const cleaned = content && cleanContent(content);
+      const result = await approveCard(session, id, ref, cleaned, choice as MatchChoice | null);
+      return await decided(session, id, result.progress, 201);
     }
     if (action === "later" || action === "dropped" || action === "pending") {
-      return ok(await decideCard(session, id, ref, action));
+      return await decided(session, id, await decideCard(session, id, ref, action));
     }
     return problem(400, "That didn't come through. Try again.");
   } catch (error) {

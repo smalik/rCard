@@ -1,7 +1,13 @@
 import "server-only";
 
 import type { CardContent, CardKind } from "./cards";
-import { type Answer, FILENAME_HEADER, type ImportSummary, type Progress } from "./imports";
+import {
+  type Answer,
+  FILENAME_HEADER,
+  type ImportSummary,
+  type MatchChoice,
+  type Progress,
+} from "./imports";
 import type {
   ParentChanges,
   ProposedResume,
@@ -194,17 +200,25 @@ export function placeCard(
   );
 }
 
+// Approves a proposed card. One that matches the person's own card carries on
+// as it (see MatchChoice); `choice` null leaves that to the API's default.
 export function approveCard(
   session: Session,
   id: string,
   ref: string,
   content: CardContent | null,
+  choice: MatchChoice | null = null,
 ): Promise<{ card: { id: string }; progress: Progress }> {
   return apiFetch(
     `/v1/imports/${encodeURIComponent(id)}/cards/${encodeURIComponent(ref)}/approve`,
     session,
-    json({ content }),
+    json({ content, choice }),
   );
+}
+
+// The person's cards that an import's proposed cards stand for, as things stand.
+export function getMatches(session: Session, id: string): Promise<unknown> {
+  return apiFetch<unknown>(`/v1/imports/${encodeURIComponent(id)}/matches`, session);
 }
 
 // -- the conversation ---------------------------------------------------------
