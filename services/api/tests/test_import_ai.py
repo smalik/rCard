@@ -180,6 +180,16 @@ def test_client_engagements_sit_under_the_agency_role() -> None:
     assert client.organization == "Brightline Partners"
 
 
+def test_an_engagement_finds_its_agency_role_when_not_pointed_at_it() -> None:
+    reading = good_reading()
+    reading["roles"][4]["engagement_of"] = -1
+    result = _import(reading)
+    client = next(r for r in result.roles if r.client == "Fabrikam Foods")
+    assert client.parent_ref == next(r.ref for r in result.roles if r.title == "Consultant")
+    checks = next(c.needs_check for c in result.cards if c.role_ref == client.ref)
+    assert "What was your title on the Fabrikam Foods work?" in checks
+
+
 def test_values_the_resume_doesnt_say_are_dropped() -> None:
     reading = good_reading()
     reading["roles"][0]["employer"] = "Northwind Logistics Inc."

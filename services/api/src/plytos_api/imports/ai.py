@@ -456,13 +456,25 @@ def _roles(found: list[AiRole], blocks: dict[int, Block], lines: _Claim) -> list
             role.description = " ".join(blocks[i].text for i in description)
             role.description_blocks = description
         roles.append(role)
-    for ai, role in zip(found, roles, strict=True):
+    for n, (ai, role) in enumerate(zip(found, roles, strict=True)):
+        if not role.client:
+            continue
         parent_at = _line(ai.engagement_of)
-        if role.client and parent_at is not None and parent_at < len(roles):
-            parent = roles[parent_at]
-            if parent is not role and parent.parent_ref is None:
-                role.parent_ref = parent.ref
-                role.organization = role.organization or parent.organization
+        parent = roles[parent_at] if parent_at is not None and parent_at < len(roles) else None
+        if parent is None or parent is role or parent.client:
+            # Not pointed at its agency role: take the nearest role above at the same firm.
+            firm = (role.organization or "").lower()
+            parent = next(
+                (
+                    r
+                    for r in reversed(roles[:n])
+                    if not r.client and (not firm or (r.organization or "").lower() == firm)
+                ),
+                None,
+            )
+        if parent is not None:
+            role.parent_ref = parent.ref
+            role.organization = role.organization or parent.organization
     return roles
 
 
