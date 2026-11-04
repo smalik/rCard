@@ -1,0 +1,67 @@
+name: Deploy
+
+# Manual only until there is something to ship. Needs the repository
+# variables that `terraform output github_actions_variables` prints.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  REGION: ${{ vars.GCP_REGION }}
+  REGISTRY: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/plytos
+  CLOUD_SQL_PROXY_VERSION: v2.14.1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build and push images
+        run: |
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+          docker build --tag "$REGISTRY/api:$GITHUB_SHA" services/api
+          docker build --tag "$REGISTRY/web:$GITHUB_SHA" apps/web
+          docker push "$REGISTRY/api:$GITHUB_SHA"
+          docker push "$REGISTRY/web:$GITHUB_SHA"
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Run database migrations
+        working-directory: services/api
+        env:
+          PLYTOS_DATABASE_URL: postgresql://${{ vars.PLYTOS_MIGRATE_DB_USER }}@127.0.0.1:5432/plytos?sslmode=disable
+          PLYTOS_APP_LOGIN_ROLES: ${{ vars.PLYTOS_API_DB_USER }}
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/cloud-sql-proxy" \
+            "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/$CLOUD_SQL_PROXY_VERSION/cloud-sql-proxy.linux.amd64"
+          chmod +x "$RUNNER_TEMP/cloud-sql-proxy"
+          "$RUNNER_TEMP/cloud-sql-proxy" --auto-iam-authn \
+            --impersonate-service-account="${{ vars.GCP_MIGRATE_SA }}" \
+            --address=127.0.0.1 --port=5432 "${{ vars.GCP_SQL_INSTANCE }}" &
+          for _ in $(seq 1 30); do nc -z 127.0.0.1 5432 && break; sleep 1; done
+          uv sync --locked --no-dev
+          uv run python -m plytos_api.migrate
+          kill %1
+
+      - name: Deploy services
+        run: |
+          gcloud run services update plytos-api --region "$REGION" \
+            --container api --image "$REGISTRY/api:$GITHUB_SHA"
+          gcloud run services update plytos-web --region "$REGION" \
+            --image "$REGISTRY/web:$GITHUB_SHA"
