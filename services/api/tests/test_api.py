@@ -1,16 +1,21 @@
 from collections.abc import Iterator
 from urllib.parse import quote, unquote
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
 
-from plytos_api.agents.model import NewCard, ProposalBody
+from plytos_api.agents.model import NewCard, NewResume, ProposalBody, Rewording
 from plytos_api.agents.store import AgentStore
 from plytos_api.auth import find_or_create_user
+from plytos_api.cards.model import Framing
+from plytos_api.cards.repository import Author
 from plytos_api.config import Settings
 from plytos_api.db import Database
 from plytos_api.keys import Vault
 from plytos_api.main import create_app
+from plytos_api.resumes.model import ResumeContent
+from plytos_api.resumes.store import ResumeStore
 
 from .conftest import DbUrls, main_content
 from .resume_samples import promotions_text
@@ -373,3 +378,190 @@ def test_check_ins_over_http(client: TestClient) -> None:
         assert refused.status_code == 422, bad
     unknown = client.put("/v1/check-ins", json=plan | {"time_zone": "Mars/Olympus"}, headers=me)
     assert unknown.json()["detail"] == "Plytos doesn't know that time zone."
+
+
+def test_resume_flow_over_http(client: TestClient) -> None:
+    me, other = as_user("api-resumes"), as_user("api-resumes-other")
+    imported = client.post(
+        "/v1/imports",
+        content=promotions_text().encode(),
+        headers=me | {"X-Plytos-Filename": quote("Avery Quinn.txt")},
+    ).json()
+    import_id = imported["id"]
+    assert client.get("/v1/resumes", headers=me).json() == {"resumes": [], "ready": []}
+    nothing = client.post("/v1/resumes/as-written", json={"import_id": import_id}, headers=me)
+    assert nothing.status_code == 422
+    for card in imported["result"]["cards"]:
+        approved = client.post(
+            f"/v1/imports/{import_id}/cards/{card['ref']}/approve", json={}, headers=me
+        )
+        assert approved.status_code == 201, approved.text
+    [ready] = client.get("/v1/resumes", headers=me).json()["ready"]
+    assert ready["id"] == import_id
+
+    made = client.post("/v1/resumes/as-written", json={"import_id": import_id}, headers=me)
+    assert made.status_code == 201, made.text
+    resume, page = made.json()["resume"], made.json()["page"]
+    resume_id, v1 = resume["id"], resume["head"]["id"]
+    assert resume["import_id"] == import_id and resume["head"]["number"] == 1
+    assert page["header"]["name"] == "Avery Quinn"
+    assert page["entries"][0]["employer"] == "Northwind Logistics"
+    again = client.post("/v1/resumes/as-written", json={"import_id": import_id}, headers=me)
+    assert again.json()["resume"]["id"] == resume_id
+    listed = client.get("/v1/resumes", headers=me).json()
+    assert [r["id"] for r in listed["resumes"]] == [resume_id] and listed["ready"] == []
+
+    content = resume["content"]
+    first_entry = content["entries"][0]
+    content["entries"] = content["entries"][1:]
+    preview = client.post(f"/v1/resumes/{resume_id}/preview", json=content, headers=me)
+    assert preview.status_code == 200, preview.text
+    assert first_entry["card"] in [e["card"] for e in preview.json()["left_out"]]
+    assert (
+        client.get(f"/v1/resumes/{resume_id}", headers=me).json()["resume"]["head"]["number"] == 1
+    )
+    saved = client.post(
+        f"/v1/resumes/{resume_id}/versions",
+        json={"base_version_id": v1, "content": content},
+        headers=me,
+    )
+    assert saved.status_code == 201, saved.text
+    v2 = saved.json()["resume"]["head"]["id"]
+    assert [e["card"] for e in saved.json()["page"]["left_out"]].count(first_entry["card"]) == 1
+    stale = client.post(
+        f"/v1/resumes/{resume_id}/versions",
+        json={"base_version_id": v1, "content": content},
+        headers=me,
+    )
+    assert stale.status_code == 409 and stale.json()["current_head_id"] == v2
+
+    old = client.get(f"/v1/resumes/{resume_id}/versions/1", headers=me).json()
+    assert old["version"]["number"] == 1 and old["content"]["entries"][0] == first_entry
+    restored = client.post(
+        f"/v1/resumes/{resume_id}/restore", json={"number": 1, "base_version_id": v2}, headers=me
+    )
+    assert restored.status_code == 201, restored.text
+    assert restored.json()["resume"]["head"]["note"] == "Back to version 1"
+    named = client.post(
+        f"/v1/resumes/{resume_id}/versions/3/name", json={"name": "Sent to Contoso"}, headers=me
+    )
+    assert named.json()["versions"][2]["names"] == ["Sent to Contoso"]
+
+    copy = client.post(
+        f"/v1/resumes/{resume_id}/copies",
+        json={"name": "Fintech", "target": "Fintech operations roles", "target_kind": "industry"},
+        headers=me,
+    )
+    assert copy.status_code == 201, copy.text
+    copy_id = copy.json()["resume"]["id"]
+    assert copy.json()["resume"]["parent_name"] == "My resume"
+    assert copy.json()["resume"]["target_name"] == "Fintech operations roles"
+
+    head = restored.json()["resume"]["head"]["id"]
+    trimmed = restored.json()["resume"]["content"]
+    trimmed["context"] = []
+    client.post(
+        f"/v1/resumes/{resume_id}/versions",
+        json={"base_version_id": head, "content": trimmed},
+        headers=me,
+    )
+    reviewed = client.get(f"/v1/resumes/{copy_id}/parent-changes", headers=me).json()
+    changes = reviewed["changes"]
+    assert reviewed["parent_version_id"] is not None
+    assert [c["change"]["kind"] for c in changes] == ["context_removed"]
+    assert changes[0]["label"].startswith("Removed “")
+    taken = client.post(
+        f"/v1/resumes/{copy_id}/take",
+        json={
+            "keys": [changes[0]["change"]["key"]],
+            "base_version_id": copy.json()["resume"]["head"]["id"],
+            "parent_version_id": reviewed["parent_version_id"],
+        },
+        headers=me,
+    )
+    assert taken.status_code == 201, taken.text
+    assert taken.json()["resume"]["content"]["context"] == []
+
+    asked = client.post(
+        f"/v1/resumes/{resume_id}/ask", json={"text": "A version for fintech ops"}, headers=me
+    )
+    assert asked.status_code == 201 and asked.json()["resume_id"] == resume_id
+
+    assert client.get(f"/v1/resumes/{resume_id}", headers=other).status_code == 404
+    assert client.get(f"/v1/resumes/{resume_id}/versions/1", headers=other).status_code == 404
+    assert (
+        client.post(f"/v1/resumes/{resume_id}/ask", json={"text": "Mine now"}, headers=other)
+    ).status_code == 404
+    assert client.get("/v1/resumes", headers=other).json() == {"resumes": [], "ready": []}
+
+
+def test_a_proposed_resume_over_http(client: TestClient, db: Database, vault: Vault) -> None:
+    me = as_user("api-resume-proposal")
+    card = client.post(
+        "/v1/cards",
+        json={
+            "kind": "employment",
+            "content": {
+                "facts": {"employer": "Northwind Logistics", "start": "2014-03"},
+                "framing": {"headline": "Northwind Logistics"},
+            },
+        },
+        headers=me,
+    ).json()
+    win = client.post(
+        "/v1/cards",
+        json={
+            "kind": "accomplishment",
+            "content": {
+                "parent": card["id"],
+                "facts": {"figures": ["22%"]},
+                "framing": {"headline": "Cut late shipments by 22%"},
+            },
+        },
+        headers=me,
+    ).json()
+    content = {"entries": [{"card": card["id"], "items": [{"card": win["id"]}]}]}
+    user_id = find_or_create_user(db, vault, "dev:api-resume-proposal")
+    with db.as_user(user_id) as conn:
+        cipher = vault.cipher_for(conn, user_id)
+        parent = ResumeStore(conn, user_id, cipher).create(
+            "My resume", ResumeContent.model_validate(content), Author("person")
+        )
+        proposal = AgentStore(conn, user_id, cipher).propose(
+            "assembler",
+            "resume",
+            ProposalBody(
+                message="Here's a version for fintech.",
+                resume=NewResume(
+                    name="Fintech",
+                    target="Fintech operations roles",
+                    target_kind="industry",
+                    parent_id=parent.id,
+                    parent_version_id=parent.head.id,
+                    content=ResumeContent.model_validate(content),
+                    rewordings=[
+                        Rewording(
+                            card=UUID(win["id"]),
+                            framing=Framing(headline="Cut late deliveries 22%"),
+                        )
+                    ],
+                ),
+            ),
+        )
+    preview = client.get(f"/v1/proposals/{proposal.id}/resume", headers=me)
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["parent_name"] == "My resume"
+    [role] = preview.json()["page"]["entries"][0]["roles"]
+    assert [(i["text"], i["wording"]) for i in role["items"]] == [
+        ("Cut late deliveries 22%", "target")
+    ]
+    kept = client.post(f"/v1/proposals/{proposal.id}/keep-resume", json={}, headers=me)
+    assert kept.status_code == 201, kept.text
+    assert kept.json()["proposal"]["state"] == "kept"
+    resume = kept.json()["resume"]
+    assert resume["parent_id"] == str(parent.id)
+    assert resume["head"]["author_kind"] == "ai"
+    shown = client.get(f"/v1/resumes/{resume['id']}", headers=me).json()["page"]
+    assert shown["entries"][0]["roles"][0]["items"][0]["text"] == "Cut late deliveries 22%"
+    again = client.post(f"/v1/proposals/{proposal.id}/keep-resume", json={}, headers=me)
+    assert again.status_code == 409

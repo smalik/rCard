@@ -116,6 +116,17 @@ class ResumeChange(BaseModel):
     fold_earlier: bool | None = None
 
 
+def keep_wording(content: ResumeContent, target_id: UUID) -> ResumeContent:
+    """The same content, with each line that followed its resume's target
+    pinned to that target's wording, so a copy made for another target reads
+    the same until the person changes it."""
+    out = content.model_copy(deep=True)
+    for item in [i for e in out.entries for i in e.items] + list(out.context):
+        if item.wording == "auto" and item.version is None:
+            item.wording = target_id
+    return out
+
+
 def _key(kind: str, card: UUID) -> str:
     return f"{kind}:{card}"
 

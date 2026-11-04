@@ -25,6 +25,7 @@ from plytos_api.agents.thinking import Usage
 from plytos_api.cards.repository import CardRepository
 from plytos_api.db import Database
 from plytos_api.keys import Vault
+from plytos_api.resumes.store import ResumeStore
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ class Context:
     user_id: UUID
     store: AgentStore
     cards: CardRepository
+    resumes: ResumeStore
     usage: Usage = field(default_factory=Usage)
 
 
@@ -108,6 +110,7 @@ class Worker:
                     user_id=owner_id,
                     store=store,
                     cards=CardRepository(conn, owner_id, cipher),
+                    resumes=ResumeStore(conn, owner_id, cipher),
                 )
                 agent.run(ctx)
                 store.finish_run(

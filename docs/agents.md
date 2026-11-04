@@ -102,6 +102,22 @@ worker was down) is skipped. Either way the next month's is queued. The
 person's answer goes to the Listener like any message, which reads it with the
 question before it.
 
+**Assembler** (`agents/assembler.py`) puts together a version of a resume
+for a target. The person asks from a resume's page ("Make a version for…")
+or just says it in the conversation, and the Listener hands it over. It
+starts from the resume asked about, or else the person's own as written,
+and picks from everything on file: which employments show, which
+accomplishments are switched on under each and in what order, what comes
+along at the end, whether earlier titles fold, and up to eight lines to word
+for the target. The model sees refs (E1, A3, C2), never IDs, and an
+accomplishment it puts under the wrong employment is dropped, as is a
+rewording with a number its card doesn't have. If the ask doesn't say who
+it's for, it asks once, and the answer keeps the resume the ask was about. It proposes; keeping it creates the target, makes
+the resume from the one it started with (its first version is the
+Assembler's), and turns each kept rewording into the card's variant for that
+target, also the Assembler's. Keeping after changes makes the first version
+the person's. With AI off, it says so and points to making a copy by hand.
+
 ## A resume in the conversation
 
 The person can share a resume from the composer (or "Start from my resume"
@@ -121,7 +137,22 @@ uses the import screens for now.
 | `POST /v1/conversation/resume` | The person shares a resume (the file is the body, its name in `X-Plytos-Filename`). Returns both messages and the import's summary |
 | `GET /v1/proposals?state=open` | Proposals, by state |
 | `POST /v1/proposals/{id}/keep` | Keeps a proposed card, as proposed or with the person's edits (`content`) |
+| `GET /v1/proposals/{id}/resume` | A proposed resume as it would read, with the wording drafted for it |
+| `POST /v1/proposals/{id}/keep-resume` | Keeps a proposed resume, as proposed or with the person's changes (`content`), and the rewordings they kept (`rewordings`, card IDs; omitted keeps all) |
 | `POST /v1/proposals/{id}/dismiss` | Says no to a proposal |
+| `GET /v1/resumes` | The person's resumes, and files with kept cards that no resume was made from yet |
+| `POST /v1/resumes/as-written` | Makes the resume as written from a file's kept cards (`import_id`). Asking again returns the one made |
+| `GET /v1/resumes/{id}` | A resume with its versions, and the page as it reads now |
+| `PATCH /v1/resumes/{id}` | Renames it |
+| `POST /v1/resumes/{id}/preview` | How a change would read (the body is the content), without saving it |
+| `POST /v1/resumes/{id}/versions` | Saves a change as a new version (`base_version_id`, `content`); 409 if it moved on |
+| `GET /v1/resumes/{id}/versions/{n}` | One earlier version and how it reads |
+| `POST /v1/resumes/{id}/restore` | Brings version `number` back as a new version |
+| `POST /v1/resumes/{id}/versions/{n}/name` | Names a version |
+| `GET /v1/resumes/{id}/parent-changes` | Changes in the resume it was made from that it hasn't taken, each said plainly, and the parent version they run to (`parent_version_id`) |
+| `POST /v1/resumes/{id}/take` | Takes the changes named by `keys` and catches up with `parent_version_id`, the version reviewed; no keys passes on them all. A parent change made meanwhile still shows afterwards |
+| `POST /v1/resumes/{id}/copies` | Makes a version for a target by hand (`name`, `target`, `target_kind`). Lines worded for the source's target keep that wording |
+| `POST /v1/resumes/{id}/ask` | Asks Plytos in the conversation for a version of this resume (`text`); the Assembler answers there |
 | `GET /v1/tidbits?card_id=` | The person's notes, oldest first, all or under one job |
 | `GET /v1/agent-runs` | What the agents did lately, for "how I got here". Never content |
 | `GET /v1/check-ins` | The check-in plan, said plainly, and when the next one is due. No plan means the person hasn't been asked yet |
@@ -131,5 +162,5 @@ uses the import screens for now.
 
 Check-ins reach people only when they open the app for now. Next come
 notifications (web push, then text messages after carrier registration), moving
-the resume import's card review into the conversation, and then the Scout and
-Assembler for applying.
+the resume import's card review into the conversation, and then the Scout for
+finding roles to apply to.

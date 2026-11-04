@@ -14,7 +14,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from plytos_api.cards.model import CardKind, MainContent
+from plytos_api.cards.model import CardKind, Framing, MainContent, TargetKind
+from plytos_api.resumes.model import ResumeContent
 
 AgentName = Literal[
     "check_in",
@@ -62,6 +63,33 @@ class NewCard(BaseModel):
     missing: str | None = Field(default=None, max_length=300)
 
 
+class Rewording(BaseModel):
+    """A line worded for the resume's target. Kept, it becomes the card's
+    variant for that target: framing only, and every number from the card."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    card: UUID
+    framing: Framing
+
+
+class NewResume(BaseModel):
+    """A resume an agent proposes: a version of another resume, made for a target.
+    Keeping it makes the resume, with the target, as a branch of its parent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=120)
+    # Who it's for, in the person's terms ("Product roles at fintech companies").
+    target: str = Field(min_length=1, max_length=200)
+    target_kind: TargetKind
+    parent_id: UUID
+    # The parent's version it was made from, which it starts caught up with.
+    parent_version_id: UUID
+    content: ResumeContent
+    rewordings: list[Rewording] = Field(default_factory=list, max_length=60)
+
+
 class ProposalBody(BaseModel):
     """A proposal's encrypted content."""
 
@@ -70,6 +98,7 @@ class ProposalBody(BaseModel):
     # What Plytos says when it offers this, in the conversation.
     message: str = Field(min_length=1, max_length=MAX_MESSAGE)
     card: NewCard | None = None
+    resume: NewResume | None = None
 
 
 class ProposalView(BaseModel):
@@ -83,6 +112,8 @@ class ProposalView(BaseModel):
     created_at: datetime
     decided_at: datetime | None
     result_version_id: UUID | None
+    # The resume version made when the person kept a proposed resume.
+    result_resume_version_id: UUID | None = None
 
 
 class MessageView(BaseModel):
@@ -94,6 +125,8 @@ class MessageView(BaseModel):
     proposal: ProposalView | None = None
     # A resume shared in the conversation, while its import is kept.
     import_id: UUID | None = None
+    # A resume the message is about, such as one the person asked a version of.
+    resume_id: UUID | None = None
 
 
 class TidbitView(BaseModel):

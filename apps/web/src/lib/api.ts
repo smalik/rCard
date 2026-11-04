@@ -2,6 +2,16 @@ import "server-only";
 
 import type { CardContent, CardKind } from "./cards";
 import { type Answer, FILENAME_HEADER, type ImportSummary, type Progress } from "./imports";
+import type {
+  ParentChanges,
+  ProposedResume,
+  RenderedResume,
+  ResumeContent,
+  ResumeDetail,
+  ResumePage,
+  Resumes,
+  ResumeVersionPage,
+} from "./resumes";
 import type { Session } from "./session";
 import type { CheckInPlan, CheckIns, Message, Proposal, Thread } from "./talk";
 
@@ -244,4 +254,131 @@ export function dismissProposal(session: Session, id: string): Promise<Proposal>
   return apiFetch<Proposal>(`/v1/proposals/${encodeURIComponent(id)}/dismiss`, session, {
     method: "POST",
   });
+}
+
+// -- resumes ------------------------------------------------------------------
+
+function resumePath(id: string, rest = ""): string {
+  return `/v1/resumes/${encodeURIComponent(id)}${rest}`;
+}
+
+export function listResumes(session: Session): Promise<Resumes> {
+  return apiFetch<Resumes>("/v1/resumes", session);
+}
+
+// Makes the person's resume as they wrote it, from the cards they kept from a
+// file. Asking again for the same file returns the one made.
+export function makeAsWritten(session: Session, importId: string): Promise<ResumePage> {
+  return apiFetch<ResumePage>("/v1/resumes/as-written", session, json({ import_id: importId }));
+}
+
+export function getResume(session: Session, id: string): Promise<ResumePage> {
+  return apiFetch<ResumePage>(resumePath(id), session);
+}
+
+export function getResumeVersion(
+  session: Session,
+  id: string,
+  number: number,
+): Promise<ResumeVersionPage> {
+  return apiFetch<ResumeVersionPage>(resumePath(id, `/versions/${number}`), session);
+}
+
+// How a change would read, without saving it.
+export function previewResume(
+  session: Session,
+  id: string,
+  content: ResumeContent,
+): Promise<RenderedResume> {
+  return apiFetch<RenderedResume>(resumePath(id, "/preview"), session, json(content));
+}
+
+export function saveResume(
+  session: Session,
+  id: string,
+  baseVersionId: string,
+  content: ResumeContent,
+): Promise<ResumePage> {
+  return apiFetch<ResumePage>(
+    resumePath(id, "/versions"),
+    session,
+    json({ base_version_id: baseVersionId, content }),
+  );
+}
+
+export function restoreResume(
+  session: Session,
+  id: string,
+  number: number,
+  baseVersionId: string,
+): Promise<ResumePage> {
+  return apiFetch<ResumePage>(
+    resumePath(id, "/restore"),
+    session,
+    json({ number, base_version_id: baseVersionId }),
+  );
+}
+
+export function nameResumeVersion(
+  session: Session,
+  id: string,
+  number: number,
+  name: string,
+): Promise<ResumeDetail> {
+  return apiFetch<ResumeDetail>(resumePath(id, `/versions/${number}/name`), session, json({ name }));
+}
+
+export function renameResume(session: Session, id: string, name: string): Promise<ResumeDetail> {
+  return apiFetch<ResumeDetail>(resumePath(id), session, { ...json({ name }), method: "PATCH" });
+}
+
+export function parentChanges(session: Session, id: string): Promise<ParentChanges> {
+  return apiFetch<ParentChanges>(resumePath(id, "/parent-changes"), session);
+}
+
+// Takes the chosen changes from the resume this one was made from; no keys
+// passes on them all. It settles only up to the parent version reviewed.
+export function takeChanges(
+  session: Session,
+  id: string,
+  keys: string[],
+  baseVersionId: string,
+  parentVersionId: string | null,
+): Promise<ResumePage> {
+  return apiFetch<ResumePage>(
+    resumePath(id, "/take"),
+    session,
+    json({ keys, base_version_id: baseVersionId, parent_version_id: parentVersionId }),
+  );
+}
+
+// A version for a target, made by hand: it starts the same as this resume.
+export function copyResume(
+  session: Session,
+  id: string,
+  name: string,
+  target: string,
+): Promise<ResumePage> {
+  return apiFetch<ResumePage>(
+    resumePath(id, "/copies"),
+    session,
+    json({ name, target, target_kind: "custom" }),
+  );
+}
+
+// Asks Plytos in the conversation for a version of this resume. The
+// Assembler answers there.
+export function askForVersion(session: Session, id: string, text: string): Promise<Message> {
+  return apiFetch<Message>(resumePath(id, "/ask"), session, json({ text }));
+}
+
+export function getProposedResume(session: Session, id: string): Promise<ProposedResume> {
+  return apiFetch<ProposedResume>(`/v1/proposals/${encodeURIComponent(id)}/resume`, session);
+}
+
+export function keepResume(
+  session: Session,
+  id: string,
+): Promise<{ proposal: Proposal; resume: ResumeDetail }> {
+  return apiFetch(`/v1/proposals/${encodeURIComponent(id)}/keep-resume`, session, json({}));
 }

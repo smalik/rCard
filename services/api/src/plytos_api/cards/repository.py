@@ -27,6 +27,7 @@ from plytos_api.cards.model import (
     SCHEMA_VERSION,
     AuthorKind,
     CardKind,
+    Framing,
     MainContent,
     TargetKind,
     VariantContent,
@@ -115,6 +116,15 @@ class CardSummary(BaseModel):
     variants_behind: int
 
 
+@dataclass(frozen=True)
+class CardText:
+    """A card's kind, place and current main content."""
+
+    kind: CardKind
+    parent_id: UUID | None
+    content: MainContent
+
+
 class TargetView(BaseModel):
     id: UUID
     kind: TargetKind
@@ -156,7 +166,7 @@ def version_aad(version_id: UUID) -> bytes:
     return b"plytos.card_version:" + version_id.bytes
 
 
-def _target_aad(target_id: UUID) -> bytes:
+def target_aad(target_id: UUID) -> bytes:
     return b"plytos.target:" + target_id.bytes
 
 
@@ -235,7 +245,7 @@ class CardRepository:
             if parent is None:
                 raise CardNotFoundError(str(parent_id))
         target_id = uuid7()
-        ciphertext = self._cipher.encrypt(name.encode(), _target_aad(target_id))
+        ciphertext = self._cipher.encrypt(name.encode(), target_aad(target_id))
         self._conn.execute(
             "insert into plytos.target (id, owner_id, kind, parent_id, name_ciphertext)"
             " values (%s, %s, %s, %s, %s)",
@@ -253,7 +263,7 @@ class CardRepository:
                 id=r[0],
                 kind=r[1],
                 parent_id=r[2],
-                name=self._cipher.decrypt(bytes(r[3]), _target_aad(r[0])).decode(),
+                name=self._cipher.decrypt(bytes(r[3]), target_aad(r[0])).decode(),
             )
             for r in rows
         ]
@@ -338,6 +348,62 @@ class CardRepository:
                 )
             )
         return summaries
+
+    def main_contents(self) -> dict[UUID, CardText]:
+        """Every card's kind, place and current main content, in one query. For
+        building a whole resume at once."""
+        rows = self._conn.execute(
+            "select c.id, c.kind, c.parent_id, v.id, v.content_ciphertext"
+            " from plytos.card c"
+            " join plytos.card_line l on l.card_id = c.id and l.target_id is null"
+            " join plytos.card_version v on v.id = l.head_version_id"
+            " where c.status <> 'archived' and v.content_ciphertext is not null"
+        ).fetchall()
+        return {
+            r[0]: CardText(
+                kind=r[1],
+                parent_id=r[2],
+                content=MainContent.model_validate_json(
+                    self._cipher.decrypt(bytes(r[4]), version_aad(r[3]))
+                ),
+            )
+            for r in rows
+        }
+
+    def variant_framings(self, target_id: UUID) -> dict[UUID, Framing]:
+        """The current wording each card has for one target, by card."""
+        rows = self._conn.execute(
+            "select l.card_id, v.id, v.content_ciphertext from plytos.card_line l"
+            " join plytos.card_version v on v.id = l.head_version_id"
+            " where l.target_id = %s and v.content_ciphertext is not null",
+            (target_id,),
+        ).fetchall()
+        return {
+            r[0]: VariantContent.model_validate_json(
+                self._cipher.decrypt(bytes(r[2]), version_aad(r[1]))
+            ).framing
+            for r in rows
+        }
+
+    def version_framings(self, version_ids: Sequence[UUID]) -> dict[UUID, Framing]:
+        """The wording of particular card versions, main or variant, by version."""
+        if not version_ids:
+            return {}
+        rows = self._conn.execute(
+            "select v.id, l.target_id, v.content_ciphertext from plytos.card_version v"
+            " join plytos.card_line l on l.id = v.line_id"
+            " where v.id = any(%s) and v.content_ciphertext is not null",
+            (list(version_ids),),
+        ).fetchall()
+        out: dict[UUID, Framing] = {}
+        for version_id, target_id, blob in rows:
+            raw = self._cipher.decrypt(bytes(blob), version_aad(version_id))
+            out[version_id] = (
+                MainContent.model_validate_json(raw).framing
+                if target_id is None
+                else VariantContent.model_validate_json(raw).framing
+            )
+        return out
 
     def card_detail(self, card_id: UUID) -> CardDetail:
         card = self._conn.execute(

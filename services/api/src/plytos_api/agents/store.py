@@ -33,10 +33,18 @@ from plytos_api.agents.model import (
     TidbitView,
     TriggerKind,
 )
-from plytos_api.cards.model import MainContent
-from plytos_api.cards.repository import Author, CardDetail, CardRepository
+from plytos_api.cards.model import MainContent, VariantContent
+from plytos_api.cards.repository import (
+    Author,
+    CardDetail,
+    CardNotFoundError,
+    CardRepository,
+    UnsupportedClaimsError,
+)
 from plytos_api.ids import uuid7
 from plytos_api.keys import UserCipher
+from plytos_api.resumes.model import ResumeContent
+from plytos_api.resumes.store import ResumeDetail, ResumeStore
 
 
 class AgentRecordNotFoundError(Exception):
@@ -54,7 +62,7 @@ class ProposalConflictError(Exception):
 
 _PROPOSAL_COLUMNS = sql.SQL(
     "id, agent, kind, state, card_id, cites, payload_ciphertext, created_at, decided_at,"
-    " result_version_id"
+    " result_version_id, result_resume_version_id"
 )
 _TIDBIT_COLUMNS = sql.SQL(
     "id, kind, said_at, body_ciphertext, message_id, card_id, reading_ciphertext, read_at,"
@@ -124,6 +132,14 @@ class AgentStore:
         self._event("system", "message.sent", "message", answer.id, "import")
         return [shared, answer]
 
+    def ask_for_resume(self, text: str, resume_id: UUID) -> MessageView:
+        """The person asks for a version of one of their resumes. The Assembler
+        puts it together; the Listener doesn't need to read it."""
+        message = self._message("person", text, "app", None, resume_id=resume_id)
+        self._event("person", "message.sent", "message", message.id)
+        self.enqueue("assembler", "message", message.id)
+        return message
+
     def notice(self, text: str, ref: str) -> MessageView:
         """Saves a message from Plytos that no agent wrote, such as confirming a
         change the person made. `ref` says what wrote it."""
@@ -133,7 +149,8 @@ class AgentStore:
 
     def message(self, message_id: UUID) -> MessageView:
         row = self._conn.execute(
-            "select id, author, channel, body_ciphertext, proposal_id, created_at, import_id"
+            "select id, author, channel, body_ciphertext, proposal_id, created_at, import_id,"
+            " resume_id"
             " from plytos.message where id = %s",
             (message_id,),
         ).fetchone()
@@ -144,7 +161,8 @@ class AgentStore:
     def conversation(self, limit: int = 50, before: UUID | None = None) -> list[MessageView]:
         """The latest messages, oldest first. `before` pages further back."""
         rows = self._conn.execute(
-            "select id, author, channel, body_ciphertext, proposal_id, created_at, import_id"
+            "select id, author, channel, body_ciphertext, proposal_id, created_at, import_id,"
+            " resume_id"
             " from plytos.message"
             " where %(before)s::uuid is null or (created_at, id) <"
             "   (select created_at, id from plytos.message where id = %(before)s)"
@@ -314,6 +332,58 @@ class AgentStore:
         self._event("person", f"proposal.{state}", "proposal", proposal_id)
         return self.proposal(proposal_id), detail
 
+    def keep_resume(
+        self,
+        proposal_id: UUID,
+        cards: CardRepository,
+        resumes: ResumeStore,
+        edited: ResumeContent | None = None,
+        rewordings: Sequence[UUID] | None = None,
+    ) -> tuple[ProposalView, ResumeDetail]:
+        """Turns a proposed resume into a resume made from its parent, for its
+        target. Kept as proposed, its first version is the agent's; kept after
+        the person's changes, it's theirs.
+
+        The lines the agent worded for the target become each card's variant
+        for it, as the agent's versions. `rewordings` names the cards whose
+        new wording the person kept; None keeps them all."""
+        proposal = self._open_for_update(proposal_id)
+        new = proposal.body.resume
+        if proposal.kind != "resume" or new is None:
+            raise ProposalConflictError("Only a proposed resume can be kept as a resume.")
+        target = cards.create_target(new.target_kind, new.target, None)
+        wanted = None if rewordings is None else set(rewordings)
+        for r in new.rewordings:
+            if wanted is not None and r.card not in wanted:
+                continue
+            try:
+                cards.create_variant(
+                    r.card,
+                    target.id,
+                    VariantContent(framing=r.framing),
+                    Author("ai", proposal.agent),
+                )
+            except (CardNotFoundError, UnsupportedClaimsError):
+                # The card changed or went since the draft: it keeps its own wording.
+                continue
+        author = (
+            Author("person", str(self._user_id))
+            if edited is not None
+            else Author("ai", proposal.agent)
+        )
+        resume = resumes.create(
+            new.name,
+            edited if edited is not None else new.content,
+            author,
+            target_id=target.id,
+            parent_id=new.parent_id,
+            synced_parent_version_id=new.parent_version_id,
+        )
+        state: ProposalState = "kept" if edited is None else "edited"
+        self._decide(proposal_id, state, None, resume.head.id)
+        self._event("person", f"proposal.{state}", "proposal", proposal_id)
+        return self.proposal(proposal_id), resume
+
     def dismiss(self, proposal_id: UUID) -> ProposalView:
         self._open_for_update(proposal_id)
         self._decide(proposal_id, "dismissed", None)
@@ -413,7 +483,8 @@ class AgentStore:
         ).fetchone()
         rows = self._conn.execute(
             "select m.id, m.author, m.channel, m.body_ciphertext, m.proposal_id, m.created_at,"
-            " m.import_id from plytos.event e join plytos.message m on m.id = e.record_id"
+            " m.import_id, m.resume_id"
+            " from plytos.event e join plytos.message m on m.id = e.record_id"
             " where e.action = 'check_in.asked'"
             " order by m.created_at desc, m.id desc limit %s",
             (limit,),
@@ -519,13 +590,14 @@ class AgentStore:
         channel: Channel,
         proposal_id: UUID | None,
         import_id: UUID | None = None,
+        resume_id: UUID | None = None,
     ) -> MessageView:
         message_id = uuid7()
         row = self._conn.execute(
             "insert into plytos.message (id, owner_id, author, channel, body_ciphertext,"
-            " proposal_id, import_id) values (%s, %s, %s, %s, %s, %s, %s)"
+            " proposal_id, import_id, resume_id) values (%s, %s, %s, %s, %s, %s, %s, %s)"
             " returning id, author, channel, body_ciphertext, proposal_id, created_at,"
-            " import_id",
+            " import_id, resume_id",
             (
                 message_id,
                 self._user_id,
@@ -534,6 +606,7 @@ class AgentStore:
                 self._cipher.encrypt(text.encode(), _aad("message", message_id)),
                 proposal_id,
                 import_id,
+                resume_id,
             ),
         ).fetchone()
         assert row is not None
@@ -553,11 +626,17 @@ class AgentStore:
             raise ProposalConflictError("This was already decided.")
         return proposal
 
-    def _decide(self, proposal_id: UUID, state: ProposalState, version_id: UUID | None) -> None:
+    def _decide(
+        self,
+        proposal_id: UUID,
+        state: ProposalState,
+        version_id: UUID | None,
+        resume_version_id: UUID | None = None,
+    ) -> None:
         self._conn.execute(
-            "update plytos.proposal set state = %s, decided_at = now(), result_version_id = %s"
-            " where id = %s",
-            (state, version_id, proposal_id),
+            "update plytos.proposal set state = %s, decided_at = now(), result_version_id = %s,"
+            " result_resume_version_id = %s where id = %s",
+            (state, version_id, resume_version_id, proposal_id),
         )
 
     def _message_view(self, row: Sequence[Any]) -> MessageView:
@@ -570,6 +649,7 @@ class AgentStore:
             proposal=proposal,
             created_at=row[5],
             import_id=row[6],
+            resume_id=row[7],
         )
 
     def _proposal_view(self, row: Sequence[Any]) -> ProposalView:
@@ -587,6 +667,7 @@ class AgentStore:
             created_at=row[7],
             decided_at=row[8],
             result_version_id=row[9],
+            result_resume_version_id=row[10],
         )
 
     def _tidbit_view(self, row: Sequence[Any]) -> TidbitView:

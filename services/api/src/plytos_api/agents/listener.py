@@ -38,8 +38,13 @@ percentages, money, durations.
 
 Then write reply, what Plytos sends back: one or two short sentences, warm and plain, never \
 gushing. If a number or the outcome is missing and would make this stronger, ask for exactly \
-that in one specific question. Otherwise acknowledge briefly. Never mention job hunting, \
-resumes or recruiters: people answer at work, near coworkers.
+that in one specific question. Otherwise acknowledge briefly. Unless the person brings it up, \
+never mention job hunting, resumes or recruiters: people answer at work, near coworkers.
+
+If the person asks for a version of their resume for something (a kind of role, a company, an \
+industry or a job posting), or answers a question about who such a version is for, set \
+resume_for to who it's for in their words, set about_work to false, leave the other fields \
+empty, and reply in one short sentence that you'll put it together. Otherwise resume_for is "".
 
 If it isn't about work, set about_work to false, leave the other fields empty, and reply \
 briefly that you keep notes on their work and they can tell you what happened any time.
@@ -56,6 +61,7 @@ class ListenerAnswer(BaseModel):
     figures: list[str]
     has_outcome: bool
     reply: str = Field(max_length=600)
+    resume_for: str = Field(default="", max_length=200)
 
 
 FALLBACK_REPLY = "Noted. I've kept that with your work notes."
@@ -95,7 +101,10 @@ class Listener:
         answer = self._thinker.think(INSTRUCTIONS, prompt, ListenerAnswer, ctx.usage)
         if answer is None:
             raise AgentGaveUpError("model_no_answer")
-        if answer.about_work:
+        if answer.resume_for.strip() and not answer.about_work:
+            # A request for a resume version: the Assembler puts it together.
+            ctx.store.enqueue("assembler", "message", message.id)
+        elif answer.about_work:
             job = next((j for j in options if j.ref == answer.job), None)
             said = number_tokens(message.text)
             reading = Reading(

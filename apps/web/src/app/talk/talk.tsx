@@ -24,6 +24,7 @@ import { useSyncExternalStore } from "react";
 
 import { AppHeader, TabBar } from "../../components/hybrid";
 import { Icon } from "../../components/icon";
+import { ResumeDocument } from "../../components/resume-document";
 import { HEADLINE_MAX } from "../../lib/cards";
 import {
   ACCEPT_RESUME,
@@ -31,6 +32,7 @@ import {
   fileProblem,
   type ImportSummary,
 } from "../../lib/imports";
+import { proposalSize, type ProposedResume, type ResumeDetail } from "../../lib/resumes";
 import {
   AGENT_LABELS,
   awaitingReply,
@@ -641,6 +643,7 @@ function Line({
         <p className="plytos-text">{message.text}</p>
         {resume && <ResumeCard resume={resume} />}
         {proposal?.body.card && <Offer proposal={proposal} onDecided={onDecided} />}
+        {proposal?.body.resume && <ResumeOffer proposal={proposal} onDecided={onDecided} />}
         {proposal && (
           <p className="trail">
             How I got here · {AGENT_LABELS[proposal.agent]}
@@ -671,6 +674,121 @@ function ResumeCard({ resume }: { resume: ImportSummary }) {
             See what I read
           </Link>
         )}
+      </div>
+    </article>
+  );
+}
+
+// A version of a resume the Assembler put together for a target. The person
+// can see it as it would read before keeping it.
+function ResumeOffer({
+  proposal,
+  onDecided,
+}: {
+  proposal: Proposal;
+  onDecided: (p: Proposal) => void;
+}) {
+  const resume = proposal.body.resume!;
+  const [preview, setPreview] = useState<ProposedResume | null>(null);
+  const [showing, setShowing] = useState(false);
+  const [kept, setKept] = useState<ResumeDetail | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const url = `/talk/proposals/${proposal.id}`;
+
+  async function show() {
+    if (showing) {
+      setShowing(false);
+      return;
+    }
+    if (!preview) {
+      setBusy(true);
+      setError(null);
+      const result = await send<ProposedResume>(`${url}/resume`);
+      setBusy(false);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setPreview(result.data);
+    }
+    setShowing(true);
+  }
+
+  async function decide(decision: "keep-resume" | "dismiss") {
+    setBusy(true);
+    setError(null);
+    const result =
+      decision === "keep-resume"
+        ? await send<{ proposal: Proposal; resume: ResumeDetail }>(`${url}/${decision}`, {})
+        : await send<Proposal>(`${url}/${decision}`, {});
+    setBusy(false);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    if ("resume" in result.data) {
+      setKept(result.data.resume);
+      onDecided(result.data.proposal);
+    } else {
+      onDecided(result.data as Proposal);
+    }
+  }
+
+  if (proposal.state !== "open") {
+    const href = kept ? `/resumes/${encodeURIComponent(kept.id)}` : "/resumes";
+    return (
+      <article className="offer offer-kept" aria-label="Kept resume">
+        <p className="offer-kind">
+          <span>Resume version</span>
+          <em>
+            <Icon icon={faCheck} size={9} /> Kept
+          </em>
+        </p>
+        <h3>{resume.name}</h3>
+        <Link className="offer-link" href={href}>
+          {kept ? "Open it" : "See it in your resumes"}
+        </Link>
+      </article>
+    );
+  }
+  return (
+    <article className="offer" aria-label="Suggested resume">
+      <p className="offer-kind">
+        <span>Resume version · for {resume.target}</span>
+      </p>
+      <h3>{resume.name}</h3>
+      <p className="offer-meta">{proposalSize(resume)}</p>
+      {showing && preview && (
+        <>
+          {preview.parent_name && (
+            <p className="offer-body">
+              Made from {preview.parent_name}. Lines worded for this version are marked.
+            </p>
+          )}
+          <ResumeDocument page={preview.page} compact />
+        </>
+      )}
+      {error && (
+        <p className="offer-error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="offer-actions">
+        <button
+          className="keep"
+          type="button"
+          disabled={busy}
+          onClick={() => decide("keep-resume")}
+        >
+          Keep it
+        </button>
+        <button className="soft" type="button" disabled={busy} onClick={show}>
+          {showing ? "Hide it" : "See it"}
+        </button>
+        <button className="quiet" type="button" disabled={busy} onClick={() => decide("dismiss")}>
+          Not now
+        </button>
       </div>
     </article>
   );

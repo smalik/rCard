@@ -3,7 +3,13 @@
 // on the server or inside a client screen alike.
 
 import { faComment } from "@fortawesome/free-regular-svg-icons";
-import { faArrowLeft, faCheck, faLayerGroup, faLock } from "@fortawesome/free-solid-svg-icons";
+import {
+  faArrowLeft,
+  faCheck,
+  faFileLines,
+  faLayerGroup,
+  faLock,
+} from "@fortawesome/free-solid-svg-icons";
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 
@@ -45,10 +51,12 @@ export function AppHeader({ back }: { back?: Back }) {
 const TABS = [
   { href: "/talk", label: "Talk", icon: faComment },
   { href: "/cards", label: "Your cards", icon: faLayerGroup },
+  { href: "/resumes", label: "Resumes", icon: faFileLines },
 ] as const;
 
-// The app's two places: the conversation, and the cards it has built.
-export function TabBar({ current }: { current: "/talk" | "/cards" }) {
+// The app's places: the conversation, the cards it has built, and the
+// resumes made from them.
+export function TabBar({ current }: { current: (typeof TABS)[number]["href"] }) {
   return (
     <nav className="tab-bar" aria-label="Plytos">
       {TABS.map((tab) => (

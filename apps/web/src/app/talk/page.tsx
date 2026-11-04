@@ -6,6 +6,7 @@ import { currentSession } from "../../lib/session";
 import { NO_CHECK_INS, type Thread } from "../../lib/talk";
 import { Talk } from "./talk";
 
+import "../resumes/resumes.css";
 import "./talk.css";
 
 export const metadata: Metadata = { title: "Talk" };

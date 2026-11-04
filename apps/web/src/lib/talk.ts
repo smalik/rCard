@@ -3,6 +3,7 @@
 
 import type { CardContent, CardKind } from "./cards";
 import type { ImportSummary } from "./imports";
+import type { NewResume } from "./resumes";
 
 export const MAX_MESSAGE = 4000;
 
@@ -45,10 +46,12 @@ export type Proposal = {
   state: ProposalState;
   card_id: string | null;
   cites: string[];
-  body: { message: string; card: ProposedCard | null };
+  body: { message: string; card: ProposedCard | null; resume?: NewResume | null };
   created_at: string;
   decided_at: string | null;
   result_version_id: string | null;
+  // The resume version made when the person kept a proposed resume.
+  result_resume_version_id?: string | null;
 };
 
 export type Message = {
@@ -60,6 +63,8 @@ export type Message = {
   proposal: Proposal | null;
   // A resume shared in the conversation, while its import is kept.
   import_id?: string | null;
+  // A resume the message is about, such as one the person asked a version of.
+  resume_id?: string | null;
 };
 
 // What the thread needs to show: the messages, the resumes they share, and

@@ -16,6 +16,7 @@ across hundreds of tailored variants. These rules make that hold. The schema is
 | Version | `plytos.card_version` | One permanent snapshot on a line. Content encrypted; hashes in clear |
 | Event | `plytos.event` | Append-only history: who did what to which record, never the content |
 | Resume import | `plytos.resume_import` | A resume the person brought in: the original file, what was read from it, and their progress approving its cards. All encrypted; only the format, size and times are clear. Schema in [`0002_resume_import.sql`](../services/api/migrations/0002_resume_import.sql) |
+| Resume, resume version | `plytos.resume`, `plytos.resume_version`, `plytos.resume_version_name` | A resume is a selection over cards, with its own line of versions. Name and content encrypted; hashes in clear. Schema in [`0007_resumes.sql`](../services/api/migrations/0007_resumes.sql) and [`0008_resume_proposals.sql`](../services/api/migrations/0008_resume_proposals.sql). See "Resumes" below |
 | Message, tidbit, proposal, agent run | `plytos.message`, `plytos.tidbit`, `plytos.proposal`, `plytos.agent_run` | The conversation with Plytos, the notes it keeps, what agents offer, and the work they did. Content encrypted. See [agents.md](agents.md) |
 | Check-in plan | `plytos.check_in_plan` | When Plytos checks in, once a month: a week of the month, a weekday, a local time and a time zone. No content. See [agents.md](agents.md) |
 
@@ -91,6 +92,40 @@ foreign keys stop any row from pointing at another person's rows.
 **Deleted for real.** `plytos.purge_user` (callable only by the
 `plytos_shredder` role) deletes the person's wrapped data key first, then
 every row they own. Any copy left in a backup is unreadable without the key.
+
+## Resumes
+
+**A resume is a selection over cards, not a copy of them.** Its content
+(`resumes/model.py`) lists the employments it shows, in order, the
+accomplishments switched on under each, and the cards that come along at the
+end (education, skills, credentials, activities). Positions and client work
+show as headings under their employment, latest first; `fold_earlier` folds
+every title but the latest into one line. Facts always come from the card as
+it is now, so a corrected date shows in every resume at once.
+
+**Each line names its wording.** `auto` uses the card's variant for the
+resume's target if there is one, and the card's own wording otherwise. `main`
+always uses the card's own wording, and a target ID picks that target's.
+When the person rewords a line inside a resume, the item pins the card
+version it was given, so that resume version keeps that exact wording.
+
+**Every change is a version.** Versions are append-only and hash-chained like
+card versions. A save names the version it started from and fails if the
+resume moved on (409). Restoring version 2 makes a new version with
+version 2's content and the note "Back to version 2"; nothing in between is
+lost. A version can carry names the person gives it, such as "Sent to
+Contoso".
+
+**Versions for a target are made from a resume.** The first resume comes
+from the person's own file: once they keep its cards, "as written" lays them
+out in the file's order, in the file's words (`resumes/as_written.py`), one
+per file. A version for a target records the resume it was made from
+(`parent_id`) and which of that resume's versions it has caught up with
+(`synced_parent_version_id`). When the parent changes, the person sees each
+change since then that their version doesn't already reflect, takes the ones
+they want, and passes on the rest; either way it catches up. Versions for a
+target come from the Assembler in the conversation (see
+[agents.md](agents.md)) or by hand, as a copy.
 
 ## Open design point
 
