@@ -223,3 +223,5 @@ class ImportResult(BaseModel):
     cards: list[ProposedCard]
     findings: list[Finding]
     blocks: list[Block]
+    # The model that decided which line is which, or None when the rules did.
+    read_by: str | None = None

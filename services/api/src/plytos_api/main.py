@@ -29,6 +29,7 @@ from plytos_api.cards.repository import (
 )
 from plytos_api.config import Settings, get_settings
 from plytos_api.db import Database
+from plytos_api.imports.ai import reader_for
 from plytos_api.imports.extract import MAX_BYTES, UnsupportedFileError
 from plytos_api.imports.pipeline import import_resume
 from plytos_api.imports.store import (
@@ -115,6 +116,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     db = Database(settings.database_url)
     vault = Vault(kek_from_setting(settings.kek, allow_local=settings.dev_shortcuts))
+    reader = reader_for(
+        settings.ai_provider,
+        settings.ai_model,
+        settings.ai_effort,
+        settings.ai_vertex_project,
+        settings.ai_vertex_region,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -300,7 +308,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         URL, because URLs land in request logs and resume file names carry names.
         """
         data, filename = await read_upload(request)
-        result = await run_in_threadpool(import_resume, data, filename)
+        result = await run_in_threadpool(import_resume, data, filename, reader=reader)
 
         def store() -> ImportView:
             with db.as_user(user_id) as conn:

@@ -17,6 +17,7 @@ import {
   overview,
   type Proposal,
   type Review,
+  readerName,
   reviewQueue,
   settledCount,
   settleState,
@@ -148,6 +149,7 @@ function review(progress: Partial<Review["progress"]> = {}): Review {
     toSettle: [0, 2],
     progress: { settled: {}, cards: {}, edits: {}, ...progress },
     contactKept: true,
+    readBy: null,
   };
 }
 
@@ -190,6 +192,14 @@ describe("toReview", () => {
     const shaped = toReview(null);
     expect(shaped.cards).toEqual([]);
     expect(shaped.progress).toEqual({ settled: {}, cards: {}, edits: {} });
+    expect(shaped.readBy).toBeNull();
+  });
+
+  it("says which model sorted the lines", () => {
+    expect(toReview({ result: { read_by: "claude-haiku-5-5" } }).readBy).toBe("claude-haiku-5-5");
+    expect(readerName("claude-haiku-5-5")).toBe("Claude Haiku 5.5");
+    expect(readerName("claude-opus-5")).toBe("Claude Opus 5");
+    expect(readerName(null)).toBeNull();
   });
 });
 

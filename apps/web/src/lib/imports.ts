@@ -80,6 +80,8 @@ export type Review = {
   progress: Progress;
   // Contact details found in the file. They stay in the import, never on cards.
   contactKept: boolean;
+  // The model that sorted the resume's lines, or null when the built-in rules did.
+  readBy: string | null;
 };
 
 export type ImportSummary = {
@@ -107,6 +109,7 @@ type RawImport = {
       location?: string | null;
     };
     blocks?: { index: number; text: string; page?: number | null }[];
+    read_by?: string | null;
     cards?: (Omit<Proposal, "source"> & { source_blocks?: number[] })[];
     findings?: (Omit<Finding, "locations"> & {
       locations?: Partial<FindingLocation>[];
@@ -170,7 +173,17 @@ export function toReview(raw: unknown): Review {
     progress: { ...emptyProgress(), ...view.progress },
     contactKept:
       (contact.emails?.length ?? 0) > 0 || (contact.phones?.length ?? 0) > 0 || !!contact.location,
+    readBy: typeof result.read_by === "string" ? result.read_by : null,
   };
+}
+
+// "claude-haiku-5-5" reads as "Claude Haiku 5.5".
+export function readerName(readBy: string | null): string | null {
+  const m = readBy?.match(/^claude-([a-z]+)-(\d+)(?:-(\d+))?$/);
+  if (!m) return readBy;
+  const [, family = "", major = "", minor] = m;
+  const name = family.charAt(0).toUpperCase() + family.slice(1);
+  return `Claude ${name} ${minor ? `${major}.${minor}` : major}`;
 }
 
 // --- Progress ---------------------------------------------------------------

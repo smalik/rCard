@@ -21,7 +21,14 @@ import type { CSSProperties, ReactNode } from "react";
 import { PageHead } from "../../../components/hybrid";
 import { Icon } from "../../../components/icon";
 import { FannedCards, FileCard, fileDetail } from "../../../components/import-parts";
-import { BATCH_SIZE, minutesFor, overview, plural, settledCount } from "../../../lib/imports";
+import {
+  BATCH_SIZE,
+  minutesFor,
+  overview,
+  plural,
+  readerName,
+  settledCount,
+} from "../../../lib/imports";
 import { DeleteImport } from "./delete-import";
 import { loadReview } from "./load";
 
@@ -300,6 +307,11 @@ export default async function ImportOverview({ params }: { params: Promise<{ id:
               detail={fileDetail(review.file)}
               href={`${base}/original`}
             />
+            <p className="fine-print">
+              {review.readBy
+                ? `${readerName(review.readBy)} sorted your lines into cards. Every detail was checked against your file.`
+                : "Our built-in rules sorted your lines into cards."}
+            </p>
             <DeleteImport id={id} approved={o.approved} />
           </section>
         </aside>

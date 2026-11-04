@@ -4,7 +4,9 @@ Importing a resume does three things:
 
 1. **Reads** the file into lines in reading order (`imports/extract.py`).
 2. **Splits** the lines into contact details, sections, roles, bullets,
-   skills and entries (`imports/segment.py`).
+   skills and entries. Claude Haiku 5.5 does this when it's configured
+   (`imports/ai.py`); otherwise, or when it fails, the rule-based parser does
+   (`imports/segment.py`).
 3. **Audits** it for problems a recruiter or an applicant tracking system
    (ATS) would trip on (`imports/audit.py`), and **proposes cards** in the
    resume's own words (`imports/cards.py`).
@@ -105,6 +107,47 @@ contact details stay on the server. Nothing goes to browser storage.
 | `POST /v1/imports/{id}/cards/{ref}/approve` | Makes the card, as proposed or in the person's edited words, as an approved card written by the person |
 | `DELETE /v1/imports/{id}` | Deletes the original file and everything read from it. Approved cards stay |
 
+## Reading the structure with Claude
+
+Rules can't keep up with every way people lay out a resume. Several titles
+listed under one employer line with the whole tenure beside it (promotions) is
+the case that showed it: the rules read the employer line as a role of its
+own, split "Director, Supply Chain Operations" into a title and an employer,
+and left the earlier titles with no employer.
+
+So Claude decides which line is which:
+
+- It gets the resume as numbered lines with layout hints (bullet, bold, caps,
+  table, text box, page header) and returns JSON that matches a fixed schema
+  (`AiResume`): sections, contact lines, roles with their own lines and
+  dates, bullets, skills and entries. Promotions under one employer become one
+  role per title, each with the employer and its own dates.
+- It points at lines and copies values; it doesn't write text. Every value is
+  then checked against the lines it came from (`verbatim`). A title, employer,
+  client, date or skill the resume doesn't contain is dropped, and the card
+  asks the person instead, so a card never says something the resume doesn't.
+  Line numbers that don't exist are ignored, a line belongs to one role only,
+  and experience lines it left out stay with the role above them.
+- The audit and the proposed cards run on its reading exactly as they do on
+  the rules' reading. The import records which model read it (`read_by`).
+- If it isn't configured, errors, declines or returns something that doesn't
+  match the schema, the rule-based parser runs instead. An import never
+  depends on it.
+
+Because Claude only points at the person's own words, an approved card is
+still the person's text and is recorded as theirs. Rewording with AI is a
+different step and will be recorded with `author_kind = 'ai'`.
+
+| Setting | Default | |
+| --- | --- | --- |
+| `PLYTOS_AI_PROVIDER` | `off` | `anthropic` (Claude API, key from `ANTHROPIC_API_KEY`) or `vertex` (Claude on Vertex AI, with the service's identity) |
+| `PLYTOS_AI_MODEL` | `claude-haiku-5-5` | |
+| `PLYTOS_AI_EFFORT` | `medium` | |
+| `PLYTOS_AI_VERTEX_PROJECT`, `PLYTOS_AI_VERTEX_REGION` | `""`, `global` | For `vertex` only |
+
+A resume is a few thousand tokens in and out, which is well under a cent on
+Haiku 5.5.
+
 ## Proposed cards
 
 | Resume part | Card |
@@ -155,6 +198,12 @@ numbers" rule only lets a variant use numbers its main version has.
   because URLs reach request logs and resume file names carry names.
 - `.docx`, `.pdf` and other document types are git-ignored, and tests build
   made-up resumes in code. A real resume never enters the repo.
+- With `PLYTOS_AI_PROVIDER` set, the resume's text (not the file) is sent to
+  the model provider for each import: Anthropic for `anthropic`, Google Cloud
+  for `vertex`. Check the provider's data retention terms before production;
+  `vertex` keeps it inside the Plytos Google Cloud account's agreements. The
+  API key lives in Secret Manager in production, never in the repo. Failures
+  are logged by error class only, never with the text.
 
 ## Trying it
 
@@ -165,4 +214,6 @@ Run the API and web app as in the README, then open
 cd services/api
 uv run python -m plytos_api.imports "path/to/resume.docx"
 uv run python -m plytos_api.imports "path/to/resume.docx" --json
+# Claude reads the structure (needs ANTHROPIC_API_KEY):
+uv run python -m plytos_api.imports "path/to/resume.docx" --ai
 ```

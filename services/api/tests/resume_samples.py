@@ -296,3 +296,35 @@ def consultant_docx() -> bytes:
     out = io.BytesIO()
     doc.save(out)
     return out.getvalue()
+
+
+def promotions_text() -> str:
+    """Three titles held at one employer, listed under a single employer line with the
+    whole tenure beside it, then an agency job with client engagements. The rule-based
+    parser reads the employer line as a role of its own; Claude shouldn't."""
+    return "\n".join(
+        [
+            "Avery Quinn",
+            "Chicago, IL | avery.quinn@example.com | 312-555-0142",
+            "",
+            "EXPERIENCE",
+            "",
+            "Northwind Logistics, Chicago, IL\tMar 2014 – Present",
+            "Director, Supply Chain Operations (Jan 2021 – Present)",
+            "• Led a 40-person team across three distribution centers, cutting late "
+            "shipments by 22%.",
+            "• Built the first network-wide demand forecast, saving $3.1M in carrying costs.",
+            "Senior Manager, Operations (Jun 2017 – Dec 2020)",
+            "• Rolled out warehouse software to 6 sites in 9 months.",
+            "Operations Analyst (Mar 2014 – May 2017)",
+            "• Automated weekly inventory reporting, saving 10 hours a week.",
+            "",
+            "Brightline Partners, Milwaukee, WI\tJun 2010 – Feb 2014",
+            "Consultant",
+            "Fabrikam Foods",
+            "• Mapped inbound freight for 120 suppliers.",
+            "",
+            "EDUCATION",
+            "University of Wisconsin–Madison, B.S. Industrial Engineering, 2010",
+        ]
+    )
