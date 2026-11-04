@@ -30,26 +30,23 @@ TODAY = date(2026, 11, 4)
 
 def _role(**fields: Any) -> dict[str, Any]:
     role: dict[str, Any] = {
-        "section": "experience",
-        "title": None,
-        "employer": None,
-        "client": None,
-        "location": None,
-        "employment_type": None,
-        "dates": None,
+        "volunteer": False,
+        "title": "",
+        "employer": "",
+        "client": "",
+        "location": "",
+        "employment_type": "",
+        "dates": "",
         "header_lines": [],
-        "employer_line": None,
-        "engagement_of": None,
+        "employer_line": -1,
+        "engagement_of": -1,
+        "subheading_lines": [],
+        "bullet_lines": [],
         "description_lines": [],
-        "bullets": [],
         "unsure": False,
     }
     role.update(fields)
     return role
-
-
-def _bullets(*lines: int) -> list[dict[str, Any]]:
-    return [{"line": i, "group": None} for i in lines]
 
 
 def good_reading() -> dict[str, Any]:
@@ -58,7 +55,7 @@ def good_reading() -> dict[str, Any]:
         "name": "Avery Quinn",
         "contact_lines": [0, 1],
         "sections": [
-            {"kind": "contact", "heading_line": None, "lines": [0, 1]},
+            {"kind": "contact", "heading_line": -1, "lines": [0, 1]},
             {"kind": "experience", "heading_line": 2, "lines": list(range(3, 15))},
             {"kind": "education", "heading_line": 15, "lines": [16]},
         ],
@@ -71,7 +68,7 @@ def good_reading() -> dict[str, Any]:
                 dates="Jan 2021 – Present",
                 header_lines=[4],
                 employer_line=3,
-                bullets=_bullets(5, 6),
+                bullet_lines=[5, 6],
             ),
             _role(
                 title="Senior Manager, Operations",
@@ -80,7 +77,7 @@ def good_reading() -> dict[str, Any]:
                 dates="Jun 2017 – Dec 2020",
                 header_lines=[7],
                 employer_line=3,
-                bullets=_bullets(8),
+                bullet_lines=[8],
             ),
             _role(
                 title="Operations Analyst",
@@ -89,7 +86,7 @@ def good_reading() -> dict[str, Any]:
                 dates="Mar 2014 – May 2017",
                 header_lines=[9],
                 employer_line=3,
-                bullets=_bullets(10),
+                bullet_lines=[10],
             ),
             _role(
                 title="Consultant",
@@ -103,15 +100,11 @@ def good_reading() -> dict[str, Any]:
                 client="Fabrikam Foods",
                 header_lines=[13],
                 engagement_of=3,
-                bullets=_bullets(14),
+                bullet_lines=[14],
             ),
         ],
         "skills": [],
-        "education": [{"lines": [16], "dates": "2010"}],
-        "certifications": [],
-        "projects": [],
-        "awards": [],
-        "highlights": [],
+        "entries": [{"kind": "education", "lines": [16], "dates": "2010"}],
     }
 
 
@@ -208,7 +201,7 @@ def test_values_keep_the_resumes_own_spelling() -> None:
 
 def test_line_numbers_that_dont_exist_are_ignored() -> None:
     reading = good_reading()
-    reading["roles"][0]["bullets"] = _bullets(5, 6, 999)
+    reading["roles"][0]["bullet_lines"] = [5, 6, 999]
     reading["roles"][0]["header_lines"] = [4, -3]
     result = _import(reading)
     role = result.roles[0]
@@ -218,7 +211,7 @@ def test_line_numbers_that_dont_exist_are_ignored() -> None:
 
 def test_a_line_belongs_to_one_role_only() -> None:
     reading = good_reading()
-    reading["roles"][1]["bullets"] = _bullets(6, 8)
+    reading["roles"][1]["bullet_lines"] = [6, 8]
     result = _import(reading)
     assert [b.block for b in result.roles[0].bullets] == [5, 6]
     assert [b.block for b in result.roles[1].bullets] == [8]
@@ -226,7 +219,7 @@ def test_a_line_belongs_to_one_role_only() -> None:
 
 def test_lines_left_out_stay_with_the_role_above() -> None:
     reading = good_reading()
-    reading["roles"][0]["bullets"] = _bullets(5)
+    reading["roles"][0]["bullet_lines"] = [5]
     result = _import(reading)
     assert [b.block for b in result.roles[0].bullets] == [5, 6]
 
@@ -248,31 +241,42 @@ def test_reader_is_off_unless_asked_for() -> None:
     assert reader_for("off", "claude-haiku-5-5", "medium", "", "global") is None
 
 
+def _message(text: str, stop_reason: str = "end_turn") -> dict[str, Any]:
+    return {
+        "id": "msg_test",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-haiku-5-5",
+        "content": [{"type": "text", "text": text}] if text else [],
+        "stop_reason": stop_reason,
+        "stop_sequence": None,
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+
+
+def _client(handler: Any) -> anthropic.Anthropic:
+    return anthropic.Anthropic(
+        api_key="test",
+        base_url="https://api.test",
+        max_retries=0,
+        http_client=httpx2.Client(transport=httpx2.MockTransport(handler)),
+    )
+
+
+def test_the_schema_has_no_optional_or_nullable_fields() -> None:
+    """The API compiles the schema into a grammar with a size cap; unions blow it up."""
+    schema = json.dumps(AiResume.model_json_schema())
+    assert "anyOf" not in schema and "null" not in schema
+
+
 def test_claude_reader_asks_haiku_at_medium_effort_for_json() -> None:
     sent: list[dict[str, Any]] = []
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         sent.append(json.loads(request.content))
-        return httpx2.Response(
-            200,
-            json={
-                "id": "msg_test",
-                "type": "message",
-                "role": "assistant",
-                "model": "claude-haiku-5-5",
-                "content": [{"type": "text", "text": json.dumps(good_reading())}],
-                "stop_reason": "end_turn",
-                "stop_sequence": None,
-                "usage": {"input_tokens": 1, "output_tokens": 1},
-            },
-        )
+        return httpx2.Response(200, json=_message(json.dumps(good_reading())))
 
-    client = anthropic.Anthropic(
-        api_key="test",
-        base_url="https://api.test",
-        http_client=httpx2.Client(transport=httpx2.MockTransport(handler)),
-    )
-    reader = ClaudeReader(client, "claude-haiku-5-5", "medium")
+    reader = ClaudeReader(_client(handler), "claude-haiku-5-5", "medium")
     doc = extract(promotions_text().encode(), "avery.txt")
     reading = reader.read(doc)
 
@@ -286,31 +290,52 @@ def test_claude_reader_asks_haiku_at_medium_effort_for_json() -> None:
     assert "temperature" not in body
 
 
-def test_claude_reader_gives_up_quietly_on_errors_and_refusals() -> None:
+def test_claude_reader_asks_for_plain_json_when_the_schema_is_refused() -> None:
+    sent: list[dict[str, Any]] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        body = json.loads(request.content)
+        sent.append(body)
+        if "format" in body.get("output_config", {}):
+            error = {"type": "invalid_request_error", "message": "grammar is too large"}
+            return httpx2.Response(400, json={"type": "error", "error": error})
+        return httpx2.Response(
+            200, json=_message("```json\n" + json.dumps(good_reading()) + "\n```")
+        )
+
+    doc = extract(promotions_text().encode(), "avery.txt")
+    reading = ClaudeReader(_client(handler), "claude-haiku-5-5", "medium").read(doc)
+
+    assert reading is not None and len(reading.roles) == 5
+    assert len(sent) == 2
+    assert sent[1]["output_config"] == {"effort": "medium"}
+    assert "Reply with only a JSON object" in sent[1]["system"]
+
+
+def test_claude_reader_gives_up_quietly_on_errors_refusals_and_bad_json() -> None:
     def failing(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(500, json={"type": "error", "error": {"type": "api_error"}})
 
     def refusing(request: httpx2.Request) -> httpx2.Response:
-        return httpx2.Response(
-            200,
-            json={
-                "id": "msg_test",
-                "type": "message",
-                "role": "assistant",
-                "model": "claude-haiku-5-5",
-                "content": [],
-                "stop_reason": "refusal",
-                "stop_sequence": None,
-                "usage": {"input_tokens": 1, "output_tokens": 0},
-            },
-        )
+        return httpx2.Response(200, json=_message("", stop_reason="refusal"))
+
+    def refused_then_garbled(request: httpx2.Request) -> httpx2.Response:
+        if "format" in json.loads(request.content).get("output_config", {}):
+            error = {"type": "invalid_request_error", "message": "no"}
+            return httpx2.Response(400, json={"type": "error", "error": error})
+        return httpx2.Response(200, json=_message('{"name": "Avery Quinn"}'))
 
     doc = extract(promotions_text().encode(), "avery.txt")
-    for handler in (failing, refusing):
-        client = anthropic.Anthropic(
-            api_key="test",
-            base_url="https://api.test",
-            max_retries=0,
-            http_client=httpx2.Client(transport=httpx2.MockTransport(handler)),
-        )
-        assert ClaudeReader(client, "claude-haiku-5-5", "medium").read(doc) is None
+    for handler in (failing, refusing, refused_then_garbled):
+        assert ClaudeReader(_client(handler), "claude-haiku-5-5", "medium").read(doc) is None
+
+
+def test_bullets_under_a_subheading_carry_it_as_their_workstream() -> None:
+    reading = good_reading()
+    reading["roles"][0]["subheading_lines"] = [4]
+    reading["roles"][0]["header_lines"] = []
+    reading["roles"][0]["title"] = ""
+    result = _import(reading)
+    assert {b.group for b in result.roles[0].bullets} == {
+        "Director, Supply Chain Operations (Jan 2021 – Present)"
+    }

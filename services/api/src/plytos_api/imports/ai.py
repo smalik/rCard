@@ -17,10 +17,11 @@ are logged by error class only.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections.abc import Iterable
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast, get_args
 
 import anthropic
 from pydantic import BaseModel, ValidationError
@@ -48,64 +49,62 @@ from plytos_api.imports.segment import (
 log = logging.getLogger(__name__)
 
 # --- What Claude returns ----------------------------------------------------------------
-# Every field is required (null when absent) so the schema can be enforced strictly.
+# Strict structured outputs compile the schema into a grammar, and the API caps its size,
+# so the schema stays flat: no nullable fields (an empty string or -1 means "none") and
+# plain strings for kinds, checked here instead.
+
+SECTION_KINDS: tuple[str, ...] = get_args(SectionKind)
+ENTRY_KINDS = ("education", "certification", "project", "award", "highlight")
 
 
 class AiSection(BaseModel):
-    kind: SectionKind
-    heading_line: int | None
+    kind: str
+    heading_line: int
     lines: list[int]
 
 
-class AiBullet(BaseModel):
-    line: int
-    group: str | None
-
-
 class AiRole(BaseModel):
-    section: Literal["experience", "volunteer"]
-    title: str | None
-    employer: str | None
-    client: str | None
-    location: str | None
-    employment_type: str | None
-    dates: str | None
+    volunteer: bool
+    title: str
+    employer: str
+    client: str
+    location: str
+    employment_type: str
+    dates: str
     header_lines: list[int]
-    employer_line: int | None
-    engagement_of: int | None
+    employer_line: int
+    engagement_of: int
+    subheading_lines: list[int]
+    bullet_lines: list[int]
     description_lines: list[int]
-    bullets: list[AiBullet]
     unsure: bool
 
 
 class AiSkillGroup(BaseModel):
-    category: str | None
+    category: str
     items: list[str]
     lines: list[int]
 
 
 class AiEntry(BaseModel):
+    kind: str
     lines: list[int]
-    dates: str | None
+    dates: str
 
 
 class AiResume(BaseModel):
-    name: str | None
+    name: str
     contact_lines: list[int]
     sections: list[AiSection]
     summary_lines: list[int]
     roles: list[AiRole]
     skills: list[AiSkillGroup]
-    education: list[AiEntry]
-    certifications: list[AiEntry]
-    projects: list[AiEntry]
-    awards: list[AiEntry]
-    highlights: list[AiEntry]
+    entries: list[AiEntry]
 
 
 # --- Asking Claude ----------------------------------------------------------------------
 
-INSTRUCTIONS = """\
+INSTRUCTIONS = f"""\
 You read resumes for Plytos, an app where job seekers turn their resume into cards: one \
 for each role, accomplishment, skill group, degree and so on. You get the resume as \
 numbered lines. Say which line is which, so the app can build the cards from the \
@@ -115,7 +114,9 @@ Values
 - Refer to lines by their numbers.
 - Copy every name, title, date and other value exactly as the resume writes it, \
 character for character, keeping its capitalization and abbreviations. Never correct, \
-expand, reword or guess a value. Use null when the resume doesn't say.
+expand, reword or guess a value.
+- Use an empty string for a value the resume doesn't state, and -1 for a line or \
+position that doesn't apply.
 - A line belongs to at most one role, entry or skill group.
 
 Roles
@@ -129,32 +130,38 @@ sits under an employer, that span is the title's dates.
 - When someone worked for an agency or consultancy on client projects, the job at the \
 agency is a role, and each client engagement listed under it is its own role with \
 client set to the client's name, employer set to the agency, and engagement_of set to \
-the position (counting from 0) of the agency role in your roles list. Otherwise \
-engagement_of is null.
+the position (counting from 0) of the agency role in your roles list.
 - dates: the role's own date range, copied as written (for example "Jun 2017 – Dec \
-2020"). Null when the role has none.
+2020").
 - header_lines: the role's own lines that state its title, employer, location or \
 dates, not the shared employer_line.
-- bullets: the role's bulleted lines. If bullets sit under a subheading inside the role \
-(a project or workstream name), set group to that subheading, copied as written.
-- description_lines: prose lines that describe the role.
-- section is "volunteer" for unpaid or volunteer work, otherwise "experience".
+- subheading_lines: lines inside the role that name a project or workstream its \
+bullets sit under.
+- bullet_lines: the role's bulleted lines. description_lines: prose lines that describe \
+the role.
+- volunteer: true for unpaid or volunteer work.
 - unsure: true when you can't tell which part of a line is the title and which is the \
 employer.
 
 Everything else
 - sections: the resume's sections in reading order. kind is what the section holds, \
-whatever its heading says. heading_line is null for the opening lines with the \
-person's name and contact details. lines are the section's lines, without the heading.
+whatever its heading says, and is one of: {", ".join(SECTION_KINDS)}. heading_line \
+is -1 for the opening lines with the person's name and contact details. lines are the \
+section's lines, without the heading.
 - name: the person's name as written. contact_lines: lines with their name, email, \
 phone, links or location.
 - summary_lines: the lines of a summary, profile or objective.
 - skills: group skills the way the resume does. category is the resume's own label for \
-the group (for example "Languages"), or null. items are the skills, copied exactly.
-- education, certifications, projects, awards, highlights: one entry per degree, \
-certificate, project, award or highlight, with all of its lines and its date or date \
-range as written.
+the group (for example "Languages"). items are the skills, copied exactly.
+- entries: one per degree, certificate, project, award or highlight (a key \
+achievement listed apart from the roles), with all of its lines and its date or date \
+range as written. kind is one of: {", ".join(ENTRY_KINDS)}.
 """
+
+PLAIN_JSON = """
+
+Reply with only a JSON object, no other text, that matches this JSON Schema:
+{schema}"""
 
 
 def resume_lines(doc: ExtractedDocument) -> str:
@@ -205,16 +212,22 @@ class ClaudeReader:
         self.name = model
 
     def read(self, doc: ExtractedDocument) -> AiResume | None:
+        lines = "Resume lines:\n" + resume_lines(doc)
         try:
             response = self._client.messages.parse(
                 model=self._model,
                 # Room for thinking plus the JSON; larger needs streaming.
                 max_tokens=16000,
                 system=INSTRUCTIONS,
-                messages=[{"role": "user", "content": "Resume lines:\n" + resume_lines(doc)}],
+                messages=[{"role": "user", "content": lines}],
                 output_format=AiResume,
                 output_config={"effort": self._effort},
             )
+        except anthropic.BadRequestError as exc:
+            # The API turned the request down, for example because the schema is more
+            # than it can enforce. Ask for the same JSON unenforced and check it here.
+            log.warning("Enforced reading refused, asking for plain JSON: %s", type(exc).__name__)
+            return self._read_plain(lines)
         except anthropic.APIError as exc:
             log.warning("Reading the resume with Claude failed: %s", type(exc).__name__)
             return None
@@ -225,6 +238,30 @@ class ClaudeReader:
             log.warning("Claude stopped without a reading: %s", response.stop_reason)
             return None
         return response.parsed_output
+
+    def _read_plain(self, lines: str) -> AiResume | None:
+        schema = json.dumps(AiResume.model_json_schema())
+        try:
+            response = self._client.messages.create(
+                model=self._model,
+                max_tokens=16000,
+                system=INSTRUCTIONS + PLAIN_JSON.format(schema=schema),
+                messages=[{"role": "user", "content": lines}],
+                output_config={"effort": self._effort},
+            )
+        except anthropic.APIError as exc:
+            log.warning("Reading the resume with Claude failed: %s", type(exc).__name__)
+            return None
+        if response.stop_reason != "end_turn":
+            log.warning("Claude stopped without a reading: %s", response.stop_reason)
+            return None
+        text = "".join(b.text for b in response.content if b.type == "text").strip()
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
+        try:
+            return AiResume.model_validate_json(text)
+        except ValidationError as exc:
+            log.warning("Claude's reading didn't match the schema: %s", type(exc).__name__)
+            return None
 
 
 def reader_for(
@@ -249,6 +286,14 @@ def reader_for(
 
 def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _given(value: str) -> str | None:
+    return value.strip() or None
+
+
+def _line(index: int) -> int | None:
+    return index if index >= 0 else None
 
 
 def verbatim(value: str | None, texts: Iterable[str]) -> str | None:
@@ -294,7 +339,7 @@ def to_parsed(doc: ExtractedDocument, ai: AiResume) -> ParsedResume:
         | {b.index for b in doc.blocks if b.where in ("header", "footer")}
     )
     contact = parse_contact([blocks[i] for i in contact_blocks if i not in markings])
-    name = verbatim(ai.name, text_of(contact_blocks))
+    name = verbatim(_given(ai.name), text_of(contact_blocks))
     if name is not None:
         contact.name = name.title() if name.isupper() else name
 
@@ -313,23 +358,30 @@ def to_parsed(doc: ExtractedDocument, ai: AiResume) -> ParsedResume:
         items = list(dict.fromkeys(i.strip(" .") for i in items if i.strip(" .")))
         if not items:
             continue
-        category = verbatim(group.category, text_of(own)) or "Skills"
+        category = verbatim(_given(group.category), text_of(own)) or "Skills"
         parsed.skills.setdefault(category, []).extend(items)
         parsed.skill_blocks.setdefault(category, []).extend(own)
 
-    parsed.education = _entries(ai.education, blocks, lines)
-    parsed.certifications = _entries(ai.certifications, blocks, lines)
-    parsed.projects = _entries(ai.projects, blocks, lines)
-    parsed.awards = _entries(ai.awards, blocks, lines)
-    parsed.highlights = _entries(ai.highlights, blocks, lines)
+    by_kind = {
+        "education": parsed.education,
+        "certification": parsed.certifications,
+        "project": parsed.projects,
+        "award": parsed.awards,
+        "highlight": parsed.highlights,
+    }
+    for entry in ai.entries:
+        found = by_kind.get(entry.kind.strip().lower())
+        if found is not None:
+            found += _entries([entry], blocks, lines)
     return parsed
 
 
 def _sections(found: list[AiSection], blocks: dict[int, Block]) -> list[Section]:
     sections: list[Section] = []
     for s in found:
-        heading = blocks.get(s.heading_line) if s.heading_line is not None else None
-        kind: SectionKind = s.kind
+        kind: SectionKind = _section_kind(s.kind)
+        heading_line = _line(s.heading_line)
+        heading = blocks.get(heading_line) if heading_line is not None else None
         holds: SectionKind | None = None
         recognized = True
         if heading is not None:
@@ -338,8 +390,8 @@ def _sections(found: list[AiSection], blocks: dict[int, Block]) -> list[Section]
             recognized = named is not None
             # Keep what the heading claims, so the audit can point out a heading
             # that doesn't match what's under it.
-            if named is not None and named != s.kind:
-                kind, holds = named, s.kind
+            if named is not None and named != kind:
+                kind, holds = named, kind
         sections.append(
             Section(
                 kind=kind,
@@ -347,10 +399,17 @@ def _sections(found: list[AiSection], blocks: dict[int, Block]) -> list[Section]
                 heading=heading.text.strip() if heading is not None else None,
                 heading_block=heading.index if heading is not None else None,
                 heading_recognized=recognized,
-                blocks=sorted(i for i in s.lines if i in blocks and i != s.heading_line),
+                blocks=sorted(i for i in s.lines if i in blocks and i != heading_line),
             )
         )
     return [s for s in sections if s.blocks or s.heading is not None]
+
+
+def _section_kind(kind: str) -> SectionKind:
+    for known in get_args(SectionKind):
+        if kind.strip().lower() == known:
+            return cast(SectionKind, known)
+    return "other"
 
 
 class _Claim(Protocol):
@@ -361,32 +420,36 @@ def _roles(found: list[AiRole], blocks: dict[int, Block], lines: _Claim) -> list
     roles: list[Role] = []
     for n, ai in enumerate(found):
         own = lines(ai.header_lines)
-        shared = lines([ai.employer_line] if ai.employer_line is not None else [], claim=False)
+        employer_line = _line(ai.employer_line)
+        shared = lines([employer_line] if employer_line is not None else [], claim=False)
         shared = [i for i in shared if i not in own]
         own_text = [blocks[i].text for i in own]
         all_text = own_text + [blocks[i].text for i in shared]
+        title = _given(ai.title)
+        dates = _given(ai.dates)
         role = Role(
             ref=f"role-{n + 1}",
-            section=ai.section,
-            title=verbatim(ai.title, own_text) or verbatim(ai.title, all_text),
-            organization=verbatim(ai.employer, all_text),
-            client=verbatim(ai.client, all_text),
-            location=verbatim(ai.location, all_text),
-            employment_type=_lower(verbatim(ai.employment_type, all_text)),
-            dates=_dates(ai.dates, own_text) or _dates(ai.dates, all_text),
+            section="volunteer" if ai.volunteer else "experience",
+            title=verbatim(title, own_text) or verbatim(title, all_text),
+            organization=verbatim(_given(ai.employer), all_text),
+            client=verbatim(_given(ai.client), all_text),
+            location=verbatim(_given(ai.location), all_text),
+            employment_type=_lower(verbatim(_given(ai.employment_type), all_text)),
+            dates=_dates(dates, own_text) or _dates(dates, all_text),
             header_blocks=own + shared,
             header_text="\n".join(blocks[i].text for i in own + shared),
             confidence="low" if ai.unsure else "high",
         )
         role.title_first = _title_first(role, own_text)
+        subheadings = lines(ai.subheading_lines)
         role.bullets = [
             Bullet(
                 block=i,
                 text=blocks[i].text,
                 bullet_char=blocks[i].bullet_char,
-                group=_group(ai.bullets, i, blocks),
+                group=_group(subheadings, i, blocks),
             )
-            for i in lines(b.line for b in ai.bullets)
+            for i in lines(ai.bullet_lines)
         ]
         description = lines(ai.description_lines)
         if description:
@@ -394,8 +457,8 @@ def _roles(found: list[AiRole], blocks: dict[int, Block], lines: _Claim) -> list
             role.description_blocks = description
         roles.append(role)
     for ai, role in zip(found, roles, strict=True):
-        parent_at = ai.engagement_of
-        if role.client and parent_at is not None and 0 <= parent_at < len(roles):
+        parent_at = _line(ai.engagement_of)
+        if role.client and parent_at is not None and parent_at < len(roles):
             parent = roles[parent_at]
             if parent is not role and parent.parent_ref is None:
                 role.parent_ref = parent.ref
@@ -403,10 +466,10 @@ def _roles(found: list[AiRole], blocks: dict[int, Block], lines: _Claim) -> list
     return roles
 
 
-def _group(bullets: list[AiBullet], line: int, blocks: dict[int, Block]) -> str | None:
-    label = next((b.group for b in bullets if b.line == line), None)
-    # A workstream label is a line of the resume itself, usually just above the bullets.
-    return verbatim(label, [b.text for i, b in blocks.items() if 0 < line - i <= 12])
+def _group(subheadings: list[int], line: int, blocks: dict[int, Block]) -> str | None:
+    """The workstream a bullet sits under: the nearest subheading line above it."""
+    above = [i for i in subheadings if i < line]
+    return _norm(blocks[above[-1]].text).rstrip(":") if above else None
 
 
 def _dates(value: str | None, texts: list[str]) -> DateRange | None:
@@ -439,12 +502,11 @@ def _adopt_strays(
     # A role's own first line comes first in header_blocks, before a shared employer line.
     starts = sorted((r.header_blocks[0], n) for n, r in enumerate(roles) if r.header_blocks)
     headers = {h for r in roles for h in r.header_blocks}
-    labels = {_norm(b.group).lower() for r in roles for b in r.bullets if b.group}
     for section in sections:
         if (section.holds or section.kind) not in ("experience", "volunteer"):
             continue
         for i in section.blocks:
-            if i in used or i in headers or _norm(blocks[i].text).lower() in labels:
+            if i in used or i in headers:
                 continue
             above = [n for start, n in starts if start < i]
             if not above:
@@ -471,7 +533,7 @@ def _entries(found: list[AiEntry], blocks: dict[int, Block], lines: _Claim) -> l
             Entry(
                 text=texts[0],
                 blocks=own,
-                dates=_dates(ai.dates, texts) or find_range(" ".join(texts)),
+                dates=_dates(_given(ai.dates), texts) or find_range(" ".join(texts)),
                 details=texts[1:],
             )
         )
