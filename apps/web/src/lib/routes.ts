@@ -26,15 +26,22 @@ export function isImportId(id: string): boolean {
   return UUID.test(id);
 }
 
+export function isId(id: string): boolean {
+  return UUID.test(id);
+}
+
 export function isCardRef(ref: string): boolean {
   return CARD_REF.test(ref);
 }
 
 // The session for a request from Plytos's own pages, or the response to send instead.
-export async function guard(request: Request): Promise<Session | Response> {
+export async function guard(
+  request: Request,
+  signedOut = "Sign in to bring in a resume.",
+): Promise<Session | Response> {
   if (!isSameOrigin(request)) return problem(403, "This request has to come from Plytos.");
   const session = await currentSession();
-  if (!session) return problem(401, "Sign in to bring in a resume.");
+  if (!session) return problem(401, signedOut);
   return session;
 }
 
@@ -51,9 +58,9 @@ export async function readJson(request: Request, max = 64 * 1024): Promise<unkno
 // Turns an API failure into a message for the person. Only the API's own
 // plain-text explanations are passed on, never validation errors, which can
 // echo what was sent.
-export function apiProblem(error: unknown): Response {
+export function apiProblem(error: unknown, gone = "That import isn't here any more."): Response {
   if (!(error instanceof ApiError)) throw error;
-  if (error.status === 404) return problem(404, "That import isn't here any more.");
+  if (error.status === 404) return problem(404, gone);
   if ((error.status === 409 || error.status === 413 || error.status === 422) && error.detail) {
     return problem(error.status, error.detail);
   }

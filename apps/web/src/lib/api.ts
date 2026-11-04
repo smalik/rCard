@@ -3,6 +3,7 @@ import "server-only";
 import type { CardContent, CardKind } from "./cards";
 import { type Answer, FILENAME_HEADER, type ImportSummary, type Progress } from "./imports";
 import type { Session } from "./session";
+import type { Message, Proposal } from "./talk";
 
 // The API is private: only this server talks to it, never the browser.
 const API_URL = process.env.PLYTOS_API_URL ?? "http://localhost:8000";
@@ -169,4 +170,29 @@ export function approveCard(
     session,
     json({ content }),
   );
+}
+
+// -- the conversation ---------------------------------------------------------
+
+export function getConversation(session: Session, limit = 60): Promise<Message[]> {
+  return apiFetch<Message[]>(`/v1/conversation?limit=${limit}`, session);
+}
+
+// Saves what the person said. The Listener reads it and answers shortly after.
+export function say(session: Session, text: string): Promise<Message> {
+  return apiFetch<Message>("/v1/conversation", session, json({ text }));
+}
+
+export function keepProposal(
+  session: Session,
+  id: string,
+  content: CardContent | null,
+): Promise<{ proposal: Proposal; card: { id: string } }> {
+  return apiFetch(`/v1/proposals/${encodeURIComponent(id)}/keep`, session, json({ content }));
+}
+
+export function dismissProposal(session: Session, id: string): Promise<Proposal> {
+  return apiFetch<Proposal>(`/v1/proposals/${encodeURIComponent(id)}/dismiss`, session, {
+    method: "POST",
+  });
 }

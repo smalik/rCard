@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { AppHeader, kindStyle } from "../../components/hybrid";
+import { AppHeader, kindStyle, TabBar } from "../../components/hybrid";
 import { ApiError, type CardSummary, listCards } from "../../lib/api";
 import { KIND_LABELS } from "../../lib/cards";
 import { currentSession } from "../../lib/session";
@@ -89,6 +89,7 @@ export default async function Cards({
           ))}
         </ul>
       )}
+      <TabBar current="/cards" />
     </main>
   );
 }

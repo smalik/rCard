@@ -853,3 +853,39 @@ a {
   text-transform: uppercase;
   color: var(--kind, var(--ink-60));
 }
+
+/* --- Tab bar ---------------------------------------------------------------- */
+
+.tab-bar {
+  position: sticky;
+  bottom: 0;
+  margin: auto calc(-1 * var(--gutter)) calc(-1 * (env(safe-area-inset-bottom) + 24px));
+  padding: 6px 8px calc(env(safe-area-inset-bottom) + 8px);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  background: var(--paper);
+  border-top: 1px solid var(--ink-10);
+}
+
+.tab {
+  min-height: 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--ink-55);
+  text-decoration: none;
+}
+
+.tab[aria-current="page"] {
+  color: var(--ink);
+}
+
+.tab[aria-current="page"] .icon {
+  color: var(--orange);
+}

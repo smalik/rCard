@@ -2,7 +2,8 @@
 // card shapes used in illustrations. None of them hold state, so they render
 // on the server or inside a client screen alike.
 
-import { faArrowLeft, faCheck, faLock } from "@fortawesome/free-solid-svg-icons";
+import { faComment } from "@fortawesome/free-regular-svg-icons";
+import { faArrowLeft, faCheck, faLayerGroup, faLock } from "@fortawesome/free-solid-svg-icons";
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 
@@ -26,7 +27,7 @@ export function AppHeader({ back }: { back?: Back }) {
             <Icon icon={faArrowLeft} size={14} />
           </button>
         )}
-        <Link className="logo" href="/cards" aria-label="Plytos, your cards">
+        <Link className="logo" href="/talk" aria-label="Plytos, talk">
           <span className="logo-mark" aria-hidden="true">
             P
           </span>
@@ -38,6 +39,30 @@ export function AppHeader({ back }: { back?: Back }) {
         Only you
       </span>
     </div>
+  );
+}
+
+const TABS = [
+  { href: "/talk", label: "Talk", icon: faComment },
+  { href: "/cards", label: "Your cards", icon: faLayerGroup },
+] as const;
+
+// The app's two places: the conversation, and the cards it has built.
+export function TabBar({ current }: { current: "/talk" | "/cards" }) {
+  return (
+    <nav className="tab-bar" aria-label="Plytos">
+      {TABS.map((tab) => (
+        <Link
+          key={tab.href}
+          className="tab"
+          href={tab.href}
+          aria-current={tab.href === current ? "page" : undefined}
+        >
+          <Icon icon={tab.icon} size={17} />
+          {tab.label}
+        </Link>
+      ))}
+    </nav>
   );
 }
 
