@@ -567,8 +567,12 @@ def share(db: Database, vault: Vault, user: UUID) -> tuple[UUID, list[UUID]]:
     with db.as_user(user) as conn:
         cipher = vault.cipher_for(conn, user)
         kept = ImportStore(conn, user, cipher).create(data, "Avery Quinn.txt", result)
-        said = AgentStore(conn, user, cipher).share_resume(kept.id, reading(result))
-    return kept.id, [m.id for m in said]
+        store = AgentStore(conn, user, cipher)
+        shared = store.share_resume(kept.id)
+        answer = store.answer_shared_resume(kept.id, reading(result))
+        # Plytos answers once.
+        assert answer is not None and store.answer_shared_resume(kept.id, "again") is None
+    return kept.id, [shared.id, answer.id]
 
 
 def test_a_shared_resume_sits_in_the_conversation_until_it_is_deleted(
