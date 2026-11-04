@@ -349,3 +349,113 @@ def test_skill_spelling() -> None:
         ("Sagemaker", "SageMaker"),
         ("Milvius", "Milvus"),
     ]
+
+
+def test_an_agency_tenure_is_the_one_position_written_over_its_client_work() -> None:
+    """The consultant line at Contoso Staffing, dated January 2019 to June 2023, heads
+    two client engagements, and the reader gave the employer no line of its own: the
+    position's dates are the tenure as written, not worked out from the titles."""
+    from plytos_api.imports.career import settle_employments
+    from plytos_api.imports.dates import find_range
+    from plytos_api.imports.model import Employment, Role
+
+    texts = {
+        3: "Consultant, Contoso Staffing - January 2019 – June 2023",
+        4: "Data Scientist, Northwind Health",
+        6: "Analytics Lead, Tailspin Bank",
+    }
+    roles = [
+        Role(
+            ref="role-1",
+            title="Consultant",
+            organization="Contoso Staffing",
+            dates=find_range(texts[3]),
+            header_blocks=[3],
+            employment_ref="employment-1",
+        ),
+        Role(
+            ref="role-2",
+            title="Data Scientist",
+            client="Northwind Health",
+            parent_ref="role-1",
+            header_blocks=[4],
+            employment_ref="employment-1",
+        ),
+        Role(
+            ref="role-3",
+            title="Analytics Lead",
+            client="Tailspin Bank",
+            parent_ref="role-1",
+            header_blocks=[6],
+            employment_ref="employment-1",
+        ),
+    ]
+    [contoso] = settle_employments([Employment(ref="employment-1")], roles, texts)
+    assert contoso.tenure_written
+    assert contoso.dates is not None and contoso.dates.raw == "January 2019 – June 2023"
+
+
+def test_a_year_shared_without_months_isnt_an_overlap() -> None:
+    text = "\n".join(
+        [
+            "Sam Patel",
+            "sam.patel@example.com",
+            "EXPERIENCE",
+            "Data Architect, Contoso Ltd., MAR 2005 – Present",
+            "• Designed the data platform for 3 business units.",
+            "Database Administrator, Fabrikam Inc., 2003 – 2005",
+            "• Kept 40 databases running.",
+            "Database Administrator, Tailspin Toys, 2001 – 2003",
+            "• Ran nightly backups.",
+            "Analyst, Northwind Traders, June 2000 – June 2002",
+            "• Built reports.",
+        ]
+    )
+    result = import_resume(text.encode(), "sam.txt", today=TODAY)
+    pairs = [
+        sorted(loc.excerpt.split(",")[1].strip() for loc in f.locations)
+        for f in result.findings
+        if f.rule == "dates.overlap"
+    ]
+    # Only the months that really overlap are flagged.
+    assert pairs == [["Northwind Traders", "Tailspin Toys"]]
+
+
+def test_product_names_quarters_and_24_7_arent_figures() -> None:
+    from plytos_api.imports.cards import _figures
+
+    line = "Rolled out Microsoft Dynamics 365 to 1,200 users in Q3 with 24/7 support"
+    assert _figures(line) == {"figures": ["1,200"]}
+    assert _figures("Ran a 24x7 desk and FY2023 budgets of $5M") == {"figures": ["$5M"]}
+
+
+def _short_resume(*bullets: str) -> ImportResult:
+    text = "\n".join(
+        [
+            "Avery Chen",
+            "avery.chen@example.com",
+            "EXPERIENCE",
+            "Analyst, Contoso Ltd., Jan 2020 – Present",
+            *(f"• {b}" for b in bullets),
+        ]
+    )
+    return import_resume(text.encode(), "avery.txt", today=TODAY)
+
+
+def test_a_cliche_is_a_whole_word_not_part_of_a_product() -> None:
+    product = _short_resume("Moved 40 teams onto Microsoft Dynamics 365.")
+    assert "content.cliches" not in rules(product)
+    cliche = _short_resume("Dynamic analyst who cut reporting time by 30%.")
+    assert "content.cliches" in rules(cliche)
+
+
+def test_notes_left_in_the_text_are_flagged() -> None:
+    result = _short_resume(
+        "Grew renewals XX% at AlgoNorth (confirm employer).",
+        "Built the TBD pipeline for 12 teams.",
+        "Supported Check Point Software (Contract) firewall rollouts for 30 sites.",
+        "Launched add-on sales (Add-on bundle) worth $1M.",
+    )
+    [notes] = [f for f in result.findings if f.rule == "content.placeholder"]
+    assert notes.severity == "fix" and notes.about == "cards"
+    assert [loc.block for loc in notes.locations] == [4, 5]

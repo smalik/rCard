@@ -279,6 +279,11 @@ def _inline_heading(block: Block) -> tuple[SectionKind, str] | None:
 
 
 _PAGE_NUMBER = re.compile(r"^(page\s*)?\d{1,2}(\s*(of|/)\s*\d{1,2})?$", re.I)
+# "Continued...", "(continued)", "Continued on next page", "- continued -"
+_CONTINUED = re.compile(
+    r"^[\W_]*(\w+\s+)?(cont(inued|\.|'d)?)(\s+(on\s+)?(next\s+|the\s+next\s+)?(page|overleaf))?[\W_]*$",
+    re.I,
+)
 _REFERENCES = re.compile(
     r"^references?\s*(are\s*)?(available\s*)?(up)?on\s*request\.?$|^references?\s*available\.?$",
     re.I,
@@ -288,7 +293,7 @@ _REFERENCES = re.compile(
 def plain_skip(text: str) -> SkipReason | None:
     """Why a line holds nothing to keep, when that's plain from the line alone."""
     text = text.strip()
-    if _PAGE_NUMBER.match(text):
+    if _PAGE_NUMBER.match(text) or _CONTINUED.match(text):
         return "page_number"
     if not re.search(r"[^\W_]", text):
         return "decoration"
@@ -601,6 +606,7 @@ def parse_roles(blocks: list[Block], section: SectionKind, *, start: int = 0) ->
             for bullet in role.bullets:
                 bullet.group = label
             prev.bullets += role.bullets
+            prev.subheading_blocks += role.header_blocks
             continue
         # An undated organization under a dated role is a client engagement.
         if role.dates is None and parent is not None:

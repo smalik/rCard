@@ -456,9 +456,11 @@ class ClaudeReader:
         *,
         step: str,
         effort: Effort | None = None,
+        _attempt: int = 1,
     ) -> T | None:
         """One request whose answer must match ``schema``, or None when it can't be had.
-        ``step`` names what it's for in the usage record."""
+        ``step`` names what it's for in the usage record. An answer that doesn't match
+        is asked for once more."""
         effort = effort or self._effort
         images = 0 if isinstance(content, str) else sum(_is_image(b) for b in content)
         started = time.monotonic()
@@ -483,9 +485,16 @@ class ClaudeReader:
             self._failed(step, effort, type(exc).__name__, started)
             return None
         except ValidationError as exc:
-            log.warning("Claude's reading didn't match the schema: %s", type(exc).__name__)
+            log.warning(
+                "Claude's %s answer didn't match the schema (attempt %d): %s",
+                step,
+                _attempt,
+                _schema_errors(exc),
+            )
             # Answered, so billed, but the answer and its usage are lost with the error.
             self._failed(step, effort, type(exc).__name__, started, billed=True)
+            if _attempt == 1:
+                return self.ask(system, content, schema, step=step, effort=effort, _attempt=2)
             return None
         self.calls.append(
             record(
@@ -591,6 +600,14 @@ class ClaudeReader:
             content.append(ImageBlockParam(type="image", source=source))
         # Copying words out needs little thought.
         return self.ask(PICTURE_INSTRUCTIONS, content, AiPictures, step="pictures", effort="low")
+
+
+def _schema_errors(exc: ValidationError) -> str:
+    """Where and how an answer broke the schema: field paths and error types only,
+    never the values, which may quote the resume."""
+    found = exc.errors(include_input=False, include_url=False, include_context=False)
+    parts = [".".join(str(p) for p in e["loc"]) + ": " + e["type"] for e in found[:5]]
+    return "; ".join(parts) + (f" (+{len(found) - 5} more)" if len(found) > 5 else "")
 
 
 def _is_image(block: object) -> bool:
@@ -823,6 +840,7 @@ def _roles(
             role.organization = employment.organization
         role.title_first = _title_first(role, own_text)
         subheadings = lines(ai.subheading_lines)
+        role.subheading_blocks = subheadings
         role.bullets = [
             Bullet(
                 block=i,

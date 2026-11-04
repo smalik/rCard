@@ -12,8 +12,8 @@ from plytos_api.imports.ai import AiPlacementCheck, AiResume
 from plytos_api.imports.model import ExtractedDocument, ImportResult, ProposedCard
 from plytos_api.imports.pipeline import import_resume
 from plytos_api.imports.store import ImportConflictError, ImportNotFoundError, ImportStore
-from tests.resume_samples import stint_text
-from tests.test_import_lines import reading
+from tests.resume_samples import one_line_text, stint_text
+from tests.test_import_lines import _role, reading
 
 TODAY = date(2026, 11, 4)
 ME = Author("person")
@@ -205,3 +205,79 @@ def test_a_title_cant_be_moved_off_its_employer(make_user, db: Any, vault: Any) 
         for bad in (None, other.ref):
             with pytest.raises(ImportConflictError):
                 store.place(import_id, title.ref, bad)
+
+
+def test_one_line_jobs_and_later_sections_raise_no_questions() -> None:
+    """A title on its employer's line belongs to that employer, and an award in its own
+    section isn't asked about because of a job written above the heading."""
+    found = {
+        "name": "Morgan Diaz",
+        "contact_lines": [0, 1],
+        "sections": [
+            {"kind": "contact", "heading_line": -1, "lines": [0, 1]},
+            {"kind": "experience", "heading_line": 2, "lines": list(range(3, 10))},
+            {"kind": "awards", "heading_line": 10, "lines": [11]},
+        ],
+        "summary_lines": [],
+        "employments": [
+            {
+                "employer": "Northwind Traders",
+                "location": "Seattle, WA",
+                "dates": "2020 – 2024",
+                "header_lines": [3],
+                "description_lines": [],
+            },
+            {
+                "employer": "Tailspin Toys",
+                "location": "",
+                "dates": "March 2017 to June 2020",
+                "header_lines": [],
+                "description_lines": [],
+            },
+            {
+                "employer": "Fabrikam Inc.",
+                "location": "",
+                "dates": "2015 to 2017",
+                "header_lines": [],
+                "description_lines": [],
+            },
+        ],
+        "roles": [
+            _role(title="Senior Buyer", header_lines=[4], bullet_lines=[5]),
+            _role(
+                employment=1,
+                title="Buyer",
+                employer="Tailspin Toys",
+                dates="March 2017 to June 2020",
+                header_lines=[6],
+                bullet_lines=[7],
+            ),
+            _role(
+                employment=2,
+                title="Analyst",
+                employer="Fabrikam Inc.",
+                dates="2015 to 2017",
+                header_lines=[8],
+                bullet_lines=[9],
+            ),
+        ],
+        "skills": [],
+        "entries": [{"kind": "award", "lines": [11], "dates": "2016"}],
+        "skipped": [],
+    }
+    reader = FakeReader(found, [])
+    result = import_resume(one_line_text().encode(), "morgan.txt", today=TODAY, reader=reader)
+    employers = {
+        c.ref: c.content.facts.get("employer") for c in result.cards if c.kind == "employment"
+    }
+    titles = {
+        c.content.facts.get("title"): employers.get(c.parent_ref or "")
+        for c in result.cards
+        if c.kind == "position"
+    }
+    assert titles == {
+        "Senior Buyer": "Northwind Traders",
+        "Buyer": "Tailspin Toys",
+        "Analyst": "Fabrikam Inc.",
+    }
+    assert [(c.kind, min(c.source_blocks)) for c in result.cards if c.placement] == []

@@ -4,9 +4,10 @@ The reading decides which employer each title belongs to and which title each
 accomplishment belongs to. Two checks go over that, independently:
 
 * Order. On most resumes a line belongs to the title written above it, and a
-  title to the employer written above it. A line filed somewhere else is
-  suspect. This check is skipped for multi-column layouts, where reading order
-  isn't reliable.
+  title to the employer written above it (or on the same line, as in "Analyst,
+  Contoso - 2019 to 2021"), within the same section. A line filed somewhere
+  else is suspect. This check is skipped for multi-column layouts, where
+  reading order isn't reliable.
 * A second look by Claude, separate from the reading, that gets the resume and
   the tree built from it and names anything filed under the wrong title or
   employer, with the cue in the resume that shows it.
@@ -52,7 +53,7 @@ def check_placements(
     if not any(c.kind in _JOBS for c in cards):
         return
     keys = {c.ref: line for c in cards if (line := _key_line(c, roles, employments)) is not None}
-    order = {} if doc.facts.columns > 1 else _by_order(cards, roles, employments, keys)
+    order = {} if doc.facts.columns > 1 else _by_order(cards, parsed, keys)
     names, tree = _tree(cards, keys)
     found: dict[int, AiMisfiled] = {}
     if checker is not None and tree:
@@ -117,21 +118,29 @@ def _key_line(
 
 
 def _by_order(
-    cards: list[ProposedCard],
-    roles: dict[str, Role],
-    employments: dict[str, Employment],
-    keys: dict[str, int],
+    cards: list[ProposedCard], parsed: ParsedResume, keys: dict[str, int]
 ) -> dict[str, str]:
-    """Where each card sits by reading order: the nearest title or employer line above."""
+    """Where each card sits by reading order: the nearest title or employer line above
+    it in the same section. A title may share its employer's line."""
+    employments = {e.ref: e for e in parsed.employments}
+    role_lines: dict[str, list[int]] = {}
+    for role in parsed.roles:
+        if role.employment_ref:
+            role_lines.setdefault(role.employment_ref, []).extend(role.header_blocks)
     anchors: list[tuple[int, str]] = []  # (line, card ref)
     for card in cards:
         if card.kind == "employment":
             employment = employments.get(card.employment_ref or "")
-            if employment is not None and employment.header_blocks:
-                anchors.append((min(employment.header_blocks), card.ref))
+            if employment is None:
+                continue
+            # An employer written only on its titles' lines starts at the first of them.
+            lines = employment.header_blocks or role_lines.get(employment.ref, [])
+            if lines:
+                anchors.append((min(lines), card.ref))
         elif card.kind in _JOBS and card.ref in keys:
             anchors.append((keys[card.ref], card.ref))
     anchors.sort()
+    headings = sorted(s.heading_block for s in parsed.sections if s.heading_block is not None)
     kinds = {c.ref: c.kind for c in cards}
     out: dict[str, str] = {}
     for card in cards:
@@ -143,7 +152,15 @@ def _by_order(
             wanted = ("employment",)
         elif card.kind == "engagement":
             wanted = ("employment", "position")
-        above = [ref for start, ref in anchors if start < line and kinds[ref] in wanted]
+        section = max((h for h in headings if h <= line), default=-1)
+        above = [
+            ref
+            for start, ref in anchors
+            if section <= start
+            and (start < line or (start == line and kinds[ref] == "employment"))
+            and ref != card.ref
+            and kinds[ref] in wanted
+        ]
         if above:
             out[card.ref] = above[-1]
     return out

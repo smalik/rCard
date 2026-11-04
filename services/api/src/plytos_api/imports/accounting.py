@@ -43,11 +43,20 @@ def account(
     ``skipped`` holds lines the reader left out on purpose, with its reason."""
     blocks = {b.index: b for b in doc.blocks}
     on_cards = {i for c in cards for i in c.source_blocks if i in blocks}
-    contact = sorted(i for i in parsed.contact.blocks if i in blocks and i not in on_cards)
-    headings = sorted(
-        {s.heading_block for s in parsed.sections if s.heading_block in blocks} - on_cards
+    # A "Continued..." footer the reader took for contact details is skipped, not kept.
+    contact = sorted(
+        i
+        for i in parsed.contact.blocks
+        if i in blocks and i not in on_cards and plain_skip(blocks[i].text.strip()) is None
     )
-    placed = on_cards | set(contact) | set(headings)
+    headings = {
+        s.heading_block
+        for s in parsed.sections
+        if s.heading_block is not None and s.heading_block in blocks
+    }
+    headings |= {i for r in parsed.roles for i in r.subheading_blocks if i in blocks}
+    headings -= on_cards
+    placed = on_cards | set(contact) | headings
     contact_texts = {_norm(blocks[i].text) for i in parsed.contact.blocks if i in blocks}
     if parsed.contact.name:
         contact_texts.add(_norm(parsed.contact.name))
@@ -74,16 +83,55 @@ def account(
         else:
             left.append(i)
 
+    for i in list(left):
+        if _labels_bullets(i, doc, parsed, cards):
+            left.remove(i)
+            headings.add(i)
     for i in left:
         cards.append(_guess(i, blocks[i].text, blocks[i].is_bullet, parsed, cards))
     return LineAccount(
         lines=len(doc.blocks),
         on_cards=len(on_cards),
         contact=contact,
-        headings=headings,
+        headings=sorted(headings),
         skipped=skips,
         guessed=left,
     )
+
+
+def _labels_bullets(
+    i: int, doc: ExtractedDocument, parsed: ParsedResume, cards: list[ProposedCard]
+) -> bool:
+    """A short label inside a job with accomplishments right under it
+    ("Enterprise AI") names the workstream they belong to. It becomes their
+    workstream, where they don't have one yet, and counts as a heading."""
+    order = [b.index for b in doc.blocks]
+    at = order.index(i)
+    block = doc.blocks[at]
+    text = block.text.strip().rstrip(":").strip()
+    if (
+        block.is_bullet
+        or _section(i, parsed.sections) not in ("experience", "volunteer")
+        or not text
+        or len(text.split()) > 6
+        or text[-1] in ".!?;,"
+        or any(c.isdigit() for c in text)
+    ):
+        return False
+    by_block = {b: c for c in cards if c.kind == "accomplishment" for b in c.source_blocks}
+    under: list[ProposedCard] = []
+    for later in doc.blocks[at + 1 :]:
+        card = by_block.get(later.index)
+        if card is None:
+            break
+        if all(c is not card for c in under):
+            under.append(card)
+    if not under:
+        return False
+    for card in under:
+        if not card.content.facts.get("workstream"):
+            card.content.facts["workstream"] = text
+    return True
 
 
 def _section(i: int, sections: list[Section]) -> SectionKind | None:

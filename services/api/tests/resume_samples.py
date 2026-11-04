@@ -390,3 +390,45 @@ def pictured_pdf() -> bytes:
     pdf.cell(0, 6, "Operations Lead, Tailspin Toys  2019 - 2024", new_x="LMARGIN", new_y="NEXT")
     pdf.cell(0, 6, "Ran a warehouse team of twelve people.", new_x="LMARGIN", new_y="NEXT")
     return bytes(pdf.output())
+
+
+def one_line_text() -> str:
+    """An employer with its title below it, then jobs written on one line each
+    ("Title, Employer - dates"), then an awards section. Morgan Diaz is made up."""
+    return "\n".join(
+        [
+            "Morgan Diaz",
+            "morgan.diaz@example.com",
+            "EXPERIENCE",
+            "Northwind Traders, Seattle, WA\t2020 – 2024",
+            "Senior Buyer",
+            "• Cut supplier costs 12% across 40 vendors.",
+            "Buyer, Tailspin Toys - March 2017 to June 2020",
+            "• Managed a $3M toy category.",
+            "Analyst, Fabrikam Inc. - 2015 to 2017",
+            "• Built the weekly sales report.",
+            "AWARDS",
+            "Buyer of the Year, 2016",
+        ]
+    )
+
+
+def workstream_text() -> str:
+    """One job whose bullets sit under two workstream labels, and a "Continued..."
+    footer left in the text. Made up."""
+    return "\n".join(
+        [
+            "Casey Morgan",
+            "casey.morgan@example.com | 555-0100",
+            "EXPERIENCE",
+            "Consultant, Contoso Motors, Plano, TX\tAug 2025 – Present",
+            "Enterprise AI",
+            "• Built a document search assistant used by 400 analysts.",
+            "• Cut contract review time by 30% with automated clause checks.",
+            "Workforce Strategies",
+            "• Modeled staffing needs for 6 plants.",
+            "Continued...",
+            "EDUCATION",
+            "University of Texas, B.S. Statistics, 2015",
+        ]
+    )

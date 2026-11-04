@@ -8,7 +8,7 @@ from typing import Any
 from plytos_api.imports.ai import AiResume
 from plytos_api.imports.model import ExtractedDocument, ImportResult
 from plytos_api.imports.pipeline import import_resume
-from tests.resume_samples import stint_text
+from tests.resume_samples import stint_text, workstream_text
 
 TODAY = date(2026, 11, 4)
 LINES = 20
@@ -202,3 +202,99 @@ def test_the_rules_alone_also_account_for_every_line() -> None:
     # The rules read the references line as a heading; the audit points it out.
     assert 19 in result.lines.headings
     assert "content.references" in {f.rule for f in result.findings}
+
+
+def _workstream_reading(subheadings: list[int], experience: list[int]) -> dict[str, Any]:
+    """A reading of workstream_text() that takes the "Continued..." footer for a
+    contact line, as Claude once did."""
+    return {
+        "name": "Casey Morgan",
+        "contact_lines": [0, 1, 9],
+        "sections": [
+            {"kind": "contact", "heading_line": -1, "lines": [0, 1]},
+            {"kind": "experience", "heading_line": 2, "lines": experience},
+            {"kind": "education", "heading_line": 10, "lines": [11]},
+        ],
+        "summary_lines": [],
+        "employments": [],
+        "roles": [
+            _role(
+                title="Consultant",
+                employer="Contoso Motors",
+                location="Plano, TX",
+                dates="Aug 2025 – Present",
+                header_lines=[3],
+                subheading_lines=subheadings,
+                bullet_lines=[5, 6, 8],
+            )
+        ],
+        "skills": [],
+        "entries": [{"kind": "education", "lines": [11], "dates": "2015"}],
+        "skipped": [],
+    }
+
+
+def _workstreams(result: ImportResult) -> dict[int, object]:
+    return {
+        c.source_blocks[0]: c.content.facts.get("workstream")
+        for c in result.cards
+        if c.kind == "accomplishment"
+    }
+
+
+def _import_workstreams(found: dict[str, Any] | None) -> ImportResult:
+    return import_resume(
+        workstream_text().encode(),
+        "casey.txt",
+        today=TODAY,
+        reader=FakeReader(found) if found is not None else None,
+    )
+
+
+def _all_lines_placed(result: ImportResult) -> None:
+    lines = result.lines
+    assert lines is not None
+    on_cards = {i for c in result.cards for i in c.source_blocks}
+    placed = on_cards | set(lines.contact) | set(lines.headings) | {s.block for s in lines.skipped}
+    assert placed == set(range(lines.lines))
+
+
+def test_workstream_labels_are_headings_not_cards() -> None:
+    result = _import_workstreams(_workstream_reading([4, 7], [3, 4, 5, 6, 7, 8, 9]))
+    _all_lines_placed(result)
+    assert result.lines is not None
+    assert result.lines.guessed == []
+    assert {4, 7} <= set(result.lines.headings)
+    assert _workstreams(result) == {
+        5: "Enterprise AI",
+        6: "Enterprise AI",
+        8: "Workforce Strategies",
+    }
+
+
+def test_a_continued_footer_taken_for_contact_is_skipped() -> None:
+    result = _import_workstreams(_workstream_reading([4, 7], [3, 4, 5, 6, 7, 8, 9]))
+    assert result.lines is not None
+    assert 9 not in result.lines.contact
+    assert (9, "page_number") in {(s.block, s.reason) for s in result.lines.skipped}
+
+
+def test_a_label_the_reader_left_out_still_names_its_workstream() -> None:
+    # The labels are in no list at all: they read as headings over the bullets below.
+    result = _import_workstreams(_workstream_reading([], [3, 5, 6, 8, 9]))
+    _all_lines_placed(result)
+    assert result.lines is not None
+    assert result.lines.guessed == []
+    assert _workstreams(result) == {
+        5: "Enterprise AI",
+        6: "Enterprise AI",
+        8: "Workforce Strategies",
+    }
+
+
+def test_the_rules_alone_keep_workstream_labels_off_cards() -> None:
+    result = _import_workstreams(None)
+    _all_lines_placed(result)
+    assert result.lines is not None
+    assert result.lines.guessed == []
+    assert set(_workstreams(result).values()) == {"Enterprise AI", "Workforce Strategies"}

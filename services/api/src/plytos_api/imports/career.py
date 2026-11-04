@@ -127,6 +127,13 @@ def _settle(employment: Employment, held: list[Role], texts: dict[int, str]) -> 
         if written is not None and written.start is not None:
             employment.dates, employment.tenure_written = written, True
             return
+    # Client work sits inside a position: "Consultant, Agency - 2020 to 2025" with its
+    # engagements below. The one position's own dates are the tenure as written.
+    positions = [r for r in held if r.client is None and r.parent_ref is None]
+    if len(positions) == 1 and positions[0].dates is not None:
+        employment.dates = positions[0].dates
+        employment.tenure_written = True
+        return
     if len(held) == 1:
         employment.dates = held[0].dates
         employment.tenure_written = held[0].dates is not None

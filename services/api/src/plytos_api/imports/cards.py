@@ -301,8 +301,24 @@ def _own(role: Role, employment: Employment) -> list[int]:
     return own or role.header_blocks
 
 
+# "24/7" says always on; it isn't two figures.
+_ROUND_THE_CLOCK = re.compile(r"\b24\s*[/x]\s*7\b", re.IGNORECASE)
+# A capitalised word right before a number, past the start: "Dynamics 365", "Windows 11".
+_NAMED_BEFORE = re.compile(r"(?<=\S)\s+[A-Z][A-Za-z]*\s$")
+
+
 def _figures(text: str) -> dict[str, FactValue]:
-    figures = [m.group(0).strip() for m in _NUMBER.finditer(text)]
+    """The numbers in a line, leaving out ones that are part of a name or "24/7"."""
+    text = _ROUND_THE_CLOCK.sub(" ", text)
+    figures: list[str] = []
+    for m in _NUMBER.finditer(text):
+        token = m.group(0).strip()
+        before = text[: m.start()]
+        if before[-1:].isalpha():
+            continue  # part of a word or code, like "Q3" or "S4"
+        if token.isdigit() and _NAMED_BEFORE.search(before):
+            continue
+        figures.append(token)
     return {"figures": list(dict.fromkeys(figures))} if figures else {}
 
 

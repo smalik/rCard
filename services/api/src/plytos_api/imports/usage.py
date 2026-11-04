@@ -78,9 +78,26 @@ class AiUsage(BaseModel):
         return sum(c.seconds for c in self.calls)
 
     @property
-    def cost_usd(self) -> float | None:
-        costs = [c.cost_usd for c in self.calls]
-        return None if any(c is None for c in costs) else sum(c or 0.0 for c in costs)
+    def cost_usd(self) -> float:
+        """The priced calls' cost. A call answered but lost to an error has no price."""
+        return sum(c.cost_usd or 0.0 for c in self.calls)
+
+    @property
+    def unpriced(self) -> int:
+        return sum(1 for c in self.calls if c.cost_usd is None)
+
+    @property
+    def estimated_cost_usd(self) -> float:
+        """The cost with each unpriced call counted at the dearest priced call of its
+        step (or of any step): an upper estimate, for keeping to a budget."""
+        dearest: dict[str, float] = {}
+        for c in self.calls:
+            if c.cost_usd is not None:
+                dearest[c.step] = max(dearest.get(c.step, 0.0), c.cost_usd)
+        fallback = max(dearest.values(), default=0.0)
+        return self.cost_usd + sum(
+            dearest.get(c.step, fallback) for c in self.calls if c.cost_usd is None
+        )
 
 
 def record(

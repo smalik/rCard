@@ -20,7 +20,7 @@ from tests.resume_samples import clean_pdf, pictured_pdf, promotions_text, two_c
 
 def _call(**fields: Any) -> AiCall:
     base: dict[str, Any] = {"step": "structure", "model": "claude-haiku-5-5", "effort": "medium"}
-    return AiCall(ok=True, **{**base, **fields})
+    return AiCall(**{"ok": True, **base, **fields})
 
 
 def test_cost_is_list_price_per_million_tokens() -> None:
@@ -41,6 +41,10 @@ def test_usage_totals_count_cached_input_too() -> None:
     )
     assert usage.input_tokens == 150 and usage.output_tokens == 15
     assert usage.cost_usd == 0.75
+    # A call lost to an error is estimated at the dearest call of its step.
+    usage.calls.append(_call(ok=False, cost_usd=None))
+    assert usage.cost_usd == 0.75 and usage.unpriced == 1
+    assert usage.estimated_cost_usd == 1.25
 
 
 def _client(handler: Any) -> anthropic.Anthropic:
@@ -170,3 +174,21 @@ def test_the_bench_stops_at_the_budget_across_runs(tmp_path: Path) -> None:
 
     # The next run picks up the total and has no room for another resume.
     assert run(items[2:], MeteredFake(0.004), out, budget=0.01, run_id="second") == []
+
+
+def test_an_answer_that_breaks_the_schema_is_asked_for_once_more(caplog: Any) -> None:
+    answers = iter(['{"typos": "not a list"}', '{"typos": []}'])
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
+            200, json=_reply(next(answers), {"input_tokens": 10, "output_tokens": 5})
+        )
+
+    reader = ClaudeReader(_client(handler), "claude-haiku-5-5", "medium").metered()
+    found = reader.proofread(extract(promotions_text().encode(), "avery.txt"))
+    assert found is not None and found.typos == []
+    first, second = reader.calls
+    assert (first.ok, first.error, first.cost_usd) == (False, "ValidationError", None)
+    assert second.ok and second.cost_usd is not None
+    # The log says where the answer broke, never what it said.
+    assert "typos: list_type" in caplog.text and "not a list" not in caplog.text

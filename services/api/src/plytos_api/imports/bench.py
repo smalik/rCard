@@ -246,7 +246,9 @@ def _numbers(result: ImportResult) -> dict[str, Any]:
         "words": facts.word_count,
         "columns": facts.columns,
         "read_by": result.read_by,
-        "cost_usd": round(usage.cost_usd or 0.0, 6) if usage is not None else 0.0,
+        # Calls lost to an error are counted at an estimate, so the budget holds.
+        "cost_usd": round(usage.estimated_cost_usd, 6) if usage is not None else 0.0,
+        "unpriced_calls": usage.unpriced if usage is not None else 0,
         "steps": steps,
         "lines": {
             "total": lines.lines,

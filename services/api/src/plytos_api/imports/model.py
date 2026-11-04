@@ -156,6 +156,9 @@ class Role(BaseModel):
     description: str | None = None
     description_blocks: list[int] = Field(default_factory=list)
     bullets: list[Bullet] = Field(default_factory=list)
+    # Lines inside the role naming a workstream or project its bullets sit under
+    # ("Enterprise AI"). They label the bullets below them, like a heading.
+    subheading_blocks: list[int] = Field(default_factory=list)
 
 
 class Employment(BaseModel):

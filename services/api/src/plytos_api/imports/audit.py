@@ -82,12 +82,22 @@ CLICHES = [
     "best of breed",
     "passionate about",
 ]
+# Whole words only: "dynamic" isn't in "Dynamics 365".
+_CLICHE_PATTERNS = [(c, re.compile(rf"(?<![\w-]){re.escape(c)}(?![\w-])")) for c in CLICHES]
 PERSONAL = re.compile(
     r"\b(?:date of birth|d\.?o\.?b\.?|birth ?date|marital status|social security|ssn|"
     r"religion|gender:|age:\s*\d)",
     re.IGNORECASE,
 )
 _NUMBER = re.compile(r"\d")
+# Notes to self left in the text: "(confirm employer)", "[insert metric]", "TBD",
+# "grew sales XX%", "Lorem ipsum".
+PLACEHOLDER = re.compile(
+    r"[(\[<{]\s*(?i:confirm|insert|fill\s+in|placeholder|to\s*do|tbd|"
+    r"(?:add|needs?)\s+(?:a\s+|the\s+)?(?:metric|number|figure|date|link|detail|result|"
+    r"company|title|name)s?)(?![\w-])[^)\]>}]{0,60}[)\]>}]"
+    r"|\b(?:TODO|TBD|FIXME)\b|\bX{3,}\b|\b[Xx]{2,}%|\$X+\b|(?i:\blorem ipsum\b)"
+)
 
 
 def _wordset(text: str) -> frozenset[str]:
@@ -156,6 +166,7 @@ CARD_RULES = frozenset(
         "content.objective",
         "content.old_detail",
         "content.personal_info",
+        "content.placeholder",
         "content.repeated_openers",
         "content.skill_spelling",
         "content.weak_openers",
@@ -206,6 +217,26 @@ def _quote(block: Block, sentence: str) -> Location:
 def _role_label(role: Role) -> str:
     parts = [p for p in (role.title, role.organization) if p]
     return ", ".join(parts) if parts else role.header_text.split("\n")[0]
+
+
+def _boundary_year(a: Role, b: Role, months: int) -> bool:
+    """Whether an overlap is only the year one role ends and the next begins, written
+    without months ("2003-2005", then "2005-2008"): no real overlap is shown."""
+    if months > 12 or a.dates is None or b.dates is None:
+        return False
+    first, second = (a, b) if _start(a) <= _start(b) else (b, a)
+    end, start = (
+        first.dates.end if first.dates else None,
+        second.dates.start if second.dates else None,
+    )
+    if end is None or start is None or end.year != start.year:
+        return False
+    return end.month is None or start.month is None
+
+
+def _start(role: Role) -> int:
+    start = role.dates.start if role.dates is not None else None
+    return start.ordinal() if start is not None else 0
 
 
 def _plural(n: int, one: str, many: str | None = None) -> str:
@@ -852,7 +883,7 @@ def _date_checks(parsed: ParsedResume, blocks: dict[int, Block], today: date) ->
             if a.employment_ref is not None and a.employment_ref == b.employment_ref:
                 continue  # two titles at once at one employer is normal
             months = min(a_end, b_end) - max(a_start, b_start)
-            if months >= 2:
+            if months >= 2 and not _boundary_year(a, b, months):
                 overlaps.append((a, b, months))
     for a, b, months in overlaps:
         yield _finding(
@@ -1403,7 +1434,7 @@ def _content(
     found_phrases: list[str] = []
     for b in doc.blocks:
         low = b.text.lower()
-        hits = [c for c in CLICHES if c in low]
+        hits = [c for c, pattern in _CLICHE_PATTERNS if pattern.search(low)]
         if hits:
             cliche_hits.append(b)
             found_phrases += [h for h in hits if h not in found_phrases]
@@ -1416,6 +1447,18 @@ def _content(
             "Phrases like " + ", ".join(f'"{p}"' for p in found_phrases[:5]) + " appear on "
             "most resumes and recruiters skip them. Show the quality with a result instead.",
             cliche_hits[:6],
+        )
+
+    notes = [b for b in doc.blocks if PLACEHOLDER.search(b.text)]
+    if notes:
+        yield _finding(
+            "content.placeholder",
+            "fix",
+            "content",
+            f"{_plural(len(notes), 'line')} with a note left in",
+            'Notes like "(confirm employer)", "TBD" or "XX%" look unfinished to a '
+            "recruiter. Fill them in or take them out.",
+            notes[:6],
         )
 
     personal = [b for b in doc.blocks if PERSONAL.search(b.text)]

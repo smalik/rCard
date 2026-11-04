@@ -45,9 +45,9 @@ Severity says how much it matters.
 | Area | Checks |
 | --- | --- |
 | ATS and layout | No text layer; contact details only in the page header, footer or text boxes; other text in text boxes; tables; multiple columns; a text-width image in the body (often a screenshot of text); smaller images and icons; no experience found; a summary filed under an Experience heading; roles missing a title or employer; non-standard section headings; no skills or education section; body text under 10 pt; lines under 8 pt |
-| Dates | Missing dates; year-only dates; client engagements with no dates of their own; end before start; dates in the future; not newest first (by end date); overlapping roles; gaps over six months; several current roles |
+| Dates | Missing dates; year-only dates; client engagements with no dates of their own; end before start; dates in the future; not newest first (by end date); overlapping roles (not when they only share a year written without months, as in "2003 – 2005" then "MAR 2005 – Present"); gaps over six months; several current roles |
 | Consistency | The same result quoted with different numbers (say, a highlight and the role it came from); date formats, including two formats in one range; range separators; "Present" vs "Current"; bullet styles; bold bullets; bullets typed by hand; title-first vs employer-first headers; end punctuation; fonts and sizes in bullets, role headings and client headings; heading formatting; number of fonts; heading capitalization; double spaces; present tense in past roles, including clauses ("Designed X, supervise Y") |
-| Content | Objective instead of summary; "References available upon request"; duty openers ("Responsible for"); first person; roles with no numbers; roles written as paragraphs; bullets over 40 words; more than 8 bullets; roles with no description; repeated sentences anywhere; repeated opening verbs; stock phrases; personal details US employers avoid; detail on roles over 15 years old; skills spelled differently from their usual form ("Tableu", "Sagemaker") |
+| Content | Objective instead of summary; "References available upon request"; duty openers ("Responsible for"); first person; roles with no numbers; roles written as paragraphs; bullets over 40 words; more than 8 bullets; roles with no description; repeated sentences anywhere; repeated opening verbs; stock phrases (whole words, so "Dynamics 365" isn't "dynamic"); notes left in the text ("(confirm employer)", "TBD", "XX%"); personal details US employers avoid; detail on roles over 15 years old; skills spelled differently from their usual form ("Tableu", "Sagemaker") |
 | Contact | Name, email, phone, LinkedIn, city and state; several emails; a full street address; phone spacing |
 | Length | Over two pages; very short; a long summary |
 | File | An employer's sensitivity or classification marking (from Microsoft Purview and similar tools, read from the page and from the file's properties); tailoring tags (such as an employer's initials); version words like "final"; no name |
@@ -180,6 +180,11 @@ years, skills) and a summary of cost per resume and per step and what $1, $3
 and $20 buy. The output holds what was read from the resumes, so it stays on
 the machine that has them.
 
+A reply that doesn't fit the schema is asked for once more before the import
+falls back to the rules; only the error's field and type are logged. A call
+made with a model missing from the price table is counted at the dearest priced
+call of its step, so the spend cap is never undercounted.
+
 ## Reading pictures
 
 Some resumes carry words the file's text doesn't: a screenshot of bullets, a
@@ -236,7 +241,10 @@ edits the card.
 After the cards are proposed, every line of the resume must be in one of five
 places: on a card, in the contact details, a section heading, skipped for a
 stated reason (`page_number`, `page_header`, `decoration`, `references`, or a
-classification `marking`), or on a card of its own. A line nothing claimed
+classification `marking`), or on a card of its own. A short label inside a job
+that its bullets sit under ("Enterprise AI") counts as a heading and becomes
+those cards' workstream. A "Continued..." footer is skipped as a page number,
+even when the reader took it for contact details. A line nothing claimed
 gets that card, placed by the section it sits in (an accomplishment under the
 nearest job above it, a skill, an education entry, an activity), with a
 question asking the person to keep, move or drop it. The import records the
@@ -248,8 +256,10 @@ An accomplishment under the wrong title misstates someone's career, so two
 checks go over the tree once it's built:
 
 - **Order.** On most resumes a line belongs to the title written above it,
-  and a title to the employer above it. Skipped for multi-column layouts,
-  where reading order isn't reliable.
+  and a title to the employer above it, within the same section. A title
+  written on the employer's own line ("Consultant, Contoso - 2019 – 2023") is
+  under that employer. Skipped for multi-column layouts, where reading order
+  isn't reliable.
 - **A second look by Claude**, separate from the reading. It gets the numbered
   lines and the tree in short refs (E1 employer, T1 title, C1 client work) and
   names anything filed in the wrong place, with the cue in the resume that
@@ -273,7 +283,7 @@ under the title it was written under.
 | Each employer, with the tenure | `employment`: employer, start, end, location, employment type | nothing |
 | Each title held there | `position`: title, its own start and end, and a location or type only when it differs from the employment's | its employment |
 | Each client engagement under an agency or consultancy role | `engagement`: client, title, dates | the agency position |
-| Each bullet | `accomplishment`: its workstream label if it sits under one, and every number in the text as `figures` | its position or engagement |
+| Each bullet | `accomplishment`: its workstream label if it sits under one, and every number in the text as `figures`, except ones in a name or code ("Dynamics 365", "Q3") and "24/7" | its position or engagement |
 | Each sentence of a role written as a paragraph | `accomplishment`, as for a bullet | its position or engagement |
 | Key achievements | `accomplishment`; one that names a single client or employer is proposed under that work, with a question to confirm it | that work, or nothing |
 | Each skills line | `skill`, with the category and skills as facts | nothing |
