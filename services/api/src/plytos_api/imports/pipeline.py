@@ -2,12 +2,14 @@
 
 from datetime import date
 
-from plytos_api.imports.ai import ResumeReader, to_parsed
+from plytos_api.imports.accounting import account
+from plytos_api.imports.ai import PlacementChecker, ResumeReader, to_parsed
 from plytos_api.imports.audit import audit
 from plytos_api.imports.cards import propose_cards
-from plytos_api.imports.career import group_employments
+from plytos_api.imports.career import group_employments, settle_employments
 from plytos_api.imports.extract import extract
 from plytos_api.imports.model import ImportResult, ParsedResume
+from plytos_api.imports.placement import check_placements
 from plytos_api.imports.segment import segment
 
 
@@ -26,16 +28,25 @@ def import_resume(
     if parsed is None:
         parsed = segment(doc)
     texts = {b.index: b.text for b in doc.blocks}
-    parsed.employments = group_employments(parsed.roles, texts)
+    if parsed.employments:
+        # The reader said which titles belong to which employment.
+        parsed.employments = settle_employments(parsed.employments, parsed.roles, texts)
+    else:
+        parsed.employments = group_employments(parsed.roles, texts)
     findings = audit(doc, parsed, today=today)
+    cards = propose_cards(parsed, findings, texts)
+    checker = reader if isinstance(reader, PlacementChecker) and read_by is not None else None
+    check_placements(doc, parsed, cards, checker)
+    lines = account(doc, parsed, cards, skipped=parsed.skipped)
     return ImportResult(
         facts=doc.facts,
         contact=parsed.contact,
         sections=parsed.sections,
         roles=parsed.roles,
         employments=parsed.employments,
-        cards=propose_cards(parsed, findings, texts),
+        cards=cards,
         findings=findings,
         blocks=doc.blocks,
         read_by=read_by,
+        lines=lines,
     )

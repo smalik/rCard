@@ -147,7 +147,7 @@ def test_resume_import_keeps_the_original_and_saves_only_approved_cards(
     view = response.json()
     import_id = view["id"]
     assert view["file"] == {"format": "docx", "size": len(data), "name": "Casey Morgan Resume.docx"}
-    assert view["progress"] == {"settled": {}, "cards": {}, "edits": {}}
+    assert view["progress"] == {"settled": {}, "cards": {}, "edits": {}, "moves": {}}
     assert len(view["result"]["roles"]) == 4
     assert client.get("/v1/cards", headers=me).json() == before
 

@@ -17,7 +17,9 @@ import {
   openQuestions,
   outline,
   overview,
+  parentRef,
   pathLabel,
+  placementOpen,
   type Proposal,
   type Review,
   readerName,
@@ -38,6 +40,7 @@ function card(partial: Partial<Proposal> & Pick<Proposal, "ref" | "kind">): Prop
     source_blocks: [],
     source: [],
     needs_check: [],
+    placement: null,
     ...partial,
   };
 }
@@ -151,7 +154,7 @@ function review(progress: Partial<Review["progress"]> = {}): Review {
     cards: CARDS,
     findings: [FIGURES, TENSE, GAP, LAYOUT],
     toSettle: [0, 2],
-    progress: { settled: {}, cards: {}, edits: {}, ...progress },
+    progress: { settled: {}, cards: {}, edits: {}, moves: {}, ...progress },
     contactKept: true,
     readBy: null,
   };
@@ -195,7 +198,7 @@ describe("toReview", () => {
   it("copes with an empty answer", () => {
     const shaped = toReview(null);
     expect(shaped.cards).toEqual([]);
-    expect(shaped.progress).toEqual({ settled: {}, cards: {}, edits: {} });
+    expect(shaped.progress).toEqual({ settled: {}, cards: {}, edits: {}, moves: {} });
     expect(shaped.readBy).toBeNull();
   });
 
@@ -419,5 +422,30 @@ describe("career tree", () => {
       "Official title",
       "Dates",
     ]);
+  });
+
+  it("waits on the person to say where a result belongs, then files it there", () => {
+    const asked: Proposal = {
+      ...TREE[2]!,
+      placement: {
+        question: "Which job is this from?",
+        reason: "It's written under Analyst at Fabrikam Inc. on your resume.",
+        choices: [
+          { parent_ref: "t-2", label: "Senior Analyst at Fabrikam Inc." },
+          { parent_ref: "t-5", label: "Analyst at Fabrikam Inc." },
+        ],
+        moved_from: null,
+      },
+    };
+    const cards = TREE.map((c) => (c.ref === asked.ref ? asked : c));
+    const before = { ...treeReview(), cards };
+    expect(placementOpen(asked, before.progress)).toBe(true);
+    expect(parentRef(asked, before.progress)).toBe("t-2");
+
+    const after = { ...treeReview({ moves: { "t-3": "t-5" } }), cards };
+    expect(placementOpen(asked, after.progress)).toBe(false);
+    expect(parentRef(asked, after.progress)).toBe("t-5");
+    expect(pathLabel(asked, after)).toBe("Fabrikam Inc. › Analyst");
+    expect(placementOpen(TREE[3]!, after.progress)).toBe(false);
   });
 });

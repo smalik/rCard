@@ -159,6 +159,19 @@ export function decideCard(
   );
 }
 
+export function placeCard(
+  session: Session,
+  id: string,
+  ref: string,
+  parentRef: string | null,
+): Promise<Progress> {
+  return apiFetch<Progress>(
+    `/v1/imports/${encodeURIComponent(id)}/cards/${encodeURIComponent(ref)}/place`,
+    session,
+    json({ parent_ref: parentRef }),
+  );
+}
+
 export function approveCard(
   session: Session,
   id: string,

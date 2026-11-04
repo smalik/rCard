@@ -328,3 +328,33 @@ def promotions_text() -> str:
             "University of Wisconsin–Madison, B.S. Industrial Engineering, 2010",
         ]
     )
+
+
+def stint_text() -> str:
+    """One employer with a line describing it and three titles that share its tenure
+    (no dates of their own), a page number left in the text, an activity section and a
+    references line. Made up."""
+    return "\n".join(
+        [
+            "Jordan Lee",
+            "Denver, CO | jordan.lee@example.com | 720-555-0199",
+            "PROFESSIONAL EXPERIENCE",
+            "Contoso Health, Denver, CO\t2015 – 2023",
+            "A regional hospital network with 12 sites and 9,000 staff.",
+            "Director of Patient Access",
+            "• Cut average ER wait times by 18% across 4 sites.",
+            "Manager, Scheduling",
+            "• Rebuilt the scheduling team and hired 14 coordinators.",
+            "Supervisor, Registration",
+            "• Trained 30 registrars on the new intake system.",
+            "Fabrikam Clinics, Boulder, CO\t2012 – 2015",
+            "Office Manager",
+            "• Ran billing for 3 clinics, collecting $2.4M a year.",
+            "Page 2",
+            "EDUCATION",
+            "University of Colorado, B.A. Psychology, 2012",
+            "SPEAKING",
+            "Speaker, Colorado Healthcare Access Summit, 2022",
+            "References available upon request",
+        ]
+    )

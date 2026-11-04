@@ -166,6 +166,7 @@ CARD_RULES = frozenset(
         "dates.missing",
         "dates.outside_tenure",
         "dates.overlap",
+        "dates.titles_share_tenure",
         "dates.undated_engagements",
         "dates.year_only",
     }
@@ -461,8 +462,11 @@ def _headings(parsed: ParsedResume, blocks: dict[int, Block]) -> Iterable[Findin
             "with two or three lines on the work you do best and the results behind it.",
             [blocks[section.heading_block]] if section.heading_block is not None else [],
         )
-    if "references" in kinds:
-        section = next(s for s in parsed.sections if s.kind == "references")
+    references = [i for i, why in parsed.skipped.items() if why == "references" and i in blocks]
+    if "references" in kinds or references:
+        heading = next((s for s in parsed.sections if s.kind == "references"), None)
+        line = heading.heading_block if heading is not None else None
+        line = line if line is not None else (references[0] if references else None)
         yield _finding(
             "content.references",
             "improve",
@@ -470,7 +474,7 @@ def _headings(parsed: ParsedResume, blocks: dict[int, Block]) -> Iterable[Findin
             '"References available upon request"',
             "Employers assume this, so the line only takes space. Remove it and keep your "
             "references ready separately.",
-            [blocks[section.heading_block]] if section.heading_block is not None else [],
+            [blocks[line]] if line is not None else [],
         )
     # Real heading lines only: not "Certifications: CPA" or the references line.
     titled = [
@@ -670,7 +674,38 @@ def _header_blocks(roles: Iterable[Role], blocks: dict[int, Block]) -> list[Bloc
 
 def _date_checks(parsed: ParsedResume, blocks: dict[int, Block], today: date) -> Iterable[Finding]:
     roles = parsed.roles
-    undated = [r for r in roles if r.dates is None and r.parent_ref is None]
+    # Titles inside an employer whose tenure is written are dated by that tenure.
+    dated_by_tenure = {
+        ref
+        for e in parsed.employments
+        if e.dates is not None and e.tenure_written
+        for ref in e.role_refs
+    }
+    undated = [
+        r
+        for r in roles
+        if r.dates is None and r.parent_ref is None and r.ref not in dated_by_tenure
+    ]
+    shared: dict[str, list[Role]] = defaultdict(list)
+    for r in roles:
+        if r.dates is None and r.parent_ref is None and r.ref in dated_by_tenure:
+            shared[r.employment_ref or ""].append(r)
+    employments = {e.ref: e for e in parsed.employments}
+    for ref, titles in shared.items():
+        employment = employments.get(ref)
+        if employment is None or employment.dates is None or len(employment.role_refs) < 2:
+            continue  # One title under a dated employer: the tenure is its dates.
+        yield _finding(
+            "dates.titles_share_tenure",
+            "note",
+            "dates",
+            f"{_plural(len(titles), 'title')} at {employment.organization or 'one employer'} "
+            "share one date range",
+            f"Your time at {employment.organization or 'this employer'} is dated "
+            f"({employment.dates.raw}), so this is fine as it is. Adding when you moved into "
+            "each title shows the progression at a glance.",
+            _header_blocks(titles, blocks),
+        )
     by_ref = {r.ref: r for r in roles}
     engagements: dict[str, list[Role]] = defaultdict(list)
     for r in roles:

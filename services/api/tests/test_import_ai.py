@@ -30,6 +30,7 @@ TODAY = date(2026, 11, 4)
 
 def _role(**fields: Any) -> dict[str, Any]:
     role: dict[str, Any] = {
+        "employment": -1,
         "volunteer": False,
         "title": "",
         "employer": "",
@@ -38,7 +39,6 @@ def _role(**fields: Any) -> dict[str, Any]:
         "employment_type": "",
         "dates": "",
         "header_lines": [],
-        "employer_line": -1,
         "engagement_of": -1,
         "subheading_lines": [],
         "bullet_lines": [],
@@ -60,6 +60,22 @@ def good_reading() -> dict[str, Any]:
             {"kind": "education", "heading_line": 15, "lines": [16]},
         ],
         "summary_lines": [],
+        "employments": [
+            {
+                "employer": "Northwind Logistics",
+                "location": "Chicago, IL",
+                "dates": "Mar 2014 – Present",
+                "header_lines": [3],
+                "description_lines": [],
+            },
+            {
+                "employer": "Brightline Partners",
+                "location": "Milwaukee, WI",
+                "dates": "Jun 2010 – Feb 2014",
+                "header_lines": [11],
+                "description_lines": [],
+            },
+        ],
         "roles": [
             _role(
                 title="Director, Supply Chain Operations",
@@ -67,7 +83,7 @@ def good_reading() -> dict[str, Any]:
                 location="Chicago, IL",
                 dates="Jan 2021 – Present",
                 header_lines=[4],
-                employer_line=3,
+                employment=0,
                 bullet_lines=[5, 6],
             ),
             _role(
@@ -76,7 +92,7 @@ def good_reading() -> dict[str, Any]:
                 location="Chicago, IL",
                 dates="Jun 2017 – Dec 2020",
                 header_lines=[7],
-                employer_line=3,
+                employment=0,
                 bullet_lines=[8],
             ),
             _role(
@@ -85,7 +101,7 @@ def good_reading() -> dict[str, Any]:
                 location="Chicago, IL",
                 dates="Mar 2014 – May 2017",
                 header_lines=[9],
-                employer_line=3,
+                employment=0,
                 bullet_lines=[10],
             ),
             _role(
@@ -93,9 +109,11 @@ def good_reading() -> dict[str, Any]:
                 employer="Brightline Partners",
                 location="Milwaukee, WI",
                 dates="Jun 2010 – Feb 2014",
-                header_lines=[11, 12],
+                header_lines=[12],
+                employment=1,
             ),
             _role(
+                employment=1,
                 employer="Brightline Partners",
                 client="Fabrikam Foods",
                 header_lines=[13],
@@ -105,6 +123,7 @@ def good_reading() -> dict[str, Any]:
         ],
         "skills": [],
         "entries": [{"kind": "education", "lines": [16], "dates": "2010"}],
+        "skipped": [],
     }
 
 
@@ -239,9 +258,10 @@ def test_values_the_resume_doesnt_say_are_dropped() -> None:
     reading["roles"][0]["dates"] = "January 2021 – Present"
     result = _import(reading)
     first = _positions(result)[0]
-    assert "title" not in first and "start" not in first
+    assert "title" not in first
     assert "What was the job title?" in first["checks"]
-    assert "When did you start and finish in this title?" in first["checks"]
+    # The made-up dates are dropped; the range written on the title's own line is used.
+    assert (first["start"], first["end"]) == ("2021-01", "present")
     # The shared employer line still names the employer for it.
     employer = next(c for c in result.cards if c.kind == "employment")
     assert employer.content.facts["employer"] == "Northwind Logistics"

@@ -32,6 +32,9 @@ CardKind = Literal[
     "skill",
     "education",
     "credential",
+    # Talks, conferences, publications, boards, memberships, volunteering and
+    # interests: context, like education. Added in 0006_activity_cards.sql.
+    "activity",
     # The flat kind from before the tree. Old cards keep it; new cards don't use it.
     "role",
 ]

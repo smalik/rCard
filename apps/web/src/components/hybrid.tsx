@@ -148,6 +148,7 @@ export function kindLabel(kind: CardKind, facts?: Record<string, unknown>): stri
     skill: "Skill",
     education: "Education",
     credential: "Credential",
+    activity: "Activity",
   }[kind];
 }
 

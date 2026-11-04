@@ -58,15 +58,47 @@ def group_employments(roles: list[Role], texts: dict[int, str]) -> list[Employme
         role.employment_ref = current.ref
     for employment in employments:
         _settle(employment, members[employment.ref], texts)
+        _describe(employment, members[employment.ref], texts)
     return employments
+
+
+def settle_employments(
+    employments: list[Employment], roles: list[Role], texts: dict[int, str]
+) -> list[Employment]:
+    """Fills in employments a reader already grouped: each role names its
+    employment in employment_ref. Employments left without a role are dropped."""
+    members: dict[str, list[Role]] = {e.ref: [] for e in employments}
+    for role in roles:
+        if role.employment_ref in members:
+            members[role.employment_ref].append(role)
+    kept = [e for e in employments if members[e.ref]]
+    for employment in kept:
+        employment.role_refs = [r.ref for r in members[employment.ref]]
+        _settle(employment, members[employment.ref], texts)
+        _describe(employment, members[employment.ref], texts)
+    return kept
+
+
+def _describe(employment: Employment, held: list[Role], texts: dict[int, str]) -> None:
+    """Keeps what the resume says about the employer itself."""
+    lines = sorted(
+        {b for r in held for b in r.employer_description_blocks if b in texts}
+        | {b for b in employment.description_blocks if b in texts}
+    )
+    if lines:
+        employment.description_blocks = lines
+        employment.description = " ".join(texts[b].strip() for b in lines)
 
 
 def _continues(employment: Employment, held: list[Role], role: Role) -> bool:
     if role.section != employment.section or role.client:
         return False
+    previous = held[-1]
+    if role.employment_key is not None and previous.employment_key is not None:
+        # The reader said which employment each title is in.
+        return role.employment_key == previous.employment_key
     if role.employer_block is not None and role.employer_block in employment.header_blocks:
         return True
-    previous = held[-1]
     name = _name(role.organization)
     if not name or name != _name(previous.organization):
         return False
@@ -76,13 +108,20 @@ def _continues(employment: Employment, held: list[Role], role: Role) -> bool:
 
 
 def _settle(employment: Employment, held: list[Role], texts: dict[int, str]) -> None:
-    """Fills in the employer, place and tenure from the positions it holds."""
-    named = [r for r in held if r.organization]
-    employment.organization = named[0].organization if named else None
-    employment.organization_inferred = bool(named) and all(r.organization_inferred for r in named)
-    places = {r.location for r in held if r.location}
-    employment.location = places.pop() if len(places) == 1 else None
+    """Fills in the employer, place and tenure from the positions it holds, where
+    the employer's own line didn't already give them."""
+    if employment.organization is None:
+        named = [r for r in held if r.organization]
+        employment.organization = named[0].organization if named else None
+        employment.organization_inferred = bool(named) and all(
+            r.organization_inferred for r in named
+        )
+    if employment.location is None:
+        places = {r.location for r in held if r.location}
+        employment.location = places.pop() if len(places) == 1 else None
     employment.employment_type = next((r.employment_type for r in held if r.employment_type), None)
+    if employment.dates is not None and employment.tenure_written:
+        return
     for block in employment.header_blocks:
         written = find_range(texts.get(block, ""))
         if written is not None and written.start is not None:

@@ -9,6 +9,8 @@ from plytos_api.cards.model import CardKind, MainContent
 DocFormat = Literal["docx", "pdf", "text"]
 Severity = Literal["fix", "improve", "note"]
 Category = Literal["ats", "layout", "consistency", "dates", "content", "contact", "length", "file"]
+# Why a line of the resume was left off every card on purpose.
+SkipReason = Literal["page_number", "page_header", "decoration", "references", "marking"]
 
 
 class Block(BaseModel):
@@ -122,6 +124,12 @@ class Role(BaseModel):
     employer_block: int | None = None
     # The employment this role is a position (or engagement) in.
     employment_ref: str | None = None
+    # Which employment the reader put this role in, when it said; roles that
+    # share a key are one employment.
+    employment_key: str | None = None
+    # Lines about the employer written under its name, before the first title
+    # ("A $2B regional grocer with 140 stores"). They describe the employment.
+    employer_description_blocks: list[int] = Field(default_factory=list)
     title_first: bool | None = None
     # "low" when the title and the organization couldn't be told apart.
     confidence: Literal["high", "low"] = "high"
@@ -148,6 +156,9 @@ class Employment(BaseModel):
     dates: DateRange | None = None
     tenure_written: bool = False
     header_blocks: list[int] = Field(default_factory=list)
+    # What the resume says about the employer or the whole stint.
+    description: str | None = None
+    description_blocks: list[int] = Field(default_factory=list)
     # Positions and engagements, in resume order.
     role_refs: list[str] = Field(default_factory=list)
 
@@ -206,6 +217,10 @@ class ParsedResume(BaseModel):
     projects: list[Entry] = Field(default_factory=list)
     awards: list[Entry] = Field(default_factory=list)
     highlights: list[Entry] = Field(default_factory=list)
+    # Talks, publications, boards, memberships, volunteering and interests.
+    activities: list[Entry] = Field(default_factory=list)
+    # Lines the reader left out on purpose, and why.
+    skipped: dict[int, SkipReason] = Field(default_factory=dict)
 
 
 class Location(BaseModel):
@@ -229,6 +244,25 @@ class Finding(BaseModel):
     locations: list[Location] = Field(default_factory=list)
 
 
+class PlaceChoice(BaseModel):
+    # The proposed card it would sit under; None for the top of the tree.
+    parent_ref: str | None
+    label: str
+
+
+class Placement(BaseModel):
+    """A question about where a card belongs, when the checks disagree with the
+    reading. The person answers before the card is saved."""
+
+    question: str
+    reason: str
+    # Where it sits now comes first.
+    choices: list[PlaceChoice]
+    # Where the reading put it, when the checks agreed it belongs elsewhere and
+    # Plytos moved it.
+    moved_from: str | None = None
+
+
 class ProposedCard(BaseModel):
     ref: str
     kind: CardKind
@@ -238,10 +272,30 @@ class ProposedCard(BaseModel):
     # content.parent, pointing at the parent's saved card.
     parent_ref: str | None = None
     role_ref: str | None = None
+    # Set on an employment card: the employment it stands for.
+    employment_ref: str | None = None
     source_blocks: list[int] = Field(default_factory=list)
     findings: list[str] = Field(default_factory=list)
     # Questions for the person where the import had to guess.
     needs_check: list[str] = Field(default_factory=list)
+    placement: Placement | None = None
+
+
+class SkippedLine(BaseModel):
+    block: int
+    reason: SkipReason
+
+
+class LineAccount(BaseModel):
+    """Where each line of the resume went."""
+
+    lines: int
+    on_cards: int
+    contact: list[int] = Field(default_factory=list)
+    headings: list[int] = Field(default_factory=list)
+    skipped: list[SkippedLine] = Field(default_factory=list)
+    # Lines nothing claimed. Each is now on a card of its own, marked to check.
+    guessed: list[int] = Field(default_factory=list)
 
 
 class ImportResult(BaseModel):
@@ -258,3 +312,5 @@ class ImportResult(BaseModel):
     blocks: list[Block]
     # The model that decided which line is which, or None when the rules did.
     read_by: str | None = None
+    # Where every line of the resume went. None on imports from before it was kept.
+    lines: LineAccount | None = None

@@ -13,6 +13,7 @@ from plytos_api.imports.model import (
     Role,
     Section,
     SectionKind,
+    SkipReason,
 )
 
 # Standard headings an applicant tracking system expects, by what they hold.
@@ -277,6 +278,25 @@ def _inline_heading(block: Block) -> tuple[SectionKind, str] | None:
     return None
 
 
+_PAGE_NUMBER = re.compile(r"^(page\s*)?\d{1,2}(\s*(of|/)\s*\d{1,2})?$", re.I)
+_REFERENCES = re.compile(
+    r"^references?\s*(are\s*)?(available\s*)?(up)?on\s*request\.?$|^references?\s*available\.?$",
+    re.I,
+)
+
+
+def plain_skip(text: str) -> SkipReason | None:
+    """Why a line holds nothing to keep, when that's plain from the line alone."""
+    text = text.strip()
+    if _PAGE_NUMBER.match(text):
+        return "page_number"
+    if not re.search(r"[^\W_]", text):
+        return "decoration"
+    if _REFERENCES.match(text):
+        return "references"
+    return None
+
+
 def is_marking(block: Block, markings: list[str]) -> bool:
     if block.where not in ("header", "footer", "text_box"):
         return False
@@ -317,6 +337,8 @@ def segment(doc: ExtractedDocument) -> ParsedResume:
         if block.where in ("header", "footer") or block.index in markings | boxed_contact:
             continue
         found = heading_kind(block)
+        if found is None and plain_skip(block.text) is not None:
+            continue  # A page number, a rule or "References available on request".
         if found is not None:
             sections.append(current)
             kind, standard = found

@@ -23,7 +23,7 @@ from uuid import UUID
 import psycopg
 from pydantic import BaseModel, Field
 
-from plytos_api.cards.model import MainContent
+from plytos_api.cards.model import MainContent, may_sit_under
 from plytos_api.cards.repository import Author, CardDetail, CardRepository
 from plytos_api.ids import uuid7
 from plytos_api.imports.model import DocFormat, Finding, ImportResult, ProposedCard
@@ -78,6 +78,9 @@ class ImportProgress(BaseModel):
     # Proposed wording after the person's answers, by card ref. The import's
     # own reading stays as it was.
     edits: dict[str, MainContent] = Field(default_factory=dict)
+    # Where the person says a card belongs, by card ref: the proposed card it
+    # sits under, or None for the top of the tree.
+    moves: dict[str, str | None] = Field(default_factory=dict)
 
 
 class ImportFile(BaseModel):
@@ -206,6 +209,24 @@ class ImportStore:
         self._save_progress(import_id, progress)
         return progress
 
+    def place(self, import_id: UUID, ref: str, parent_ref: str | None) -> ImportProgress:
+        """Records where a card belongs, answering its placement question."""
+        result, progress = self._load(import_id)
+        proposal = _proposal(result, ref)
+        current = progress.cards.get(ref)
+        if current is not None and current.state == "approved":
+            raise ImportConflictError("That card is already approved.")
+        if parent_ref is not None:
+            parent = _proposal(result, parent_ref)
+            # Every parent kind ranks above its child, so this can't make a loop.
+            if not may_sit_under(proposal.kind, parent.kind):
+                raise ImportConflictError("That card can't sit there.")
+        elif proposal.kind in ("position", "engagement"):
+            raise ImportConflictError("A title needs an employer.")
+        progress.moves[ref] = parent_ref
+        self._save_progress(import_id, progress)
+        return progress
+
     def approve(
         self,
         import_id: UUID,
@@ -221,6 +242,8 @@ class ImportStore:
         current = progress.cards.get(ref)
         if current is not None and current.state == "approved":
             raise ImportConflictError("That card is already approved.")
+        if proposal.placement is not None and ref not in progress.moves:
+            raise ImportConflictError(f"{proposal.placement.question} Answer that first.")
         chosen = content or progress.edits.get(ref) or proposal.content
         # It sits under the saved card of its nearest approved parent.
         chosen = chosen.model_copy(update={"parent": _saved_parent(result, progress, proposal)})
@@ -357,19 +380,26 @@ def _saved_parent(
 ) -> UUID | None:
     """The saved card a proposal sits under once approved. A dropped parent passes
     its children up to its own parent; one still undecided must be approved first."""
-    ref = proposal.parent_ref
+    ref = _parent_ref(progress, proposal)
     while ref is not None:
         parent = _proposal(result, ref)
         decision = progress.cards.get(ref)
         if decision is not None and decision.state == "approved":
             return decision.card_id
         if decision is not None and decision.state == "dropped":
-            ref = parent.parent_ref
+            ref = _parent_ref(progress, parent)
             continue
         raise ImportConflictError(
             f"Approve “{parent.content.framing.headline}” first. This card sits under it."
         )
     return None
+
+
+def _parent_ref(progress: ImportProgress, proposal: ProposedCard) -> str | None:
+    """Where a proposed card sits: where the person put it, or where the import did."""
+    if proposal.ref in progress.moves:
+        return progress.moves[proposal.ref]
+    return proposal.parent_ref
 
 
 def _rebuild_edits(result: ImportResult, progress: ImportProgress) -> None:

@@ -13,6 +13,7 @@ import {
   faHandshake,
   faLayerGroup,
   faLock,
+  faPeopleGroup,
   faTrophy,
   faWandMagicSparkles,
   type IconDefinition,
@@ -44,6 +45,7 @@ export function kindIcon(kind: CardKind): IconDefinition {
     skill: faWandMagicSparkles,
     education: faGraduationCap,
     credential: faCertificate,
+    activity: faPeopleGroup,
     story: faBookOpen,
   }[kind];
 }

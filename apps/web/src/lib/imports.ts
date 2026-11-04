@@ -53,17 +53,30 @@ export type Finding = {
 // One line of the resume a card came from, so the person can see its source.
 export type SourceLine = { block: number; page: number | null; text: string };
 
+// A question about where a card belongs, asked when the checks disagree
+// with how the resume was read. The person answers before it's saved.
+export type PlaceChoice = { parent_ref: string | null; label: string };
+export type Placement = {
+  question: string;
+  reason: string;
+  // Where it sits now comes first.
+  choices: PlaceChoice[];
+  // Where the reading had it, when Plytos moved it.
+  moved_from: string | null;
+};
+
 export type Proposal = {
   ref: string;
   kind: CardKind;
   content: CardContent;
   // The proposed card this one sits under: a position's employment, an
-  // accomplishment's position.
+  // accomplishment's position. See parentRef for where the person put it.
   parent_ref: string | null;
   role_ref: string | null;
   source_blocks: number[];
   source: SourceLine[];
   needs_check: string[];
+  placement: Placement | null;
 };
 
 export type Answer = "chosen" | "as_is" | "on_card" | "later";
@@ -80,6 +93,8 @@ export type Progress = {
   cards: Record<string, CardDecision>;
   // Proposed wording after the person's answers, by card ref.
   edits: Record<string, CardContent>;
+  // Where the person says a card belongs: the card it sits under, by ref.
+  moves: Record<string, string | null>;
 };
 
 export type ImportFileInfo = {
@@ -130,7 +145,10 @@ type RawImport = {
     };
     blocks?: { index: number; text: string; page?: number | null }[];
     read_by?: string | null;
-    cards?: (Omit<Proposal, "source"> & { source_blocks?: number[] })[];
+    cards?: (Omit<Proposal, "source" | "placement"> & {
+      source_blocks?: number[];
+      placement?: Placement | null;
+    })[];
     findings?: (Omit<Finding, "locations"> & {
       locations?: Partial<FindingLocation>[];
     })[];
@@ -140,7 +158,7 @@ type RawImport = {
 };
 
 function emptyProgress(): Progress {
-  return { settled: {}, cards: {}, edits: {} };
+  return { settled: {}, cards: {}, edits: {}, moves: {} };
 }
 
 // Picks what the screens need from the API's import. Only the lines cards
@@ -175,6 +193,7 @@ export function toReview(raw: unknown): Review {
           return block ? [{ block: i, page: block.page ?? null, text: block.text }] : [];
         }),
         needs_check: card.needs_check ?? [],
+        placement: card.placement ?? null,
       };
     }),
     findings: (result.findings ?? []).map((finding) => ({
@@ -317,16 +336,26 @@ const FRAME_KINDS = new Set<CardKind>(["employment", "position", "engagement", "
 
 // --- The career tree ---------------------------------------------------------
 
+// The card a proposal sits under: where the person put it, or where the import did.
+export function parentRef(card: Proposal, progress: Progress): string | null {
+  return card.ref in progress.moves ? (progress.moves[card.ref] ?? null) : card.parent_ref;
+}
+
+// Whether a card still waits on the person to say where it belongs.
+export function placementOpen(card: Proposal, progress: Progress): boolean {
+  return card.placement !== null && !(card.ref in progress.moves);
+}
+
 // The cards a proposal sits under, nearest first.
 export function ancestors(card: Proposal, review: Review): Proposal[] {
   const byRef = new Map(review.cards.map((c) => [c.ref, c]));
   const out: Proposal[] = [];
-  let ref = card.parent_ref;
+  let ref = parentRef(card, review.progress);
   while (ref) {
     const parent = byRef.get(ref);
     if (!parent || out.includes(parent)) break;
     out.push(parent);
-    ref = parent.parent_ref;
+    ref = parentRef(parent, review.progress);
   }
   return out;
 }
@@ -360,7 +389,8 @@ export function outline(review: Review): OutlineNode[] {
   const roots: OutlineNode[] = [];
   for (const card of review.cards) {
     const node = nodes.get(card.ref)!;
-    const parent = card.parent_ref && refs.has(card.parent_ref) ? nodes.get(card.parent_ref) : null;
+    const above = parentRef(card, review.progress);
+    const parent = above && refs.has(above) ? nodes.get(above) : null;
     (parent ? parent.children : roots).push(node);
   }
   return roots;

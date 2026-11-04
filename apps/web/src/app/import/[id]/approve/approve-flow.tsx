@@ -32,6 +32,7 @@ import {
   highlight,
   isFigureQuestion,
   pathLabel,
+  placementOpen,
   plural,
   type Proposal,
   type Review,
@@ -42,7 +43,7 @@ import {
 import { post } from "../client";
 import { Editor } from "./editor";
 
-type Busy = null | "approve" | "later" | "dropped" | "answer";
+type Busy = null | "approve" | "later" | "dropped" | "answer" | "place";
 
 function figuresOf(content: CardContent): string[] {
   const figures = content.facts.figures;
@@ -81,27 +82,75 @@ function Facts({
   );
 }
 
+// Where the card belongs, when the checks disagreed with the reading.
+function PlaceQuestion({
+  card,
+  review,
+  busy,
+  onPlace,
+}: {
+  card: Proposal;
+  review: Review;
+  busy: boolean;
+  onPlace: (parentRef: string | null) => void;
+}) {
+  const placement = card.placement;
+  if (!placement) return null;
+  const answered = card.ref in review.progress.moves;
+  const chosen = review.progress.moves[card.ref] ?? null;
+  const from = placement.choices.find((c) => c.parent_ref === placement.moved_from);
+  return (
+    <div className="stack tight">
+      <p className="small-copy">
+        <strong>{placement.question}</strong> {placement.reason}
+        {from && ` Plytos moved it here from ${from.label}.`}
+      </p>
+      <div className="choice-row" role="group" aria-label={placement.question}>
+        {placement.choices.map((choice) => {
+          const pressed = answered && chosen === choice.parent_ref;
+          return (
+            <button
+              key={choice.parent_ref ?? "top"}
+              type="button"
+              className="choice-pill"
+              aria-pressed={pressed}
+              disabled={busy}
+              onClick={() => onPlace(choice.parent_ref)}
+            >
+              {pressed && <Icon icon={faCheck} size={11} />}
+              {choice.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function Checks({
   card,
   review,
   busy,
   onAnswer,
   onEdit,
+  onPlace,
 }: {
   card: Proposal;
   review: Review;
   busy: boolean;
   onAnswer: (finding: number, answer: Answer, value: string | null) => void;
   onEdit: () => void;
+  onPlace: (parentRef: string | null) => void;
 }) {
   const questions = findingsForCard(card, review).filter((i) => review.toSettle.includes(i));
-  if (questions.length === 0 && card.needs_check.length === 0) return null;
+  if (questions.length === 0 && card.needs_check.length === 0 && !card.placement) return null;
   return (
     <div className="needs-check">
       <p className="label orange">
         <Icon icon={faBell} size={11} />
         Needs your check
       </p>
+      <PlaceQuestion card={card} review={review} busy={busy} onPlace={onPlace} />
       {questions.map((index) => {
         const finding = review.findings[index]!;
         const settled = review.progress.settled[String(index)];
@@ -287,6 +336,22 @@ export function ApproveFlow({ review: initial }: { review: Review }) {
     next();
   }
 
+  async function moveTo(parentRef: string | null) {
+    if (!card) return;
+    setBusy("place");
+    setError(null);
+    const outcome = await post(`/import/${review.id}/cards/${card.ref}`, {
+      action: "place",
+      parent_ref: parentRef,
+    });
+    setBusy(null);
+    if (!outcome.ok) {
+      setError(outcome.error);
+      return;
+    }
+    setReview({ ...review, progress: outcome.progress });
+  }
+
   async function answer(finding: number, value: Answer, figure: string | null) {
     setBusy("answer");
     setError(null);
@@ -375,6 +440,7 @@ export function ApproveFlow({ review: initial }: { review: Review }) {
   }
 
   const content = contentFor(card, review.progress);
+  const unplaced = placementOpen(card, review.progress);
   const style = kindStyle(card.kind);
   const place = cardPlace(content, factsAbove(card, review));
   const path = pathLabel(card, review);
@@ -454,6 +520,7 @@ export function ApproveFlow({ review: initial }: { review: Review }) {
                 busy={busy !== null}
                 onAnswer={(finding, value, figure) => void answer(finding, value, figure)}
                 onEdit={() => setEditing(true)}
+                onPlace={(parentRef) => void moveTo(parentRef)}
               />
             </article>
           </div>
@@ -486,12 +553,13 @@ export function ApproveFlow({ review: initial }: { review: Review }) {
         <button
           className={`button primary${busy === "approve" ? " busy" : ""}`}
           type="button"
-          disabled={busy !== null}
+          disabled={busy !== null || unplaced}
           onClick={() => void act("approve")}
         >
           <Icon icon={faCheck} size={16} />
           {busy === "approve" ? "Approving…" : "Approve"}
         </button>
+        {unplaced && <p className="note">Say where this belongs first.</p>}
         <div className="dock-row">
           <button
             className="button outline"

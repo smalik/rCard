@@ -88,7 +88,11 @@ def propose_cards(
             employment.header_blocks or first.header_blocks,
             None,
         )
+        employer.employment_ref = employment.ref
         employer.needs_check = _employment_checks(employment, roles)
+        if employment.description:
+            employer.content.framing.body = employment.description
+            employer.source_blocks += employment.description_blocks
         for role in roles:
             parent = held.get(role.parent_ref or "") if role.client else None
             if role.client:
@@ -110,7 +114,9 @@ def propose_cards(
                     employer.ref,
                 )
             held[role.ref] = card
-            card.needs_check = _role_checks(role, by_ref.get(role.parent_ref or ""))
+            card.needs_check = _role_checks(
+                role, by_ref.get(role.parent_ref or ""), dated_by=employment
+            )
             prose = role.description is not None and not role.bullets
             if role.description and not prose:
                 card.content.framing.body = role.description
@@ -180,6 +186,9 @@ def propose_cards(
         cards[-1].content.framing.body = "\n".join(entry.details)
     for entry in parsed.awards:
         add("accomplishment", _dated({"award": entry.text}, entry), entry.text, entry.blocks, None)
+    for entry in parsed.activities:
+        add("activity", _dated({"name": entry.text}, entry), entry.text, entry.blocks, None)
+        cards[-1].content.framing.body = "\n".join(entry.details)
     return cards
 
 
@@ -211,7 +220,7 @@ def _employment_checks(employment: Employment, roles: list[Role]) -> list[str]:
     return checks
 
 
-def _role_checks(role: Role, parent: Role | None) -> list[str]:
+def _role_checks(role: Role, parent: Role | None, *, dated_by: Employment) -> list[str]:
     checks: list[str] = []
     if role.client and parent is not None:
         span = f" (within {parent.dates.raw})" if parent.dates else ""
@@ -224,7 +233,9 @@ def _role_checks(role: Role, parent: Role | None) -> list[str]:
     if not role.title:
         checks.append("What was the job title?")
     if role.dates is None:
-        checks.append("When did you start and finish in this title?")
+        if not (dated_by.tenure_written and dated_by.dates is not None):
+            # A title inside a written tenure is dated by it; asking isn't needed.
+            checks.append("When did you start and finish in this title?")
     elif "YYYY" in (role.dates.start_format, role.dates.end_format):
         checks.append("Which months did you start and finish in this title?")
     return checks

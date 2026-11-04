@@ -13,6 +13,7 @@ export type CardKind =
   | "project"
   | "education"
   | "credential"
+  | "activity"
   | "story";
 
 export const KIND_LABELS: Record<CardKind, string> = {
@@ -25,6 +26,7 @@ export const KIND_LABELS: Record<CardKind, string> = {
   project: "Project",
   education: "Education",
   credential: "Credential",
+  activity: "Activity",
   story: "Story",
 };
 

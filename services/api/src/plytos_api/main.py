@@ -119,6 +119,11 @@ class Decide(BaseModel):
     state: Literal["later", "dropped", "pending"]
 
 
+class Place(BaseModel):
+    # The proposed card it sits under, or None for the top of the tree.
+    parent_ref: str | None = Field(default=None, pattern=r"^card-[0-9]{1,4}$")
+
+
 class Approve(BaseModel):
     content: MainContent | None = None
 
@@ -418,6 +423,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def decide(import_id: UUID, ref: CardRef, body: Decide, user_id: User) -> ImportProgress:
         with db.as_user(user_id) as conn:
             return imports(conn, user_id).decide(import_id, ref, body.state)
+
+    @app.post("/v1/imports/{import_id}/cards/{ref}/place")
+    def place(import_id: UUID, ref: CardRef, body: Place, user_id: User) -> ImportProgress:
+        """Answers where a card belongs: which job a result is from, or which
+        employer a title was at."""
+        with db.as_user(user_id) as conn:
+            return imports(conn, user_id).place(import_id, ref, body.parent_ref)
 
     @app.post("/v1/imports/{import_id}/cards/{ref}/approve", status_code=status.HTTP_201_CREATED)
     def approve(import_id: UUID, ref: CardRef, body: Approve, user_id: User) -> Approved:

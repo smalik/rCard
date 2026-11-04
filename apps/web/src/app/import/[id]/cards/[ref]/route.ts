@@ -1,4 +1,4 @@
-import { approveCard, decideCard } from "../../../../../lib/api";
+import { approveCard, decideCard, placeCard } from "../../../../../lib/api";
 import type { CardContent } from "../../../../../lib/cards";
 import { cleanContent, contentProblems } from "../../../../../lib/imports";
 import {
@@ -31,6 +31,7 @@ function isContent(value: unknown): value is CardContent {
 
 // The person's decision on one proposed card: approve it (as it is, or in
 // their edited words), set it aside for later, leave it out, or undo that.
+// "place" answers where it belongs: which job a result is from.
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string; ref: string }> },
@@ -40,9 +41,18 @@ export async function POST(
   const { id, ref } = await params;
   if (!isImportId(id) || !isCardRef(ref)) return problem(404, "That card isn't here any more.");
 
-  const body = (await readJson(request)) as { action?: unknown; content?: unknown } | undefined;
+  const body = (await readJson(request)) as
+    | { action?: unknown; content?: unknown; parent_ref?: unknown }
+    | undefined;
   const action = body?.action;
   try {
+    if (action === "place") {
+      const parentRef = body?.parent_ref ?? null;
+      if (parentRef !== null && (typeof parentRef !== "string" || !isCardRef(parentRef))) {
+        return problem(400, "That didn't come through. Try again.");
+      }
+      return ok(await placeCard(session, id, ref, parentRef));
+    }
     if (action === "approve") {
       const content = body?.content ?? null;
       if (content !== null) {
