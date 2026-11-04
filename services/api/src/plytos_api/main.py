@@ -649,6 +649,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             store, _ = resumes(conn, user_id)
             return store.rename(resume_id, body.name)
 
+    @app.post("/v1/resumes/{resume_id}/preview")
+    def preview_resume(resume_id: UUID, body: ResumeContent, user_id: User) -> RenderedResume:
+        """How a change would read, before the person saves it. Saves nothing."""
+        with db.as_user(user_id) as conn:
+            store, cards = resumes(conn, user_id)
+            return render(body, cards, store.detail(resume_id).target_id)
+
     @app.post("/v1/resumes/{resume_id}/versions", status_code=status.HTTP_201_CREATED)
     def save_resume(resume_id: UUID, body: SaveResume, user_id: User) -> ResumePage:
         """Saves a change as a new version. Every version stays and can be restored."""

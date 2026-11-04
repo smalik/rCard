@@ -414,6 +414,12 @@ def test_resume_flow_over_http(client: TestClient) -> None:
     content = resume["content"]
     first_entry = content["entries"][0]
     content["entries"] = content["entries"][1:]
+    preview = client.post(f"/v1/resumes/{resume_id}/preview", json=content, headers=me)
+    assert preview.status_code == 200, preview.text
+    assert first_entry["card"] in [e["card"] for e in preview.json()["left_out"]]
+    assert (
+        client.get(f"/v1/resumes/{resume_id}", headers=me).json()["resume"]["head"]["number"] == 1
+    )
     saved = client.post(
         f"/v1/resumes/{resume_id}/versions",
         json={"base_version_id": v1, "content": content},

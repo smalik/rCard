@@ -144,6 +144,7 @@ uses the import screens for now.
 | `POST /v1/resumes/as-written` | Makes the resume as written from a file's kept cards (`import_id`). Asking again returns the one made |
 | `GET /v1/resumes/{id}` | A resume with its versions, and the page as it reads now |
 | `PATCH /v1/resumes/{id}` | Renames it |
+| `POST /v1/resumes/{id}/preview` | How a change would read (the body is the content), without saving it |
 | `POST /v1/resumes/{id}/versions` | Saves a change as a new version (`base_version_id`, `content`); 409 if it moved on |
 | `GET /v1/resumes/{id}/versions/{n}` | One earlier version and how it reads |
 | `POST /v1/resumes/{id}/restore` | Brings version `number` back as a new version |

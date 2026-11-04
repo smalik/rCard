@@ -1,0 +1,402 @@
+/* Resumes: the list, one resume with its versions, and the document itself.
+   The document styles are shared with Talk, which previews proposed resumes. */
+
+.resume-row {
+  display: grid;
+  gap: 2px;
+  padding: 14px 16px;
+  background: var(--white);
+  border-radius: 14px;
+  box-shadow: var(--shadow-card);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.resume-row-name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 17px;
+  line-height: 22px;
+}
+
+.resume-row-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--ink-55);
+}
+
+.resume-ready {
+  border: 1.5px solid var(--teal);
+}
+
+.resume-title {
+  display: grid;
+  gap: 2px;
+}
+
+.resume-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.resume-viewing .row {
+  gap: 14px;
+}
+
+/* Versions */
+
+.version-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.version-list li {
+  display: grid;
+  gap: 4px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--ink-08);
+}
+
+.version-list li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.version-line {
+  display: grid;
+  gap: 1px;
+}
+
+.version-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.version-tools .pill {
+  align-self: center;
+}
+
+.version-name {
+  display: flex;
+  gap: 8px;
+}
+
+.version-name input,
+.make-version input {
+  flex: 1;
+  min-width: 0;
+  min-height: 42px;
+  border: 1px solid var(--ink-20);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+}
+
+/* Changes in the resume this one was made from */
+
+.parent-changes {
+  border: 1.5px solid var(--amber);
+  background: var(--amber-tint);
+  box-shadow: none;
+}
+
+.change-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.change-list label {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.change-list input {
+  margin-top: 3px;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--teal);
+}
+
+.make-version .row {
+  gap: 14px;
+}
+
+/* The document */
+
+.doc {
+  background: var(--white);
+  border-radius: 6px;
+  box-shadow: var(--shadow-card);
+  padding: 22px 18px 24px;
+  display: grid;
+  gap: 12px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.doc-compact {
+  box-shadow: none;
+  border: 1px solid var(--ink-12);
+  padding: 14px 12px 16px;
+  font-size: 13px;
+  line-height: 18px;
+  gap: 10px;
+}
+
+.doc-head {
+  display: grid;
+  gap: 3px;
+  padding-bottom: 10px;
+  border-bottom: 1.5px solid var(--ink);
+}
+
+.doc .doc-name {
+  font-size: 22px;
+  line-height: 27px;
+  letter-spacing: -0.4px;
+}
+
+.doc-compact .doc-name,
+.offer .doc .doc-name {
+  font-size: 17px;
+  line-height: 22px;
+}
+
+.doc-headline {
+  font-weight: 600;
+}
+
+.doc-contact {
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--ink-65);
+  overflow-wrap: anywhere;
+}
+
+.doc-summary {
+  margin-top: 4px;
+}
+
+.doc .doc-section {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 14px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--ink-60);
+}
+
+.doc-entry {
+  display: grid;
+  gap: 6px;
+}
+
+.doc-employer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 12px;
+}
+
+.doc-dates {
+  color: var(--ink-60);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.doc-role {
+  display: grid;
+  gap: 3px;
+}
+
+.doc-title {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 12px;
+  font-style: italic;
+  font-weight: 600;
+}
+
+.doc-title .doc-dates {
+  font-style: normal;
+  font-weight: 400;
+}
+
+.doc-lines {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 3px;
+}
+
+.doc-lines.plain {
+  list-style: none;
+  padding-left: 0;
+}
+
+.doc-line {
+  text-wrap: pretty;
+}
+
+.doc-line[data-wording="target"] .doc-line-text {
+  background: linear-gradient(transparent 60%, var(--teal-tint) 60%);
+}
+
+.doc-x,
+.doc-hidden button,
+.doc-left-out button {
+  margin-left: 6px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--ink-20);
+  border-radius: 9999px;
+  background: var(--paper);
+  color: var(--ink-70);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.doc-x:disabled,
+.doc-hidden button:disabled,
+.doc-left-out button:disabled,
+.doc-tools button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.doc-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.doc-tools button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--ink-20);
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--ink-70);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.doc-earlier {
+  font-size: 12.5px;
+  color: var(--ink-65);
+}
+
+.doc-hidden {
+  border: 1.5px dashed var(--ink-20);
+  border-radius: 10px;
+  padding: 6px 10px;
+}
+
+.doc-hidden summary {
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--teal);
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+}
+
+.doc-hidden ul,
+.doc-left-out ul {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.doc-hidden li,
+.doc-left-out li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-65);
+}
+
+.doc-left-out {
+  display: grid;
+  gap: 4px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--ink-20);
+}
+
+.doc-left-out em {
+  font-style: normal;
+  color: var(--ink-50);
+}
+
+.doc-missing {
+  font-size: 12.5px;
+  color: var(--amber);
+}
+
+@media (min-width: 720px) {
+  .resume-screen {
+    max-width: 760px;
+  }
+
+  .doc {
+    padding: 36px 40px 40px;
+  }
+}
+
+/* Printing gives just the page, ready to save as a PDF. */
+@media print {
+  body {
+    background: var(--white);
+  }
+
+  .resume-screen > *:not(.doc) {
+    display: none !important;
+  }
+
+  .resume-screen {
+    padding: 0;
+    max-width: none;
+  }
+
+  .doc {
+    box-shadow: none;
+    padding: 0;
+  }
+
+  .doc-line[data-wording="target"] .doc-line-text {
+    background: none;
+  }
+}
