@@ -229,6 +229,10 @@ def measure(
 def _where(exc: BaseException) -> str:
     """Where an error was raised: the last frame's file, line and function. Never the
     message, which may quote the resume."""
+    while exc.__context__ is not None and exc.__suppress_context__ is False:
+        # The innermost error: a StopIteration inside a generator surfaces as the
+        # RuntimeError it was turned into, raised from the caller's frame.
+        exc = exc.__context__
     frames = traceback.extract_tb(exc.__traceback__)
     if not frames:
         return ""

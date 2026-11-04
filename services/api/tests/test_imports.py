@@ -459,3 +459,23 @@ def test_notes_left_in_the_text_are_flagged() -> None:
     [notes] = [f for f in result.findings if f.rule == "content.placeholder"]
     assert notes.severity == "fix" and notes.about == "cards"
     assert [loc.block for loc in notes.locations] == [4, 5]
+
+
+def test_an_objective_under_another_heading_is_found_without_a_crash() -> None:
+    from plytos_api.imports.audit import audit
+    from plytos_api.imports.extract import extract as read
+    from plytos_api.imports.model import Contact, ParsedResume, Section
+
+    text = "Kai Ito\nkai@example.com\nPROFILE\nSeeking a role in data analysis."
+    doc = read(text.encode(), "kai.txt")
+    parsed = ParsedResume(
+        contact=Contact(name="Kai Ito", blocks=[0, 1]),
+        sections=[
+            Section(
+                kind="summary", holds="objective", heading="PROFILE", heading_block=2, blocks=[3]
+            )
+        ],
+        roles=[],
+    )
+    found = {f.rule: f for f in audit(doc, parsed, today=TODAY)}
+    assert [loc.block for loc in found["content.objective"].locations] == [2]

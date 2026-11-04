@@ -519,7 +519,9 @@ def _headings(parsed: ParsedResume, blocks: dict[int, Block]) -> Iterable[Findin
             "add an Education section.",
         )
     if "objective" in kinds:
-        section = next(s for s in parsed.sections if s.kind == "objective")
+        # The section may be headed as something else while holding the objective.
+        section = next(s for s in parsed.sections if (s.holds or s.kind) == "objective")
+        objective_at = section.heading_block
         yield _finding(
             "content.objective",
             "improve",
@@ -527,7 +529,7 @@ def _headings(parsed: ParsedResume, blocks: dict[int, Block]) -> Iterable[Findin
             "Objective instead of a summary",
             "An objective says what you want; a summary says what you offer. Replace it "
             "with two or three lines on the work you do best and the results behind it.",
-            [blocks[section.heading_block]] if section.heading_block is not None else [],
+            [blocks[objective_at]] if objective_at is not None and objective_at in blocks else [],
         )
     references = [i for i, why in parsed.skipped.items() if why == "references" and i in blocks]
     if "references" in kinds or references:
