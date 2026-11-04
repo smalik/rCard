@@ -424,6 +424,28 @@ describe("career tree", () => {
     ]);
   });
 
+  it("shows the result, scope and skills an accomplishment names", () => {
+    const result = card({
+      ref: "r-1",
+      kind: "accomplishment",
+      content: {
+        facts: {
+          figures: ["3", "$2.4M"],
+          outcome: "collecting $2.4M a year",
+          scope: ["3 clinics"],
+          skills: ["billing"],
+        },
+        framing: { headline: "Ran billing for 3 clinics, collecting $2.4M a year.", body: "" },
+      },
+    });
+    expect(factRows(result, result.content).map((row) => [row.label, row.value])).toEqual([
+      ["Result", "collecting $2.4M a year"],
+      ["Scope", "3 clinics"],
+      ["Skills", "billing"],
+      ["Numbers", "3\n$2.4M"],
+    ]);
+  });
+
   it("waits on the person to say where a result belongs, then files it there", () => {
     const asked: Proposal = {
       ...TREE[2]!,

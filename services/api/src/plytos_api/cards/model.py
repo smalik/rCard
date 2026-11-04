@@ -80,7 +80,7 @@ class MainContent(BaseModel):
     * position: title, plain_title (shown beside the title, never instead),
       start, end, team, location, scope
     * engagement: client, title, start, end
-    * accomplishment: figures, workstream, skills, evidence, date
+    * accomplishment: figures, workstream, skills, scope, outcome, evidence, date
 
     Dates are YYYY-MM or YYYY, as precise as the person wrote them; an open
     end is "present". Numbers that framing text may cite go in facts too.

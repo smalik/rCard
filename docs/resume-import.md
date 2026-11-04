@@ -183,6 +183,28 @@ scanned with no text layer. Before the lines are sorted, Claude reads them:
 Without Claude, or when the request fails, pictures stay unread and the audit
 reports them as before.
 
+## Facts in each accomplishment
+
+Once the cards are proposed, Claude reads the accomplishments (as R1, R2...,
+at low effort) and names, for each, the skills, tools or fields its words
+name (`skills`), what shows its size or reach, such as a team, budget, sites
+or money (`scope`), and the phrase that states what it achieved (`outcome`).
+Each value is kept only when it's in that accomplishment word for word, so a
+card never claims a skill or a size its words don't. They show on the card
+as Result, Scope and Skills, and the person can change them before approving.
+This runs alongside the placement check, and only when Claude read the
+structure.
+
+## Proofreading
+
+While the structure is read, Claude proofreads the lines for misspellings,
+wrong words (lead for led) and broken grammar, leaving style, tense, resume
+conventions and names alone. Each typo becomes a `content.proofread` finding
+with the words as written and a suggestion. A typo is kept only when its
+quote is on the line it names, misspelled skills the audit already flags
+aren't repeated, and there are at most 20. Nothing changes unless the person
+edits the card.
+
 ## Every line accounted for
 
 After the cards are proposed, every line of the resume must be in one of five
@@ -261,7 +283,7 @@ numbers" rule only lets a variant use numbers its main version has.
 
 - Text inside images is read only when Claude is configured. Pictures in
   formats Claude can't take (Windows metafiles) stay unread.
-- Spelling and grammar aren't checked beyond skill names.
+- Without Claude, spelling and grammar aren't checked beyond skill names.
 - Facts are compared only where a figure repeats between the summary or
   highlights and a role. Checking names and titles against each other needs
   language understanding and comes with the AI critics in M1.

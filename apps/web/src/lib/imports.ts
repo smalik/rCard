@@ -677,6 +677,11 @@ export function factRows(
   }
   add("workstream", "Workstream", text(f.workstream));
   add("award", "Award", text(f.award));
+  if (card.kind === "accomplishment") {
+    add("outcome", "Result", text(f.outcome));
+    add("scope", "Scope", text(f.scope));
+    add("skills", "Skills", text(f.skills));
+  }
   const figures = figuresOf(content);
   if (figures.length > 0) add("figures", "Numbers", figures.join("\n"), { numbers: true });
   return rows;
@@ -715,6 +720,8 @@ const FACT_LABELS: Record<string, string> = {
   role_type: "Role type",
   workstream: "Workstream",
   figures: "Numbers",
+  outcome: "Result",
+  scope: "Scope",
   award: "Award",
   date: "Date",
   name: "Name",
@@ -731,6 +738,7 @@ export const FACT_HINTS: Record<string, string> = {
   date: "Year and month, like 2021-03",
   figures: "Separate with commas",
   skills: "Separate with commas",
+  scope: "Separate with commas",
 };
 
 export function factLabel(key: string): string {
