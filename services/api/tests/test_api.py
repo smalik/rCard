@@ -465,7 +465,9 @@ def test_resume_flow_over_http(client: TestClient) -> None:
         json={"base_version_id": head, "content": trimmed},
         headers=me,
     )
-    changes = client.get(f"/v1/resumes/{copy_id}/parent-changes", headers=me).json()
+    reviewed = client.get(f"/v1/resumes/{copy_id}/parent-changes", headers=me).json()
+    changes = reviewed["changes"]
+    assert reviewed["parent_version_id"] is not None
     assert [c["change"]["kind"] for c in changes] == ["context_removed"]
     assert changes[0]["label"].startswith("Removed “")
     taken = client.post(
@@ -473,6 +475,7 @@ def test_resume_flow_over_http(client: TestClient) -> None:
         json={
             "keys": [changes[0]["change"]["key"]],
             "base_version_id": copy.json()["resume"]["head"]["id"],
+            "parent_version_id": reviewed["parent_version_id"],
         },
         headers=me,
     )

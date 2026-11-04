@@ -35,11 +35,17 @@ from plytos_api.imports.pipeline import import_resume
 from plytos_api.imports.store import ImportStore
 from plytos_api.keys import Vault
 from plytos_api.resumes.as_written import as_written
-from plytos_api.resumes.model import ResumeContent, ResumeEntry, ResumeHeader, ResumeItem
+from plytos_api.resumes.model import (
+    ResumeContent,
+    ResumeEntry,
+    ResumeHeader,
+    ResumeItem,
+    keep_wording,
+)
 from plytos_api.resumes.render import describe, render
 from plytos_api.resumes.store import ResumeNotFoundError, ResumeStore, StaleResumeError
 
-from .resume_samples import promotions_text
+from .resume_samples import messy_text, promotions_text
 from .test_agents import FakeThinker
 
 ME = Author("person")
@@ -315,6 +321,21 @@ def test_as_written_shows_the_kept_cards_in_the_files_order(make_user, open_: Op
     assert all(i.wording == "auto" for i in content.context)
 
 
+def test_as_written_keeps_the_files_summary_when_its_card_is_kept(make_user, open_: Open) -> None:
+    user = make_user()
+    data = messy_text().encode()
+    result = import_resume(data, "Jordan Rivera.txt")
+    [summary] = [p for p in result.cards if p.kind == "story"]
+    with open_(user) as s:
+        kept = s.imports.create(data, "Jordan Rivera.txt", result)
+        s.imports.approve(kept.id, summary.ref, None, s.cards, ME)
+        view = s.imports.get(kept.id)
+        content = as_written(view.result, view.progress, s.cards.main_contents())
+        framing = summary.content.framing
+        assert content.header.summary == (framing.body or framing.headline)
+        assert content.header.summary
+
+
 def assert_saved(saved: dict[str, UUID], ref: str | None) -> UUID:
     assert ref is not None
     return saved[ref]
@@ -391,6 +412,59 @@ def test_a_version_for_a_target_takes_the_changes_the_person_picks(make_user, op
         assert taken.head.synced_parent_version_id == mine.head.id
         assert taken.parent_changes == 0
         assert taken.head.note == "Took 1 change from the resume it was made from"
+
+
+def test_taking_changes_settles_only_what_the_person_reviewed(make_user, open_: Open) -> None:
+    user = make_user()
+    with open_(user) as s:
+        c = career(s.cards)
+        mine = s.resumes.create("My resume", whole(c), ME)
+        copy = s.resumes.create(
+            "Copy", whole(c), ME, parent_id=mine.id, synced_parent_version_id=mine.head.id
+        )
+        first = whole(c)
+        first.context = []
+        mine = s.resumes.save(mine.id, first, mine.head.id, ME)
+        reviewed = mine.head.id
+        assert [ch.kind for ch in s.resumes.parent_changes(copy.id, reviewed)] == [
+            "context_removed"
+        ]
+        # The parent changes again while the person is deciding.
+        second = first.model_copy(deep=True)
+        second.entries = second.entries[:1]
+        mine = s.resumes.save(mine.id, second, mine.head.id, ME)
+
+        taken = s.resumes.take(copy.id, [], copy.head.id, ME, reviewed)
+        assert taken.head.synced_parent_version_id == reviewed
+        assert [ch.kind for ch in s.resumes.parent_changes(copy.id)] == ["entry_removed"]
+        with pytest.raises(StaleResumeError):
+            s.resumes.take(copy.id, [], taken.head.id, ME, copy.head.synced_parent_version_id)
+        with pytest.raises(ResumeNotFoundError):
+            s.resumes.take(copy.id, [], taken.head.id, ME, taken.head.id)
+
+
+def test_a_copy_reads_the_same_as_the_resume_it_was_made_from(make_user, open_: Open) -> None:
+    user = make_user()
+    with open_(user) as s:
+        c = career(s.cards)
+        fintech = s.cards.create_target("industry", "Fintech", None)
+        s.cards.create_variant(
+            c.late,
+            fintech.id,
+            VariantContent(framing=Framing(headline="Cut late settlements-style delays by 22%")),
+            ME,
+        )
+        banks = s.cards.create_target("company", "Contoso Bank", None)
+        content = whole(c)
+        content.entries[0].items[2].wording = "main"
+        copied = keep_wording(content, fintech.id)
+        assert copied.entries[0].items[0].wording == fintech.id
+        assert copied.entries[0].items[2].wording == "main"
+        assert content.entries[0].items[0].wording == "auto"
+        shown = render(copied, s.cards, banks.id).entries[0].roles
+        assert "Cut late settlements-style delays by 22%" in [
+            i.text for r in shown for i in r.items
+        ]
 
 
 # -- how a page reads ----------------------------------------------------------
@@ -618,6 +692,28 @@ def test_the_assembler_says_so_when_it_cannot_help(
     with open_(unclear) as s:
         assert s.agents.conversation()[-1].text == "Who is this version for?"
         assert s.agents.proposals("open", agent="assembler") == []
+
+
+def test_an_answer_to_the_assemblers_question_keeps_the_resume_asked_about(
+    make_user, open_: Open, worker: MakeWorker
+) -> None:
+    user = make_user()
+    with open_(user) as s:
+        c = career(s.cards)
+        other = s.resumes.create("Short one", whole(c), ME)
+        mine = s.resumes.create("My resume", whole(c), ME)
+        s.agents.ask_for_resume("Make another one", other.id)
+        s.agents.reply("Who is this version for?", "assembler")
+        answer = s.agents.say("Fintech operations roles")
+        s.agents.enqueue("assembler", "message", answer.id)
+    worker(Assembler(FakeThinker(AssemblerAnswer=assemble))).run_until_idle()
+    with open_(user) as s:
+        # One for the ask itself, one for the answer: both from the resume asked about,
+        # not the newest one.
+        proposals = s.agents.proposals("open", agent="assembler")
+        assert len(proposals) == 2
+        assert {p.body.resume.parent_id for p in proposals if p.body.resume} == {other.id}
+        assert s.resumes.summaries()[0].id == mine.id
 
 
 def test_the_listener_hands_a_resume_request_to_the_assembler(

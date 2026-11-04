@@ -4,7 +4,8 @@ Made from an import once its cards are kept. It shows the employments the
 person kept, in the order the file had them, each with the accomplishments
 kept under it, in the file's order, and the education, skills, credentials
 and activities that came with it. The header comes from the contact details
-the file had. Nothing is reworded: every line uses the card's own wording.
+the file had, and the summary from the summary card, if the person kept it.
+Nothing is reworded: every line uses the card's own wording.
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ def as_written(
             entries.setdefault(card_id, ResumeEntry(card=card_id))
 
     context: list[ResumeItem] = []
+    summary = ""
     for card_id in kept:
         kind = library[card_id].kind
         if kind in ITEM_KINDS:
@@ -52,6 +54,10 @@ def as_written(
                 context.append(ResumeItem(card=card_id))
         elif kind in CONTEXT_FROM_IMPORT:
             context.append(ResumeItem(card=card_id))
+        elif kind == "story" and library[card_id].content.facts.get("use") == "summary":
+            # The file's summary, in full: a long one keeps its whole text in the body.
+            framing = library[card_id].content.framing
+            summary = summary or (framing.body or framing.headline)
 
     contact = result.contact
     header = ResumeHeader(
@@ -60,6 +66,7 @@ def as_written(
         phone=(contact.phones[0] if contact.phones else "")[:60],
         location=(contact.location or "")[:120],
         links=[link[:300] for link in contact.links[:5]],
+        summary=summary[:1500],
     )
     return ResumeContent(header=header, entries=list(entries.values()), context=context)
 

@@ -112,7 +112,7 @@ along at the end, whether earlier titles fold, and up to eight lines to word
 for the target. The model sees refs (E1, A3, C2), never IDs, and an
 accomplishment it puts under the wrong employment is dropped, as is a
 rewording with a number its card doesn't have. If the ask doesn't say who
-it's for, it asks once. It proposes; keeping it creates the target, makes
+it's for, it asks once, and the answer keeps the resume the ask was about. It proposes; keeping it creates the target, makes
 the resume from the one it started with (its first version is the
 Assembler's), and turns each kept rewording into the card's variant for that
 target, also the Assembler's. Keeping after changes makes the first version
@@ -149,9 +149,9 @@ uses the import screens for now.
 | `GET /v1/resumes/{id}/versions/{n}` | One earlier version and how it reads |
 | `POST /v1/resumes/{id}/restore` | Brings version `number` back as a new version |
 | `POST /v1/resumes/{id}/versions/{n}/name` | Names a version |
-| `GET /v1/resumes/{id}/parent-changes` | Changes in the resume it was made from that it hasn't taken, each said plainly |
-| `POST /v1/resumes/{id}/take` | Takes the changes named by `keys` and catches up; no keys passes on them all |
-| `POST /v1/resumes/{id}/copies` | Makes a version for a target by hand (`name`, `target`, `target_kind`) |
+| `GET /v1/resumes/{id}/parent-changes` | Changes in the resume it was made from that it hasn't taken, each said plainly, and the parent version they run to (`parent_version_id`) |
+| `POST /v1/resumes/{id}/take` | Takes the changes named by `keys` and catches up with `parent_version_id`, the version reviewed; no keys passes on them all. A parent change made meanwhile still shows afterwards |
+| `POST /v1/resumes/{id}/copies` | Makes a version for a target by hand (`name`, `target`, `target_kind`). Lines worded for the source's target keep that wording |
 | `POST /v1/resumes/{id}/ask` | Asks Plytos in the conversation for a version of this resume (`text`); the Assembler answers there |
 | `GET /v1/tidbits?card_id=` | The person's notes, oldest first, all or under one job |
 | `GET /v1/agent-runs` | What the agents did lately, for "how I got here". Never content |

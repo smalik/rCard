@@ -23,7 +23,13 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from plytos_api.agents.model import AgentName, NewResume, ProposalBody, Rewording
+from plytos_api.agents.model import (
+    AgentName,
+    MessageView,
+    NewResume,
+    ProposalBody,
+    Rewording,
+)
 from plytos_api.agents.runtime import AgentGaveUpError, Context
 from plytos_api.agents.thinking import Thinker
 from plytos_api.cards.model import FactValue, Framing, TargetKind, VariantContent
@@ -137,7 +143,8 @@ class Assembler:
         message = ctx.store.message(ctx.run.trigger_id)
         if message.author != "person":
             return
-        source = _source(ctx, message.resume_id)
+        recent = ctx.store.conversation(limit=5, before=message.id)
+        source = _source(ctx, message.resume_id or _asked_about(recent))
         if source is None:
             ctx.store.reply(NO_RESUME, self.name)
             return
@@ -147,9 +154,7 @@ class Assembler:
 
         cards = ctx.cards.main_contents()
         library = _library(cards, source.content)
-        earlier = [
-            m for m in ctx.store.conversation(limit=5, before=message.id) if m.proposal is None
-        ][-4:]
+        earlier = [m for m in recent if m.proposal is None][-4:]
         prompt = json.dumps(
             {
                 "today": date.today().isoformat(),
@@ -211,6 +216,14 @@ def _source(ctx: Context, resume_id: UUID | None) -> ResumeDetail | None:
         return None
     own = [r for r in resumes if r.target_id is None and r.parent_id is None]
     return ctx.resumes.detail((own or resumes)[0].id)
+
+
+def _asked_about(recent: list[MessageView]) -> UUID | None:
+    """When this message answers Plytos's question about a request for a
+    resume, the resume that request was about."""
+    if len(recent) >= 2 and recent[-1].author == "plytos" and recent[-1].proposal is None:
+        return recent[-2].resume_id
+    return None
 
 
 def _text(value: FactValue | None) -> str:

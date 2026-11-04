@@ -219,10 +219,13 @@ class ResumeStore:
             raise ResumeNotFoundError(str(resume_id))
         return self.detail(resume_id)
 
-    def parent_changes(self, resume_id: UUID) -> list[ResumeChange]:
+    def parent_changes(
+        self, resume_id: UUID, parent_version_id: UUID | None = None
+    ) -> list[ResumeChange]:
         """What changed in the parent resume since this one last caught up,
-        leaving out what this one already reflects."""
-        theirs = self._parent_now(resume_id)
+        leaving out what this one already reflects. Against the parent as it
+        is now, or as it was at `parent_version_id`."""
+        theirs = self._parent_at(resume_id, parent_version_id)
         if theirs is None:
             return []
         _, their_content = theirs
@@ -235,18 +238,31 @@ class ResumeStore:
         return still_to_take(diff(base, their_content), mine, their_content)
 
     def take(
-        self, resume_id: UUID, keys: Sequence[str], base_version_id: UUID, author: Author
+        self,
+        resume_id: UUID,
+        keys: Sequence[str],
+        base_version_id: UUID,
+        author: Author,
+        parent_version_id: UUID | None = None,
     ) -> ResumeDetail:
         """Takes the named changes from the parent and catches up with it. With
-        no keys, it catches up without taking anything ("not these")."""
-        theirs = self._parent_now(resume_id)
+        no keys, it catches up without taking anything ("not these").
+
+        `parent_version_id` names the parent version the person reviewed. It
+        catches up with that version only, so a change made in the parent
+        while they were deciding still shows afterwards."""
+        theirs = self._parent_at(resume_id, parent_version_id)
         if theirs is None:
             raise ResumeNotFoundError(f"{resume_id} has no parent")
         their_head, their_content = theirs
         base = self._head_for_update(resume_id, base_version_id)
+        if base.synced_parent_version_id is not None:
+            synced = self._version_view(self._version_row(base.synced_parent_version_id))
+            if their_head.number < synced.number:
+                raise StaleResumeError(base.id)
         mine = self._content(base.id)
         wanted = set(keys)
-        chosen = [c for c in self.parent_changes(resume_id) if c.key in wanted]
+        chosen = [c for c in self.parent_changes(resume_id, their_head.id) if c.key in wanted]
         content = apply(mine, their_content, chosen)
         content.note = (
             f"Took {len(chosen)} change{'s' if len(chosen) != 1 else ''} from the resume"
@@ -427,6 +443,22 @@ class ResumeStore:
         if row is None:
             return None
         return self._head_content(row[0])
+
+    def _parent_at(
+        self, resume_id: UUID, parent_version_id: UUID | None
+    ) -> tuple[ResumeVersionView, ResumeContent] | None:
+        """The parent at the version named, or as it is now."""
+        if parent_version_id is None:
+            return self._parent_now(resume_id)
+        row = self._conn.execute(
+            "select parent_id from plytos.resume where id = %s", (resume_id,)
+        ).fetchone()
+        if row is None or row[0] is None:
+            return None
+        version = self._version_view(self._version_row(parent_version_id))
+        if self._version_row(parent_version_id)[10] != row[0]:
+            raise ResumeNotFoundError(f"{parent_version_id} isn't a version of the parent")
+        return version, self._content(version.id)
 
     def _versions(self, resume_id: UUID) -> list[ResumeVersionView]:
         rows = self._conn.execute(

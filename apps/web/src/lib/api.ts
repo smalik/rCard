@@ -3,7 +3,7 @@ import "server-only";
 import type { CardContent, CardKind } from "./cards";
 import { type Answer, FILENAME_HEADER, type ImportSummary, type Progress } from "./imports";
 import type {
-  LabeledChange,
+  ParentChanges,
   ProposedResume,
   RenderedResume,
   ResumeContent,
@@ -332,22 +332,23 @@ export function renameResume(session: Session, id: string, name: string): Promis
   return apiFetch<ResumeDetail>(resumePath(id), session, { ...json({ name }), method: "PATCH" });
 }
 
-export function parentChanges(session: Session, id: string): Promise<LabeledChange[]> {
-  return apiFetch<LabeledChange[]>(resumePath(id, "/parent-changes"), session);
+export function parentChanges(session: Session, id: string): Promise<ParentChanges> {
+  return apiFetch<ParentChanges>(resumePath(id, "/parent-changes"), session);
 }
 
 // Takes the chosen changes from the resume this one was made from; no keys
-// passes on them all.
+// passes on them all. It settles only up to the parent version reviewed.
 export function takeChanges(
   session: Session,
   id: string,
   keys: string[],
   baseVersionId: string,
+  parentVersionId: string | null,
 ): Promise<ResumePage> {
   return apiFetch<ResumePage>(
     resumePath(id, "/take"),
     session,
-    json({ keys, base_version_id: baseVersionId }),
+    json({ keys, base_version_id: baseVersionId, parent_version_id: parentVersionId }),
   );
 }
 

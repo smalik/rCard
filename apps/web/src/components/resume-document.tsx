@@ -11,7 +11,7 @@ import {
   faXmark,
 } from "@fortawesome/free-solid-svg-icons";
 
-import type { RenderedItem, RenderedResume } from "../lib/resumes";
+import { lineParts, type RenderedItem, type RenderedResume } from "../lib/resumes";
 import { Icon } from "./icon";
 
 export type ResumeEdits = {
@@ -25,11 +25,14 @@ export type ResumeEdits = {
 };
 
 function Line({ item, edit }: { item: RenderedItem; edit?: ResumeEdits }) {
+  const { text, detail } = lineParts(item);
   return (
     <li className="doc-line" data-wording={item.wording}>
       <span className="doc-line-text">
-        {item.text}
-        {item.wording === "target" && <span className="visually-hidden"> (worded for this version)</span>}
+        {text}
+        {item.wording === "target" && (
+          <span className="visually-hidden"> (worded for this version)</span>
+        )}
       </span>
       {edit && (
         <button
@@ -42,6 +45,7 @@ function Line({ item, edit }: { item: RenderedItem; edit?: ResumeEdits }) {
           <Icon icon={faXmark} size={11} />
         </button>
       )}
+      {detail && <span className="doc-line-detail">{detail}</span>}
     </li>
   );
 }

@@ -114,6 +114,9 @@ export type ResumeChange = { key: string; kind: string; card: string };
 
 export type LabeledChange = { change: ResumeChange; label: string };
 
+// The changes, and the parent's version they run to, sent back when taking them.
+export type ParentChanges = { parent_version_id: string | null; changes: LabeledChange[] };
+
 // A version the Assembler proposes, made from another resume for a target.
 export type NewResume = {
   name: string;
@@ -196,6 +199,24 @@ export function sameContent(a: ResumeContent, b: ResumeContent): boolean {
 }
 
 // -- saying it plainly --------------------------------------------------------
+
+// What a line shows. A headline cut short shows the whole text kept in its
+// detail; a skills card shows its skills; education and the like show their
+// details under the line. An accomplishment's extra context stays off the page.
+export function lineParts(item: RenderedItem): { text: string; detail: string } {
+  const detail = item.detail.trim();
+  if (!detail) return { text: item.text, detail: "" };
+  if (item.text.endsWith("…") && detail.startsWith(item.text.slice(0, -1).trimEnd())) {
+    return { text: detail, detail: "" };
+  }
+  if (item.kind === "skill") {
+    return { text: item.text === "Skills" ? detail : `${item.text}: ${detail}`, detail: "" };
+  }
+  if (item.kind === "accomplishment" || item.kind === "project" || item.kind === "story") {
+    return { text: item.text, detail: "" };
+  }
+  return { text: item.text, detail };
+}
 
 // Who made a version: the person, or the agent that drafted it.
 export function versionAuthor(version: ResumeVersion): string {

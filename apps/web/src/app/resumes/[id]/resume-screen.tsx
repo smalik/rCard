@@ -16,9 +16,9 @@ import {
   askText,
   bringBack,
   changesLabel,
-  type LabeledChange,
   leaveOut,
   move,
+  type ParentChanges as Changes,
   type RenderedResume,
   type ResumeContent,
   resumeFor,
@@ -375,7 +375,8 @@ function ParentChanges({
   headId: string;
   onTaken: (page: ResumePage) => void;
 }) {
-  const [changes, setChanges] = useState<LabeledChange[] | null>(null);
+  const [reviewed, setReviewed] = useState<Changes | null>(null);
+  const changes = reviewed?.changes ?? null;
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -383,20 +384,24 @@ function ParentChanges({
   async function review() {
     setBusy(true);
     setError(null);
-    const result = await send<LabeledChange[]>(`${base}/parent-changes`);
+    const result = await send<Changes>(`${base}/parent-changes`);
     setBusy(false);
     if (!result.ok) {
       setError(result.error);
       return;
     }
-    setChanges(result.data);
-    setChosen(new Set(result.data.map((c) => c.change.key)));
+    setReviewed(result.data);
+    setChosen(new Set(result.data.changes.map((c) => c.change.key)));
   }
 
   async function take(keys: string[]) {
     setBusy(true);
     setError(null);
-    const result = await send<ResumePage>(`${base}/take`, { keys, base_version_id: headId });
+    const result = await send<ResumePage>(`${base}/take`, {
+      keys,
+      base_version_id: headId,
+      parent_version_id: reviewed?.parent_version_id ?? null,
+    });
     setBusy(false);
     if (!result.ok) {
       setError(result.error);

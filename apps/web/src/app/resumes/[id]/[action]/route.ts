@@ -93,7 +93,10 @@ export async function POST(request: Request, { params }: Params): Promise<Respon
         ) {
           return problem(422, "Pick the changes to take.");
         }
-        return ok(await takeChanges(session, id, keys as string[], base), 201);
+        const parent = body.parent_version_id;
+        const parentVersion = parent === undefined || parent === null ? null : baseId(parent);
+        if (parent != null && !parentVersion) return problem(422, "Pick the changes to take.");
+        return ok(await takeChanges(session, id, keys as string[], base, parentVersion), 201);
       }
       case "copy": {
         const target = cleanLine(body.target, TARGET_MAX);

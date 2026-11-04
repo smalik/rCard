@@ -63,7 +63,7 @@ from plytos_api.imports.store import (
 )
 from plytos_api.keys import KeyShreddedError, Vault, kek_from_setting
 from plytos_api.resumes.as_written import as_written
-from plytos_api.resumes.model import ResumeChange, ResumeContent
+from plytos_api.resumes.model import ResumeChange, ResumeContent, keep_wording
 from plytos_api.resumes.render import RenderedResume, describe, render
 from plytos_api.resumes.store import (
     ResumeDetail,
@@ -194,6 +194,8 @@ class TakeChanges(BaseModel):
     # The changes to take, by key. None of them passes on every change.
     keys: list[str] = Field(max_length=1000)
     base_version_id: UUID
+    # The parent's version the person reviewed, from parent-changes.
+    parent_version_id: UUID | None = None
 
 
 class AskForVersion(BaseModel):
@@ -235,6 +237,12 @@ class ResumeVersionPage(BaseModel):
 class LabeledChange(BaseModel):
     change: ResumeChange
     label: str
+
+
+class ParentChanges(BaseModel):
+    # The parent's version these changes run to; send it back when taking them.
+    parent_version_id: UUID | None
+    changes: list[LabeledChange]
 
 
 class ProposedResume(BaseModel):
@@ -693,15 +701,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return store.name_version(resume_id, number, body.name)
 
     @app.get("/v1/resumes/{resume_id}/parent-changes")
-    def parent_changes(resume_id: UUID, user_id: User) -> list[LabeledChange]:
+    def parent_changes(resume_id: UUID, user_id: User) -> ParentChanges:
         """Changes in the resume this one was made from that it hasn't taken."""
         with db.as_user(user_id) as conn:
             store, cards = resumes(conn, user_id)
+            detail = store.detail(resume_id)
+            parent_version = store.head_version_id(detail.parent_id) if detail.parent_id else None
             library = cards.main_contents()
-            return [
-                LabeledChange(change=c, label=describe(c, library))
-                for c in store.parent_changes(resume_id)
-            ]
+            return ParentChanges(
+                parent_version_id=parent_version,
+                changes=[
+                    LabeledChange(change=c, label=describe(c, library))
+                    for c in store.parent_changes(resume_id, parent_version)
+                ],
+            )
 
     @app.post("/v1/resumes/{resume_id}/take", status_code=status.HTTP_201_CREATED)
     def take_changes(resume_id: UUID, body: TakeChanges, user_id: User) -> ResumePage:
@@ -709,7 +722,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         passes on them all with no keys."""
         with db.as_user(user_id) as conn:
             store, cards = resumes(conn, user_id)
-            detail = store.take(resume_id, body.keys, body.base_version_id, person(user_id))
+            detail = store.take(
+                resume_id,
+                body.keys,
+                body.base_version_id,
+                person(user_id),
+                body.parent_version_id,
+            )
             return page(detail, cards)
 
     @app.post("/v1/resumes/{resume_id}/copies", status_code=status.HTTP_201_CREATED)
@@ -721,6 +740,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             source = store.detail(resume_id)
             target = cards.create_target(body.target_kind, body.target, None)
             content = source.content.model_copy(deep=True)
+            if source.target_id is not None:
+                content = keep_wording(content, source.target_id)
             content.note = None
             detail = store.create(
                 body.name,

@@ -7,6 +7,7 @@ import {
   cleanContent,
   cleanLine,
   leaveOut,
+  lineParts,
   move,
   type NewResume,
   proposalSize,
@@ -99,6 +100,29 @@ describe("changing which lines show", () => {
 });
 
 describe("saying it plainly", () => {
+  const item = { card: "c", wording: "main" as const, date: "" };
+
+  it("shows each line's full text and the details that belong on the page", () => {
+    const long = "Led the migration of ".repeat(12).trim();
+    expect(
+      lineParts({ ...item, kind: "accomplishment", text: `${long.slice(0, 50)}…`, detail: long }),
+    ).toEqual({ text: long, detail: "" });
+    expect(
+      lineParts({ ...item, kind: "accomplishment", text: "Cut costs", detail: "Context." }),
+    ).toEqual({ text: "Cut costs", detail: "" });
+    expect(lineParts({ ...item, kind: "skill", text: "Skills", detail: "SQL, Python" })).toEqual({
+      text: "SQL, Python",
+      detail: "",
+    });
+    expect(lineParts({ ...item, kind: "skill", text: "Tools", detail: "Excel" }).text).toBe(
+      "Tools: Excel",
+    );
+    expect(
+      lineParts({ ...item, kind: "education", text: "B.S. Engineering", detail: "Honors" }),
+    ).toEqual({ text: "B.S. Engineering", detail: "Honors" });
+    expect(lineParts({ ...item, kind: "skill", text: "Skills", detail: "" }).text).toBe("Skills");
+  });
+
   it("names who made a version", () => {
     expect(versionAuthor(version())).toBe("You");
     expect(versionAuthor(version({ author_kind: "ai", author_ref: "assembler" }))).toBe(

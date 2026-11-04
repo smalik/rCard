@@ -257,6 +257,14 @@
   text-wrap: pretty;
 }
 
+.doc-line-detail {
+  display: block;
+  white-space: pre-line;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--ink-65);
+}
+
 .doc-line[data-wording="target"] .doc-line-text {
   background: linear-gradient(transparent 60%, var(--teal-tint) 60%);
 }
