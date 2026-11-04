@@ -27,7 +27,8 @@ jobs:
       - name: Scan this branch's full history
         # HEAD only: the deprecated legacy branches hold known, revoked
         # credentials and never merge into main.
-        run: "$RUNNER_TEMP/gitleaks" git . --log-opts=HEAD --redact --verbose --exit-code 1
+        run: |
+          "$RUNNER_TEMP/gitleaks" git . --log-opts=HEAD --redact --verbose --exit-code 1
 
   api:
     name: API
