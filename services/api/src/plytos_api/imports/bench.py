@@ -27,9 +27,13 @@ To measure a change (a lower effort for a step, say) on the same resumes:
     python -m plytos_api.imports.bench --rerun RUN --effort structure=low --budget 20
     python -m plytos_api.imports.bench --compare RUN NEW_RUN
 
+--skip leaves a step out (--skip proofread prices proofreading on demand), and
+--fold-facts asks for each accomplishment's facts in the structure reading in
+place of a facts step of their own.
+
 --compare reads the two runs' readings and says, in numbers only, how often they
-agree on employers, titles, dates and which job each accomplishment is under.
-It makes no Claude calls.
+agree on employers, titles, dates, which job each accomplishment is under and
+its facts, and what each step cost. It makes no Claude calls.
 """
 
 from __future__ import annotations
@@ -60,6 +64,8 @@ from plytos_api.imports.usage import AiUsage
 
 SUFFIXES = (".pdf", ".docx")
 STEPS = ("pictures", "structure", "placement", "facts", "proofread")
+# Steps an import can go without; the structure reading isn't one of them.
+SKIPPABLE = ("pictures", "placement", "facts", "proofread")
 BUDGETS = (1.0, 3.0, 20.0)
 
 
@@ -412,6 +418,26 @@ def _tree(result: ImportResult) -> dict[str, Any]:
     return {"employers": employers, "jobs": jobs, "placed": placed}
 
 
+def _facts(result: ImportResult) -> dict[str, tuple[set[str], set[str], str]]:
+    """Each accomplishment's skills, scope and outcome, keyed by its first line."""
+    texts = {b.index: _key(b.text) for b in result.blocks}
+    out: dict[str, tuple[set[str], set[str], str]] = {}
+    for card in result.cards:
+        if card.kind != "accomplishment" or not card.source_blocks:
+            continue
+        facts = card.content.facts
+        out[texts.get(card.source_blocks[0], "")] = (
+            _keys(facts.get("skills")),
+            _keys(facts.get("scope")),
+            _key(facts.get("outcome")),
+        )
+    return out
+
+
+def _keys(value: object) -> set[str]:
+    return {_key(v) for v in value} if isinstance(value, list) else set()
+
+
 def _jaccard(a: set[Any], b: set[Any]) -> float:
     return len(a & b) / len(a | b) if a | b else 1.0
 
@@ -436,10 +462,19 @@ def compare(out: Path, first: str, second: str) -> str:
     same_dates = [0, 0]
     same_place = [0, 0]
     resumes_all_placed_alike = 0
+    skills: list[float] = []
+    scope: list[float] = []
+    same_outcome = [0, 0]
     for rid in shared:
         a, b = _reading(out, first, rid), _reading(out, second, rid)
         if a is None or b is None:
             continue
+        fa, fb = _facts(a), _facts(b)
+        for text in set(fa) & set(fb):
+            skills.append(_jaccard(fa[text][0], fb[text][0]))
+            scope.append(_jaccard(fa[text][1], fb[text][1]))
+            same_outcome[0] += fa[text][2] == fb[text][2]
+            same_outcome[1] += 1
         ta, tb = _tree(a), _tree(b)
         employers.append(_jaccard(ta["employers"], tb["employers"]))
         jobs.append(_jaccard(set(ta["jobs"]), set(tb["jobs"])))
@@ -454,6 +489,16 @@ def compare(out: Path, first: str, second: str) -> str:
 
     def mean(run: str, key: str) -> float:
         return _mean(runs[run][rid][key] for rid in shared)
+
+    def step_cost(run: str, step: str) -> float:
+        return _mean(runs[run][rid]["steps"].get(step, {}).get("cost_usd", 0.0) for rid in shared)
+
+    def calls(run: str, step: str) -> float:
+        return _mean(runs[run][rid]["steps"].get(step, {}).get("calls", 0) for rid in shared)
+
+    def share(run: str, key: str) -> str:
+        total = sum(runs[run][rid]["accomplishments"] for rid in shared)
+        return _share([runs[run][rid] for rid in shared], key, total)
 
     def guessed(run: str) -> float:
         rs = [runs[run][rid]["lines"] for rid in shared if runs[run][rid].get("lines")]
@@ -479,12 +524,34 @@ def compare(out: Path, first: str, second: str) -> str:
         f"| | {first} | {second} |",
         "| --- | --- | --- |",
         f"| Mean cost (USD) | {mean(first, 'cost_usd'):.4f} | {mean(second, 'cost_usd'):.4f} |",
+        f"| Mean cost without proofreading | "
+        f"{mean(first, 'cost_usd') - step_cost(first, 'proofread'):.4f} | "
+        f"{mean(second, 'cost_usd') - step_cost(second, 'proofread'):.4f} |",
+        *(
+            f"| Mean cost of {step} | {step_cost(first, step):.4f} | "
+            f"{step_cost(second, step):.4f} |"
+            for step in STEPS
+        ),
+        f"| Structure calls per resume | {calls(first, 'structure'):.2f} | "
+        f"{calls(second, 'structure'):.2f} |",
         f"| Mean seconds | {mean(first, 'seconds'):.1f} | {mean(second, 'seconds'):.1f} |",
         f"| Placement questions per resume | {mean(first, 'placement_questions'):.2f} | "
         f"{mean(second, 'placement_questions'):.2f} |",
         f"| Lines no step claimed | {guessed(first):.1%} | {guessed(second):.1%} |",
         f"| Accomplishments per resume | {mean(first, 'accomplishments'):.1f} | "
         f"{mean(second, 'accomplishments'):.1f} |",
+        f"| Accomplishments with skills | {share(first, 'with_skills')} | "
+        f"{share(second, 'with_skills')} |",
+        f"| Accomplishments with scope | {share(first, 'with_scope')} | "
+        f"{share(second, 'with_scope')} |",
+        f"| Accomplishments with an outcome | {share(first, 'with_outcome')} | "
+        f"{share(second, 'with_outcome')} |",
+        "",
+        "## Facts on the same accomplishments",
+        "",
+        f"- Skills (mean overlap): {_mean(skills):.1%} over {len(skills)} accomplishments",
+        f"- Scope (mean overlap): {_mean(scope):.1%}",
+        f"- Same outcome: {_ratio(same_outcome)}",
     ]
     return "\n".join(out_lines) + "\n"
 
@@ -663,6 +730,18 @@ def main(argv: list[str] | None = None) -> int:
         metavar="STEP=LEVEL",
         help="a step's effort in place of its usual one, e.g. structure=low",
     )
+    parser.add_argument(
+        "--skip",
+        action="append",
+        default=[],
+        choices=SKIPPABLE,
+        help="leave a step out, e.g. proofread to price proofreading on demand",
+    )
+    parser.add_argument(
+        "--fold-facts",
+        action="store_true",
+        help="ask for facts in the structure reading instead of a facts step",
+    )
     parser.add_argument("--label", help="a name for this run's variant, kept with its results")
     parser.add_argument("--compare", nargs=2, metavar="RUN", help="compare two runs' readings")
     args = parser.parse_args(argv)
@@ -699,7 +778,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     if isinstance(reader, ClaudeReader):
         reader.step_efforts = cast(dict[str, Effort], efforts)
-    label = args.label or (" ".join(f"{k}={v}" for k, v in efforts.items()) or None)
+        reader.skip_steps = frozenset(args.skip)
+        reader.fold_facts = args.fold_facts
+    variant = [f"{k}={v}" for k, v in efforts.items()] + [f"skip={s}" for s in args.skip]
+    if args.fold_facts:
+        variant.append("facts-folded")
+    label = args.label or (" ".join(variant) or None)
     print(f"Trying {len(items)} resumes.", file=sys.stderr)
     run(
         items,

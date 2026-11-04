@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import re
 
-from plytos_api.imports.ai import AiFacts, verbatim
+from plytos_api.imports.ai import AiFacts, AiLineFacts, AiResultFacts, verbatim
 from plytos_api.imports.model import ProposedCard
 
 log = logging.getLogger(__name__)
@@ -30,6 +30,28 @@ def to_ask(cards: list[ProposedCard]) -> dict[str, ProposedCard]:
 def words(card: ProposedCard) -> str:
     """An accomplishment's own words. A long one keeps them whole in the body."""
     return card.content.framing.body or card.content.framing.headline
+
+
+def by_card(asked: dict[str, ProposedCard], found: list[AiLineFacts]) -> AiFacts:
+    """Facts given line by line, as part of the structure reading, gathered onto the
+    accomplishment each line belongs to. One written over several lines takes the facts
+    of all of them; add_result_facts still keeps only what its words hold."""
+    by_line: dict[int, list[AiLineFacts]] = {}
+    for item in found:
+        by_line.setdefault(item.line, []).append(item)
+    results: list[AiResultFacts] = []
+    for ref, card in asked.items():
+        items = [item for line in card.source_blocks for item in by_line.get(line, [])]
+        if items:
+            results.append(
+                AiResultFacts(
+                    ref=ref,
+                    skills=[skill for item in items for skill in item.skills],
+                    scope=[scope for item in items for scope in item.scope],
+                    outcome=next((item.outcome for item in items if item.outcome), ""),
+                )
+            )
+    return AiFacts(results=results)
 
 
 def add_result_facts(asked: dict[str, ProposedCard], found: AiFacts) -> None:

@@ -137,6 +137,20 @@ class AiResume(BaseModel):
     skipped: list[AiSkip]
 
 
+class AiLineFacts(BaseModel):
+    line: int
+    skills: list[str]
+    scope: list[str]
+    outcome: str
+
+
+class AiResumeFacts(AiResume):
+    """A structure reading that also gives each accomplishment line's facts, so the
+    separate facts pass isn't needed (ClaudeReader.fold_facts)."""
+
+    facts: list[AiLineFacts]
+
+
 class AiMisfiled(BaseModel):
     line: int
     belongs_under: str
@@ -290,6 +304,20 @@ of its own, that year). kind is one of: {", ".join(ENTRY_KINDS)}.
 (the name or contact details repeated on a later page); decoration (rules or symbols); \
 references ("References available on request"). Never skip a line that says anything \
 about the person's work, education or skills.
+"""
+
+FOLDED_FACTS_INSTRUCTIONS = """
+Facts
+- facts: one item for each bullet or description line of a role that says what the \
+person did or achieved, with line set to its number. skills: the skills, tools, methods \
+or fields of knowledge it names, such as "Python", "demand forecast" or "contract \
+negotiation", each a short phrase. scope: phrases that show its size or reach: a team, \
+a budget, a number of people, users, sites, accounts or regions, or an amount of money \
+involved. outcome: the phrase that states what it achieved, or "" when it states no \
+result.
+- Copy, don't write: every value must appear word for word on that line, and it's \
+dropped otherwise. Leave a list empty rather than stretching, and leave out a line \
+with nothing to give.
 """
 
 PLACEMENT_INSTRUCTIONS = """\
@@ -446,17 +474,26 @@ class ClaudeReader:
         self.calls: list[AiCall] = []
         # Effort for a named step in place of its usual one, for measuring the trade.
         self.step_efforts: dict[str, Effort] = {}
+        # Steps left out of an import, such as proofreading when it's done on demand.
+        self.skip_steps: frozenset[str] = frozenset()
+        # Ask for each accomplishment's facts in the structure reading, in place of a
+        # facts pass of their own.
+        self.fold_facts = False
 
     def metered(self) -> ClaudeReader:
         """A reader on the same client that records only its own calls."""
         reader = ClaudeReader(self._client, self._model, self._effort)
         reader.step_efforts = self.step_efforts
+        reader.skip_steps = self.skip_steps
+        reader.fold_facts = self.fold_facts
         return reader
 
     def read(self, doc: ExtractedDocument) -> AiResume | None:
-        return self.ask(
-            INSTRUCTIONS, "Resume lines:\n" + resume_lines(doc), AiResume, step="structure"
-        )
+        content = "Resume lines:\n" + resume_lines(doc)
+        if self.fold_facts:
+            system = INSTRUCTIONS + FOLDED_FACTS_INSTRUCTIONS
+            return self.ask(system, content, AiResumeFacts, step="structure")
+        return self.ask(INSTRUCTIONS, content, AiResume, step="structure")
 
     def ask[T: BaseModel](
         self,
@@ -472,6 +509,8 @@ class ClaudeReader:
         ``step`` names what it's for in the usage record. An answer that doesn't match
         is asked for once more, and one cut off for length is asked for at low effort,
         which leaves more room for the answer after the thinking."""
+        if step in self.skip_steps:
+            return None
         override = self.step_efforts.get(step) if _attempt == 1 else None
         effort = override or effort or self._effort
         images = 0 if isinstance(content, str) else sum(_is_image(b) for b in content)
