@@ -23,6 +23,7 @@ import type { CardContent } from "../../../../lib/cards";
 import {
   type Answer,
   BATCH_SIZE,
+  type CardMatch,
   cardPlace,
   contentFor,
   factRows,
@@ -31,6 +32,8 @@ import {
   findingsForCard,
   highlight,
   isFigureQuestion,
+  type MatchChoice,
+  matchNote,
   pathLabel,
   placementOpen,
   plural,
@@ -119,6 +122,55 @@ function PlaceQuestion({
             >
               {pressed && <Icon icon={faCheck} size={11} />}
               {choice.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// A card that's already one of the person's: approving carries on that card.
+function MatchNote({
+  match,
+  choice,
+  busy,
+  onChoose,
+}: {
+  match: CardMatch;
+  choice: MatchChoice;
+  busy: boolean;
+  onChoose: (choice: MatchChoice) => void;
+}) {
+  const options: { choice: MatchChoice; label: string }[] = match.same
+    ? [
+        { choice: "update", label: "Use my card" },
+        { choice: "separate", label: "Make a separate card" },
+      ]
+    : [
+        { choice: "update", label: "Save as next version" },
+        { choice: "keep", label: "Keep mine as it is" },
+        { choice: "separate", label: "Make a separate card" },
+      ];
+  return (
+    <div className="stack tight">
+      <p className="small-copy" aria-live="polite">
+        <strong>Already in your cards.</strong> {matchNote(match, choice)}
+      </p>
+      <div className="choice-row" role="group" aria-label="What approving does">
+        {options.map((option) => {
+          const pressed = choice === option.choice;
+          return (
+            <button
+              key={option.choice}
+              type="button"
+              className="choice-pill"
+              aria-pressed={pressed}
+              disabled={busy}
+              onClick={() => onChoose(option.choice)}
+            >
+              {pressed && <Icon icon={faCheck} size={11} />}
+              {option.label}
             </button>
           );
         })}
@@ -298,6 +350,8 @@ export function ApproveFlow({ review: initial }: { review: Review }) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<string | null>(null);
+  // What approving does when the card is already one of the person's.
+  const [choice, setChoice] = useState<MatchChoice>("update");
   const heading = useRef<HTMLHeadingElement>(null);
   const moved = useRef(false);
 
@@ -312,27 +366,36 @@ export function ApproveFlow({ review: initial }: { review: Review }) {
   ).length;
   const ref = batch[position];
   const card = review.cards.find((c) => c.ref === ref);
+  const match = card ? review.matches[card.ref] : undefined;
 
   function next() {
     moved.current = true;
     setFlipped(false);
     setEditing(false);
     setError(null);
+    setChoice("update");
     setPosition((p) => p + 1);
+  }
+
+  // A decision can change which of the person's cards the rest match.
+  function decided(outcome: { progress: Review["progress"]; matches?: Review["matches"] }) {
+    const matches = outcome.matches ?? review.matches;
+    setReview({ ...review, progress: outcome.progress, matches });
   }
 
   async function act(action: "approve" | "later" | "dropped", content: CardContent | null = null) {
     if (!card) return;
     setBusy(action);
     setError(null);
-    const body = action === "approve" ? { action, content } : { action };
+    const body =
+      action === "approve" ? { action, content, choice: match ? choice : null } : { action };
     const outcome = await post(`/import/${review.id}/cards/${card.ref}`, body);
     setBusy(null);
     if (!outcome.ok) {
       setError(outcome.error);
       return;
     }
-    setReview({ ...review, progress: outcome.progress });
+    decided(outcome);
     next();
   }
 
@@ -349,7 +412,7 @@ export function ApproveFlow({ review: initial }: { review: Review }) {
       setError(outcome.error);
       return;
     }
-    setReview({ ...review, progress: outcome.progress });
+    decided(outcome);
   }
 
   async function answer(finding: number, value: Answer, figure: string | null) {
@@ -513,6 +576,14 @@ export function ApproveFlow({ review: initial }: { review: Review }) {
                   {content.framing.body ||
                     "Nothing more than the headline yet. Add more with Edit wording."}
                 </p>
+              )}
+              {match && (
+                <MatchNote
+                  match={match}
+                  choice={choice}
+                  busy={busy !== null}
+                  onChoose={setChoice}
+                />
               )}
               <Checks
                 card={card}

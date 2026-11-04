@@ -20,7 +20,7 @@ from plytos_api.resumes.model import ResumeContent
 from plytos_api.resumes.store import ResumeStore
 
 from .conftest import DbUrls, main_content
-from .resume_samples import promotions_text
+from .resume_samples import promotions_text, title_first_text
 
 
 @pytest.fixture(scope="module")
@@ -462,6 +462,37 @@ def test_check_ins_over_http(client: TestClient) -> None:
         assert refused.status_code == 422, bad
     unknown = client.put("/v1/check-ins", json=plan | {"time_zone": "Mars/Olympus"}, headers=me)
     assert unknown.json()["detail"] == "Plytos doesn't know that time zone."
+
+
+def test_bringing_a_resume_in_again_carries_on_the_same_cards(
+    client: TestClient, reads: ImportWorker
+) -> None:
+    me, other = as_user("api-again"), as_user("api-again-other")
+    text = title_first_text().encode()
+    first = upload(client, reads, text, "Robin Diaz.txt", me)
+    kept = {}
+    for card in first["result"]["cards"]:
+        approved = client.post(
+            f"/v1/imports/{first['id']}/cards/{card['ref']}/approve", json={}, headers=me
+        )
+        assert approved.status_code == 201, approved.text
+        kept[card["ref"]] = approved.json()["card"]["id"]
+
+    again = upload(client, reads, text, "Robin Diaz.txt", me)
+    assert {ref: m["card_id"] for ref, m in again["matches"].items()} == kept
+    assert all(m["same"] for m in again["matches"].values())
+    matches = client.get(f"/v1/imports/{again['id']}/matches", headers=me)
+    assert matches.json() == again["matches"]
+    assert client.get(f"/v1/imports/{again['id']}/matches", headers=other).status_code == 404
+
+    url = f"/v1/imports/{again['id']}/cards"
+    linked = client.post(f"{url}/card-1/approve", json={"choice": "keep"}, headers=me)
+    assert linked.status_code == 201 and linked.json()["card"]["id"] == kept["card-1"]
+    separate = client.post(f"{url}/card-7/approve", json={"choice": "separate"}, headers=me)
+    assert separate.status_code == 201 and separate.json()["card"]["id"] != kept["card-7"]
+    # A choice it doesn't know is refused.
+    refused = client.post(f"{url}/card-2/approve", json={"choice": "sideways"}, headers=me)
+    assert refused.status_code == 422
 
 
 def test_resume_flow_over_http(client: TestClient, reads: ImportWorker) -> None:

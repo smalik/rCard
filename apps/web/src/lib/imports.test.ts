@@ -15,6 +15,7 @@ import {
   foundRows,
   highlight,
   isFigureQuestion,
+  matchNote,
   openQuestions,
   outline,
   overview,
@@ -30,6 +31,7 @@ import {
   stageSpan,
   stageStates,
   textToFact,
+  toMatches,
   toReview,
   toStatus,
   wordingTips,
@@ -161,6 +163,7 @@ function review(progress: Partial<Review["progress"]> = {}): Review {
     progress: { settled: {}, cards: {}, edits: {}, moves: {}, ...progress },
     contactKept: true,
     readBy: null,
+    matches: {},
   };
 }
 
@@ -513,5 +516,27 @@ describe("a reading in the background", () => {
       file: { format: "pdf", size: 10, name: "Resume.pdf" },
     });
     expect(toStatus({ id: "i2", state: "odd" }).state).toBe("reading");
+  });
+});
+
+describe("a card already in the person's cards", () => {
+  const match = { card_id: "c1", headline: "Contoso Bank", same: false };
+
+  it("keeps only well-formed matches from the API", () => {
+    expect(
+      toMatches({
+        "card-1": { card_id: "c1", headline: "Contoso Bank", same: true },
+        "card-2": { card_id: 7, headline: "x" },
+        "card-3": null,
+      }),
+    ).toEqual({ "card-1": { card_id: "c1", headline: "Contoso Bank", same: true } });
+    expect(toMatches(undefined)).toEqual({});
+  });
+
+  it("says what approving does with each choice", () => {
+    expect(matchNote(match, "update")).toMatch(/next version/);
+    expect(matchNote(match, "keep")).toMatch(/keeps your card “Contoso Bank” as it is/);
+    expect(matchNote(match, "separate")).toMatch(/separate card/);
+    expect(matchNote({ ...match, same: true }, "update")).toMatch(/changes nothing/);
   });
 });

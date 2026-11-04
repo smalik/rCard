@@ -105,6 +105,20 @@ export type ImportFileInfo = {
   words: number;
 };
 
+// One of the person's cards that a proposed card stands for: bringing a resume
+// in again carries on the same cards instead of making duplicates.
+export type CardMatch = {
+  card_id: string;
+  // The card's headline now, so the person knows which card it is.
+  headline: string;
+  // The import says nothing the card doesn't already: approving just links them.
+  same: boolean;
+};
+
+// For a card that matches one of theirs: save it as that card's next version,
+// keep theirs as it is, or make a separate card.
+export type MatchChoice = "update" | "keep" | "separate";
+
 export type Review = {
   id: string;
   file: ImportFileInfo;
@@ -117,6 +131,8 @@ export type Review = {
   contactKept: boolean;
   // The model that sorted the resume's lines, or null when the built-in rules did.
   readBy: string | null;
+  // The person's cards that proposed cards stand for, by ref.
+  matches: Record<string, CardMatch>;
 };
 
 // An upload is kept at once and read in the background. While it's read, the
@@ -233,7 +249,21 @@ type RawImport = {
   };
   progress?: Partial<Progress>;
   to_settle?: number[];
+  matches?: unknown;
 };
+
+// Keeps only well-formed matches from the API.
+export function toMatches(raw: unknown): Record<string, CardMatch> {
+  if (typeof raw !== "object" || raw === null) return {};
+  const matches: Record<string, CardMatch> = {};
+  for (const [ref, value] of Object.entries(raw as Record<string, unknown>)) {
+    const m = value as Partial<CardMatch> | null;
+    if (typeof m?.card_id === "string" && typeof m.headline === "string") {
+      matches[ref] = { card_id: m.card_id, headline: m.headline, same: m.same === true };
+    }
+  }
+  return matches;
+}
 
 function emptyProgress(): Progress {
   return { settled: {}, cards: {}, edits: {}, moves: {} };
@@ -292,7 +322,20 @@ export function toReview(raw: unknown): Review {
     contactKept:
       (contact.emails?.length ?? 0) > 0 || (contact.phones?.length ?? 0) > 0 || !!contact.location,
     readBy: typeof result.read_by === "string" ? result.read_by : null,
+    matches: toMatches(view.matches),
   };
+}
+
+// What approving a matched card does, in the person's words.
+export function matchNote(match: CardMatch, choice: MatchChoice): string {
+  if (choice === "separate") return "Approving makes a separate card. Yours stays as it is.";
+  if (match.same) return `It's your card “${match.headline}”. Approving changes nothing on it.`;
+  const name = `“${match.headline}”`;
+  if (choice === "keep") return `Approving keeps your card ${name} as it is, without this wording.`;
+  return (
+    `It's your card ${name}. Approving saves this as its next version; ` +
+    "the one before stays in its history."
+  );
 }
 
 // "claude-haiku-5-5" reads as "Claude Haiku 5.5".

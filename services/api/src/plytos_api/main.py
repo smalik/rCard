@@ -51,6 +51,7 @@ from plytos_api.config import Settings, get_settings
 from plytos_api.db import Database
 from plytos_api.imports.ai import reader_for
 from plytos_api.imports.extract import MAX_BYTES, UnsupportedFileError, detect_format
+from plytos_api.imports.matching import CardMatch
 from plytos_api.imports.store import (
     ImportConflictError,
     ImportNotFoundError,
@@ -59,6 +60,8 @@ from plytos_api.imports.store import (
     ImportStore,
     ImportSummary,
     ImportView,
+    MatchChoice,
+    find_matches,
 )
 from plytos_api.imports.worker import ImportWorker
 from plytos_api.keys import KeyShreddedError, Vault, kek_from_setting
@@ -137,6 +140,10 @@ class Place(BaseModel):
 
 class Approve(BaseModel):
     content: MainContent | None = None
+    # For a card that matches one of the person's: "update" saves it as that
+    # card's next version (the default), "keep" links it to theirs as it is,
+    # "separate" makes a new card.
+    choice: MatchChoice | None = None
 
 
 class Approved(BaseModel):
@@ -517,7 +524,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/v1/imports/{import_id}")
     def get_import(import_id: UUID, user_id: User) -> ImportView:
         with db.as_user(user_id) as conn:
-            return imports(conn, user_id).get(import_id)
+            view = imports(conn, user_id).get(import_id)
+            if view.result is not None:
+                cards = repo(conn, user_id).main_contents()
+                view.matches = find_matches(view.result, view.progress, cards)
+            return view
+
+    @app.get("/v1/imports/{import_id}/matches")
+    def import_matches(import_id: UUID, user_id: User) -> dict[str, CardMatch]:
+        """The person's cards that the import's proposed cards stand for, by ref,
+        as their decisions stand. Asked again after each decision."""
+        with db.as_user(user_id) as conn:
+            return imports(conn, user_id).matches(import_id, repo(conn, user_id))
 
     @app.get("/v1/imports/{import_id}/status")
     def import_status(import_id: UUID, user_id: User) -> ImportStatus:
@@ -571,7 +589,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         wording is the person's own, from their resume or as they edited it."""
         with db.as_user(user_id) as conn:
             card, progress = imports(conn, user_id).approve(
-                import_id, ref, body.content, repo(conn, user_id), person(user_id)
+                import_id, ref, body.content, repo(conn, user_id), person(user_id), body.choice
             )
         return Approved(card=card, progress=progress)
 
