@@ -20,6 +20,7 @@ from plytos_api.cards.repository import (
     CardNotFoundError,
     CardRepository,
     CardSummary,
+    ParentError,
     SaveResult,
     StaleHeadError,
     TargetView,
@@ -172,6 +173,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             {"detail": "A variant can't add or change facts.", "problems": exc.problems},
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         )
+
+    @app.exception_handler(ParentError)
+    async def bad_parent(_: Request, exc: ParentError) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=status.HTTP_422_UNPROCESSABLE_CONTENT)
 
     @app.exception_handler(VariantExistsError)
     async def variant_exists(_: Request, __: VariantExistsError) -> JSONResponse:

@@ -5,6 +5,7 @@ from datetime import date
 from plytos_api.imports.ai import ResumeReader, to_parsed
 from plytos_api.imports.audit import audit
 from plytos_api.imports.cards import propose_cards
+from plytos_api.imports.career import group_employments
 from plytos_api.imports.extract import extract
 from plytos_api.imports.model import ImportResult, ParsedResume
 from plytos_api.imports.segment import segment
@@ -24,13 +25,16 @@ def import_resume(
             parsed, read_by = to_parsed(doc, found), reader.name
     if parsed is None:
         parsed = segment(doc)
+    texts = {b.index: b.text for b in doc.blocks}
+    parsed.employments = group_employments(parsed.roles, texts)
     findings = audit(doc, parsed, today=today)
     return ImportResult(
         facts=doc.facts,
         contact=parsed.contact,
         sections=parsed.sections,
         roles=parsed.roles,
-        cards=propose_cards(parsed, findings, {b.index: b.text for b in doc.blocks}),
+        employments=parsed.employments,
+        cards=propose_cards(parsed, findings, texts),
         findings=findings,
         blocks=doc.blocks,
         read_by=read_by,

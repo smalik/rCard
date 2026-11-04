@@ -192,24 +192,33 @@ def test_plain_text_resume() -> None:
 
 def test_cards_keep_the_resume_wording(messy: ImportResult) -> None:
     kinds = [c.kind for c in messy.cards]
-    assert kinds.count("role") == 4
+    assert kinds.count("employment") == 4
+    assert kinds.count("position") == 4
     assert kinds.count("accomplishment") == 9
+    assert "role" not in kinds
     assert {"story", "skill", "education", "credential"} <= set(kinds)
     for card in messy.cards:
         MainContent.model_validate(card.content.model_dump())
 
+    by_ref = {c.ref: c for c in messy.cards}
     spend = next(c for c in messy.cards if "$40M" in c.content.framing.headline)
-    assert spend.content.facts["employer"] == "Contoso Health"
-    assert spend.content.facts["figures"] == ["$40M"]
-    assert spend.content.facts["start"] == "2018-01"
+    # The accomplishment holds its own facts; the title and employer sit above it.
+    assert spend.content.facts == {"figures": ["$40M"]}
     assert "consistency.tense" in spend.findings
+    position = by_ref[spend.parent_ref or ""]
+    assert position.kind == "position"
+    assert position.content.facts["start"] == "2018-01"
+    employer = by_ref[position.parent_ref or ""]
+    assert employer.kind == "employment"
+    assert employer.content.facts["employer"] == "Contoso Health"
 
     fabrikam = next(
         c
         for c in messy.cards
-        if c.kind == "role" and c.content.facts["employer"] == "Fabrikam Inc."
+        if c.kind == "position"
+        and by_ref[c.parent_ref or ""].content.facts.get("employer") == "Fabrikam Inc."
     )
-    assert fabrikam.needs_check == ["Which months did this role start and end?"]
+    assert fabrikam.needs_check == ["Which months did you start and finish in this title?"]
 
 
 def test_unreadable_files_are_refused() -> None:
@@ -239,14 +248,27 @@ def test_client_engagements_sit_under_the_agency(consultant: ImportResult) -> No
         ("Data Scientist", "Contoso Staffing", "Northwind Health", "role-2"),
         ("Analytics Lead", "Contoso Staffing", "Tailspin Bank", "role-2"),
     ]
+    by_ref = {c.ref: c for c in consultant.cards}
     northwind = next(
-        c for c in consultant.cards if c.kind == "role" and "Northwind" in str(c.content.facts)
+        c
+        for c in consultant.cards
+        if c.kind == "engagement" and "Northwind" in str(c.content.facts)
     )
-    assert northwind.content.facts["employer"] == "Contoso Staffing"
     assert northwind.content.facts["client"] == "Northwind Health"
+    assert "employer" not in northwind.content.facts
+    consultant_role = by_ref[northwind.parent_ref or ""]
+    assert (consultant_role.kind, consultant_role.content.facts["title"]) == (
+        "position",
+        "Consultant",
+    )
+    agency = by_ref[consultant_role.parent_ref or ""]
+    assert agency.content.facts["employer"] == "Contoso Staffing"
     assert northwind.needs_check == [
         "When did your work for Northwind Health start and end (within January 2019 – June 2023)?"
     ]
+    # One agency employment holds the consultant role and both client engagements.
+    assert [e.organization for e in consultant.employments] == ["Fabrikam Inc.", "Contoso Staffing"]
+    assert consultant.employments[1].role_refs == ["role-2", "role-3", "role-4"]
 
 
 def test_workstream_labels_stay_inside_their_role(consultant: ImportResult) -> None:
@@ -257,10 +279,19 @@ def test_workstream_labels_stay_inside_their_role(consultant: ImportResult) -> N
 
 
 def test_paragraph_roles_become_one_card_per_sentence(consultant: ImportResult) -> None:
-    northwind = [c for c in consultant.cards if c.role_ref == "role-3" and c.kind != "role"]
-    assert [c.content.framing.headline for c in northwind] == [
-        "Built a reminder model that cut patient no-shows 25% across 14 clinics.",
-        "Led the rollout with clinic managers and trained 30 front-desk staff.",
+    northwind = [
+        (c.content.framing.headline, c.needs_check)
+        for c in consultant.cards
+        if c.role_ref == "role-3" and c.kind == "accomplishment"
+    ]
+    assert northwind == [
+        ("Built a reminder model that cut patient no-shows 25% across 14 clinics.", []),
+        ("Led the rollout with clinic managers and trained 30 front-desk staff.", []),
+        # The highlight at the top names the client, so it's proposed under that work.
+        (
+            "Cut patient no-shows ~30% at Northwind Health with a reminder model.",
+            ["Is this from your work at Northwind Health?"],
+        ),
     ]
 
 

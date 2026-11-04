@@ -150,19 +150,37 @@ Haiku 5.5.
 
 ## Proposed cards
 
-| Resume part | Card |
-| --- | --- |
-| Summary or objective | `story`, marked as the summary |
-| Each role | `role`, with employer, title, start, end, location and employment type as facts |
-| Each client engagement under an agency or consultancy role | `role`, with the agency or firm as `employer` and the client as `client` |
-| Each bullet | `accomplishment`, with the role's employer, client, title and dates as context, its workstream label if it sits under one, and every number in the text as `figures` |
-| Each sentence of a role written as a paragraph | `accomplishment`, as for a bullet |
-| Key achievements | `accomplishment` |
-| Each skills line | `skill`, with the category and skills as facts |
-| Education | `education`, with institution, degree and date |
-| Certifications | `credential` |
-| Projects | `project` |
-| Awards | `accomplishment`, with the award as a fact |
+Cards are proposed as a career tree (see [data-model.md](data-model.md)).
+Titles held at one employer go inside one employment, and every bullet goes
+under the title it was written under.
+
+| Resume part | Card | Sits under |
+| --- | --- | --- |
+| Summary or objective | `story`, marked as the summary | nothing |
+| Each employer, with the tenure | `employment`: employer, start, end, location, employment type | nothing |
+| Each title held there | `position`: title, its own start and end, and a location or type only when it differs from the employment's | its employment |
+| Each client engagement under an agency or consultancy role | `engagement`: client, title, dates | the agency position |
+| Each bullet | `accomplishment`: its workstream label if it sits under one, and every number in the text as `figures` | its position or engagement |
+| Each sentence of a role written as a paragraph | `accomplishment`, as for a bullet | its position or engagement |
+| Key achievements | `accomplishment`; one that names a single client or employer is proposed under that work, with a question to confirm it | that work, or nothing |
+| Each skills line | `skill`, with the category and skills as facts | nothing |
+| Education | `education`, with institution, degree and date | nothing |
+| Certifications | `credential` | nothing |
+| Projects | `project` | nothing |
+| Awards | `accomplishment`, with the award as a fact | nothing |
+
+Titles join one employment when they share the employer's own line, or when
+they sit next to each other at the same employer with no more than six months
+between them. A longer gap, or another employer in between, reads as leaving
+and coming back: two employments. The tenure comes from the employer's line
+when the resume writes one, and is otherwise worked out from the titles'
+dates (marked `tenure: from positions`). A title whose dates fall outside a
+written tenure is flagged (`dates.outside_tenure`). Overlapping titles at one
+employer aren't flagged; overlapping jobs at different employers still are.
+
+Approving keeps the tree: a card sits under the saved card of its nearest
+approved parent. A card whose parent is still undecided can't be approved
+until the parent is; a dropped parent passes its children up a level.
 
 The words are the person's own; nothing is rewritten. Where the import had to
 guess (which part is the title, a role's employer inferred from the line

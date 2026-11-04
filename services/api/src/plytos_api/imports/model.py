@@ -117,12 +117,39 @@ class Role(BaseModel):
     dates: DateRange | None = None
     header_blocks: list[int] = Field(default_factory=list)
     header_text: str = ""
+    # The employer's own line when it sits above one or more titles
+    # ("Northwind Logistics, Mar 2014 - Present"). Also in header_blocks.
+    employer_block: int | None = None
+    # The employment this role is a position (or engagement) in.
+    employment_ref: str | None = None
     title_first: bool | None = None
     # "low" when the title and the organization couldn't be told apart.
     confidence: Literal["high", "low"] = "high"
     description: str | None = None
     description_blocks: list[int] = Field(default_factory=list)
     bullets: list[Bullet] = Field(default_factory=list)
+
+
+class Employment(BaseModel):
+    """One continuous stretch with one employer, holding the titles held there.
+
+    A resume with promotions often writes the employer and the whole tenure
+    once, with each title and its own dates under it. The tenure is kept here
+    and each title becomes a position inside it."""
+
+    ref: str
+    section: Literal["experience", "volunteer"] = "experience"
+    organization: str | None = None
+    organization_inferred: bool = False
+    location: str | None = None
+    employment_type: str | None = None
+    # The tenure: as written on the employer's line when there is one,
+    # otherwise the span of its positions.
+    dates: DateRange | None = None
+    tenure_written: bool = False
+    header_blocks: list[int] = Field(default_factory=list)
+    # Positions and engagements, in resume order.
+    role_refs: list[str] = Field(default_factory=list)
 
 
 class Entry(BaseModel):
@@ -169,6 +196,7 @@ class ParsedResume(BaseModel):
     contact: Contact
     sections: list[Section]
     roles: list[Role]
+    employments: list[Employment] = Field(default_factory=list)
     summary: str | None = None
     summary_blocks: list[int] = Field(default_factory=list)
     skills: dict[str, list[str]] = Field(default_factory=dict)
@@ -205,6 +233,10 @@ class ProposedCard(BaseModel):
     ref: str
     kind: CardKind
     content: MainContent
+    # The proposed card this one sits under (an accomplishment under its
+    # position, a position under its employment). On approval it becomes
+    # content.parent, pointing at the parent's saved card.
+    parent_ref: str | None = None
     role_ref: str | None = None
     source_blocks: list[int] = Field(default_factory=list)
     findings: list[str] = Field(default_factory=list)
@@ -220,6 +252,7 @@ class ImportResult(BaseModel):
     contact: Contact
     sections: list[Section]
     roles: list[Role]
+    employments: list[Employment] = Field(default_factory=list)
     cards: list[ProposedCard]
     findings: list[Finding]
     blocks: list[Block]

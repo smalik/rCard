@@ -560,6 +560,8 @@ def parse_roles(blocks: list[Block], section: SectionKind, *, start: int = 0) ->
     result: list[Role] = []
     parents: dict[int, Role] = {}
     parent: Role | None = None
+    # The role that opened the current employer line, while titles follow it.
+    employer: Role | None = None
     for role in roles:
         prev = result[-1] if result else None
         label = role.title if role.organization is None else None
@@ -604,10 +606,28 @@ def parse_roles(blocks: list[Block], section: SectionKind, *, start: int = 0) ->
             role.organization = prev.organization
             role.organization_inferred = True
             result.pop()
+            role.employer_block = prev.header_blocks[0] if prev.header_blocks else None
             role.header_blocks = prev.header_blocks + role.header_blocks
             role.header_text = f"{prev.header_text}\n{role.header_text}"
             role.location = role.location or prev.location
             role.dates = role.dates or prev.dates
+            employer = role
+        # A later dated title under the same employer line: a promotion.
+        elif (
+            employer is not None
+            and prev is not None
+            and prev.employer_block == employer.employer_block
+            and role.organization is None
+            and role.title is not None
+            and role.dates is not None
+            and _score(role.title) > 0
+        ):
+            role.organization = employer.organization
+            role.organization_inferred = True
+            role.employer_block = employer.employer_block
+            role.location = role.location or employer.location
+        else:
+            employer = None
         if role.dates is not None:
             parent = role
         result.append(role)

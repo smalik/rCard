@@ -438,6 +438,7 @@ def _roles(found: list[AiRole], blocks: dict[int, Block], lines: _Claim) -> list
             dates=_dates(dates, own_text) or _dates(dates, all_text),
             header_blocks=own + shared,
             header_text="\n".join(blocks[i].text for i in own + shared),
+            employer_block=employer_line if employer_line in blocks else None,
             confidence="low" if ai.unsure else "high",
         )
         role.title_first = _title_first(role, own_text)

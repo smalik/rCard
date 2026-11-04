@@ -126,42 +126,84 @@ def _import(reading: dict[str, Any] | None) -> ImportResult:
     )
 
 
-def _role_cards(result: ImportResult) -> list[dict[str, Any]]:
-    return [{**c.content.facts, "checks": c.needs_check} for c in result.cards if c.kind == "role"]
+def _tree(result: ImportResult) -> list[tuple[int, str, str]]:
+    """Each proposed card as (depth, kind, headline), in order."""
+    by_ref = {c.ref: c for c in result.cards}
+
+    def depth(ref: str | None) -> int:
+        return 0 if ref is None else 1 + depth(by_ref[ref].parent_ref)
+
+    return [(depth(c.parent_ref), c.kind, c.content.framing.headline) for c in result.cards]
+
+
+def _positions(result: ImportResult) -> list[dict[str, Any]]:
+    return [
+        {**c.content.facts, "checks": c.needs_check} for c in result.cards if c.kind == "position"
+    ]
 
 
 def test_rules_alone_misread_promotions_under_one_employer() -> None:
     """Why the reader exists: the rules turn the employer line into a titleless role."""
     result = import_resume(promotions_text().encode(), "avery.txt", today=TODAY)
     assert result.read_by is None
-    first = _role_cards(result)[0]
+    first = _positions(result)[0]
     assert "title" not in first
     assert "What was the job title?" in first["checks"]
 
 
-def test_promotions_become_one_role_each_at_the_same_employer() -> None:
+def test_promotions_sit_inside_one_employment() -> None:
     result = _import(good_reading())
     assert result.read_by == "fake-model"
-    cards = _role_cards(result)
-    northwind = [c for c in cards if c.get("employer") == "Northwind Logistics"]
-    assert [(c["title"], c["start"], c["end"]) for c in northwind] == [
-        ("Director, Supply Chain Operations", "2021-01", "present"),
-        ("Senior Manager, Operations", "2017-06", "2020-12"),
-        ("Operations Analyst", "2014-03", "2017-05"),
+    assert _tree(result)[:12] == [
+        (0, "employment", "Northwind Logistics"),
+        (1, "position", "Director, Supply Chain Operations"),
+        (
+            2,
+            "accomplishment",
+            "Led a 40-person team across three distribution centers, "
+            "cutting late shipments by 22%.",
+        ),
+        (
+            2,
+            "accomplishment",
+            "Built the first network-wide demand forecast, saving $3.1M in carrying costs.",
+        ),
+        (1, "position", "Senior Manager, Operations"),
+        (2, "accomplishment", "Rolled out warehouse software to 6 sites in 9 months."),
+        (1, "position", "Operations Analyst"),
+        (2, "accomplishment", "Automated weekly inventory reporting, saving 10 hours a week."),
+        (0, "employment", "Brightline Partners"),
+        (1, "position", "Consultant"),
+        (2, "engagement", "Fabrikam Foods"),
+        (3, "accomplishment", "Mapped inbound freight for 120 suppliers."),
     ]
-    assert all(c["checks"] == [] for c in northwind)
-    # The employer's whole tenure isn't a role of its own.
-    assert not any(c.get("start") == "2014-03" and c.get("end") == "present" for c in cards)
+    northwind = next(c for c in result.cards if c.kind == "employment")
+    # The tenure written once on the employer line is the employment's.
+    assert northwind.content.facts == {
+        "employer": "Northwind Logistics",
+        "location": "Chicago, IL",
+        "start": "2014-03",
+        "end": "present",
+    }
+    assert northwind.needs_check == []
+    positions = [p for p in _positions(result) if p.get("title") != "Consultant"]
+    assert [(p["title"], p["start"], p["end"], p["checks"]) for p in positions] == [
+        ("Director, Supply Chain Operations", "2021-01", "present", []),
+        ("Senior Manager, Operations", "2017-06", "2020-12", []),
+        ("Operations Analyst", "2014-03", "2017-05", []),
+    ]
+    assert [(e.organization, e.tenure_written) for e in result.employments] == [
+        ("Northwind Logistics", True),
+        ("Brightline Partners", True),
+    ]
 
 
-def test_accomplishments_keep_their_role_and_employer() -> None:
+def test_accomplishments_hold_only_their_own_facts() -> None:
     result = _import(good_reading())
     led = next(c for c in result.cards if c.content.framing.headline.startswith("Led a 40-person"))
-    assert led.content.facts["employer"] == "Northwind Logistics"
-    assert led.content.facts["title"] == "Director, Supply Chain Operations"
-    assert led.content.framing.headline == (
-        "Led a 40-person team across three distribution centers, cutting late shipments by 22%."
-    )
+    assert led.content.facts == {"figures": ["40", "22%"]}
+    director = next(c for c in result.cards if c.ref == led.parent_ref)
+    assert director.content.facts["title"] == "Director, Supply Chain Operations"
 
 
 def test_promotions_dont_read_as_overlaps_or_missing_employers() -> None:
@@ -195,10 +237,14 @@ def test_values_the_resume_doesnt_say_are_dropped() -> None:
     reading["roles"][0]["employer"] = "Northwind Logistics Inc."
     reading["roles"][0]["title"] = "VP, Supply Chain"
     reading["roles"][0]["dates"] = "January 2021 – Present"
-    first = _role_cards(_import(reading))[0]
-    assert "employer" not in first and "title" not in first and "start" not in first
-    assert "Who was the employer?" in first["checks"]
+    result = _import(reading)
+    first = _positions(result)[0]
+    assert "title" not in first and "start" not in first
     assert "What was the job title?" in first["checks"]
+    assert "When did you start and finish in this title?" in first["checks"]
+    # The shared employer line still names the employer for it.
+    employer = next(c for c in result.cards if c.kind == "employment")
+    assert employer.content.facts["employer"] == "Northwind Logistics"
 
 
 def test_values_keep_the_resumes_own_spelling() -> None:
@@ -349,3 +395,18 @@ def test_bullets_under_a_subheading_carry_it_as_their_workstream() -> None:
     assert {b.group for b in result.roles[0].bullets} == {
         "Director, Supply Chain Operations (Jan 2021 – Present)"
     }
+
+
+def test_a_title_outside_the_employer_tenure_is_flagged() -> None:
+    text = promotions_text().replace(
+        "Operations Analyst (Mar 2014 – May 2017)", "Operations Analyst (Mar 2013 – May 2017)"
+    )
+    reading = good_reading()
+    reading["roles"][2]["dates"] = "Mar 2013 – May 2017"
+    result = import_resume(text.encode(), "a.txt", today=TODAY, reader=FakeReader(reading))
+    [finding] = [f for f in result.findings if f.rule == "dates.outside_tenure"]
+    assert "Operations Analyst" in finding.detail
+    assert "Mar 2014 – Present" in finding.detail
+    # The moved date now overlaps the job before; titles inside Northwind never count.
+    [overlap] = [f for f in result.findings if f.rule == "dates.overlap"]
+    assert "Brightline Partners" in overlap.detail

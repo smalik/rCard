@@ -194,10 +194,31 @@ def test_resume_import_keeps_the_original_and_saves_only_approved_cards(
         headers=me,
     )
 
+    # The card sits under a position, which sits under an employment: approving it
+    # first is refused, so nothing lands loose.
+    proposals = {c["ref"]: c for c in view["result"]["cards"]}
+    early = client.post(f"/v1/imports/{import_id}/cards/{ref}/approve", json={}, headers=me)
+    assert early.status_code == 409
+    assert "first" in early.json()["detail"]
+    chain: list[str] = []
+    up_ref = proposals[ref]["parent_ref"]
+    while up_ref is not None:
+        chain.insert(0, up_ref)
+        up_ref = proposals[up_ref]["parent_ref"]
+    # The highlight names the client, so it sits under that engagement.
+    assert [proposals[r]["kind"] for r in chain] == ["employment", "position", "engagement"]
+    saved: dict[str, str] = {}
+    for step in chain:
+        up = client.post(f"/v1/imports/{import_id}/cards/{step}/approve", json={}, headers=me)
+        assert up.status_code == 201, up.text
+        saved[step] = up.json()["card"]["id"]
+
     approved = client.post(f"/v1/imports/{import_id}/cards/{ref}/approve", json={}, headers=me)
     assert approved.status_code == 201, approved.text
     card = approved.json()["card"]
     assert card["status"] == "approved"
+    assert card["parent_id"] == saved[chain[-1]]
+    assert card["main"]["content"]["parent"] == saved[chain[-1]]
     assert "~25%" in card["main"]["content"]["framing"]["headline"]
     assert card["main"]["head"]["author_kind"] == "person"
     again = client.post(f"/v1/imports/{import_id}/cards/{ref}/approve", json={}, headers=me)
@@ -215,7 +236,7 @@ def test_resume_import_keeps_the_original_and_saves_only_approved_cards(
         ).status_code
         == 404
     )
-    assert len(client.get("/v1/cards", headers=me).json()) == len(before) + 1
+    assert len(client.get("/v1/cards", headers=me).json()) == len(before) + 4
 
     someone = as_user("someone-else")
     assert client.get(f"/v1/imports/{import_id}", headers=someone).status_code == 404
@@ -225,7 +246,7 @@ def test_resume_import_keeps_the_original_and_saves_only_approved_cards(
 
     assert client.delete(f"/v1/imports/{import_id}", headers=me).status_code == 204
     assert client.get(f"/v1/imports/{import_id}", headers=me).status_code == 404
-    assert len(client.get("/v1/cards", headers=me).json()) == len(before) + 1
+    assert len(client.get("/v1/cards", headers=me).json()) == len(before) + 4
 
 
 def test_resume_import_refuses_bad_files(client: TestClient) -> None:

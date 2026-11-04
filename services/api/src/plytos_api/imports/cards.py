@@ -8,7 +8,16 @@ import re
 
 from plytos_api.cards.model import FactValue, Framing, MainContent
 from plytos_api.cards.rules import _NUMBER
-from plytos_api.imports.model import Entry, Finding, ParsedResume, ProposedCard, Role
+from plytos_api.imports.career import group_employments
+from plytos_api.imports.model import (
+    DateRange,
+    Employment,
+    Entry,
+    Finding,
+    ParsedResume,
+    ProposedCard,
+    Role,
+)
 from plytos_api.imports.segment import _DEGREE, _SCHOOL, sentences
 
 _HEADLINE_MAX = 200
@@ -36,68 +45,114 @@ def propose_cards(
     by_ref = {r.ref: r for r in parsed.roles}
 
     def add(
-        kind: str, facts: dict[str, FactValue], text: str, blocks: list[int], role: str | None
-    ) -> None:
+        kind: str,
+        facts: dict[str, FactValue],
+        text: str,
+        blocks: list[int],
+        role: str | None,
+        parent: str | None = None,
+    ) -> ProposedCard:
         headline, body = _framing(text)
-        cards.append(
-            ProposedCard.model_validate(
-                {
-                    "ref": f"card-{len(cards) + 1}",
-                    "kind": kind,
-                    "content": MainContent(
-                        facts={k: v for k, v in facts.items() if v not in (None, "", [])},
-                        framing=Framing(headline=headline, body=body),
-                    ),
-                    "role_ref": role,
-                    "source_blocks": blocks,
-                    "findings": rules_for(blocks),
-                }
-            )
+        card = ProposedCard.model_validate(
+            {
+                "ref": f"card-{len(cards) + 1}",
+                "kind": kind,
+                "content": MainContent(
+                    facts={k: v for k, v in facts.items() if v not in (None, "", [])},
+                    framing=Framing(headline=headline, body=body),
+                ),
+                "parent_ref": parent,
+                "role_ref": role,
+                "source_blocks": blocks,
+                "findings": rules_for(blocks),
+            }
         )
+        cards.append(card)
+        return card
 
     if parsed.summary:
         add("story", {"use": "summary"}, parsed.summary, parsed.summary_blocks, None)
 
-    for role in parsed.roles:
-        facts = _role_facts(role)
-        label = ", ".join(p for p in (role.title, role.organization) if p) or role.header_text
-        parent = by_ref.get(role.parent_ref or "")
-        if role.client:
-            label = ", ".join(p for p in (role.title, role.client) if p) or role.client
-        prose = role.description is not None and not role.bullets
-        add("role", facts, label, role.header_blocks, role.ref)
-        if role.description and not prose:
-            cards[-1].content.framing.body = role.description
-            cards[-1].source_blocks += role.description_blocks
-        cards[-1].needs_check = _role_checks(role, parent)
-        context = {
-            k: v for k, v in facts.items() if k in ("employer", "client", "title", "start", "end")
-        }
-        for bullet in role.bullets:
-            extra: dict[str, FactValue] = {"workstream": bullet.group} if bullet.group else {}
-            add(
-                "accomplishment",
-                {**context, **extra, **_figures(bullet.text)},
-                bullet.text,
-                [bullet.block],
-                role.ref,
-            )
-        if prose:
-            # One proposed card per sentence of a paragraph-style role.
-            for block in role.description_blocks:
-                for sentence in sentences(parsed_blocks[block]):
-                    if len(sentence.split()) < 5:
-                        continue
-                    add(
-                        "accomplishment",
-                        {**context, **_figures(sentence)},
-                        sentence,
-                        [block],
-                        role.ref,
-                    )
+    employments = parsed.employments or group_employments(parsed.roles, parsed_blocks)
+    # The proposed card each role became: a position, or an engagement for client work.
+    held: dict[str, ProposedCard] = {}
+    for employment in employments:
+        roles = [by_ref[r] for r in employment.role_refs if r in by_ref]
+        if not roles:
+            continue
+        first = roles[0]
+        employer = add(
+            "employment",
+            _employment_facts(employment),
+            employment.organization or first.client or first.header_text or "Employer",
+            employment.header_blocks or first.header_blocks,
+            None,
+        )
+        employer.needs_check = _employment_checks(employment, roles)
+        for role in roles:
+            parent = held.get(role.parent_ref or "") if role.client else None
+            if role.client:
+                card = add(
+                    "engagement",
+                    _engagement_facts(role),
+                    role.client,
+                    _own(role, employment),
+                    role.ref,
+                    (parent or employer).ref,
+                )
+            else:
+                card = add(
+                    "position",
+                    _position_facts(role, employment),
+                    role.title or "Title not found",
+                    _own(role, employment),
+                    role.ref,
+                    employer.ref,
+                )
+            held[role.ref] = card
+            card.needs_check = _role_checks(role, by_ref.get(role.parent_ref or ""))
+            prose = role.description is not None and not role.bullets
+            if role.description and not prose:
+                card.content.framing.body = role.description
+                card.source_blocks += role.description_blocks
+            for bullet in role.bullets:
+                extra: dict[str, FactValue] = {"workstream": bullet.group} if bullet.group else {}
+                add(
+                    "accomplishment",
+                    {**extra, **_figures(bullet.text)},
+                    bullet.text,
+                    [bullet.block],
+                    role.ref,
+                    card.ref,
+                )
+            if prose:
+                # One proposed card per sentence of a paragraph-style role.
+                for block in role.description_blocks:
+                    for sentence in sentences(parsed_blocks[block]):
+                        if len(sentence.split()) < 5:
+                            continue
+                        add(
+                            "accomplishment",
+                            _figures(sentence),
+                            sentence,
+                            [block],
+                            role.ref,
+                            card.ref,
+                        )
 
     for entry in parsed.highlights:
-        add("accomplishment", _figures(entry.text), entry.text, entry.blocks, None)
+        # A highlight that names one client or employer belongs to that work.
+        home = _named_in(entry.text, cards)
+        card = add(
+            "accomplishment",
+            _figures(entry.text),
+            entry.text,
+            entry.blocks,
+            home.role_ref if home else None,
+            home.ref if home else None,
+        )
+        if home is not None:
+            card.needs_check = [f"Is this from your work at {home.content.framing.headline}?"]
 
     for category, items in parsed.skills.items():
         add(
@@ -128,6 +183,34 @@ def propose_cards(
     return cards
 
 
+def _named_in(text: str, cards: list[ProposedCard]) -> ProposedCard | None:
+    """The one engagement or employment whose client or employer the text names."""
+    lowered = text.lower()
+    for kind, key in (("engagement", "client"), ("employment", "employer")):
+        named = [
+            c
+            for c in cards
+            if c.kind == kind
+            and isinstance(name := c.content.facts.get(key), str)
+            and re.search(r"\b" + re.escape(name.lower()) + r"\b", lowered)
+        ]
+        if len(named) == 1:
+            return named[0]
+    return None
+
+
+def _employment_checks(employment: Employment, roles: list[Role]) -> list[str]:
+    checks: list[str] = []
+    org = employment.organization
+    if not org:
+        checks.append("Who was the employer?")
+    elif employment.organization_inferred and len(roles) == 1 and not roles[0].client:
+        checks.append(f"Was this role at {org}?")
+    if employment.dates is None and org:
+        checks.append(f"When did you start and leave {org}?")
+    return checks
+
+
 def _role_checks(role: Role, parent: Role | None) -> list[str]:
     checks: list[str] = []
     if role.client and parent is not None:
@@ -138,16 +221,12 @@ def _role_checks(role: Role, parent: Role | None) -> list[str]:
         return checks
     if role.confidence == "low" and role.title and role.organization:
         checks.append(f"Is “{role.title}” the job title and “{role.organization}” the employer?")
-    if role.organization_inferred and role.organization:
-        checks.append(f"Was this role at {role.organization}?")
     if not role.title:
         checks.append("What was the job title?")
-    if not role.organization:
-        checks.append("Who was the employer?")
     if role.dates is None:
-        checks.append("When did this role start and end?")
+        checks.append("When did you start and finish in this title?")
     elif "YYYY" in (role.dates.start_format, role.dates.end_format):
-        checks.append("Which months did this role start and end?")
+        checks.append("Which months did you start and finish in this title?")
     return checks
 
 
@@ -159,24 +238,56 @@ def _framing(text: str) -> tuple[str, str]:
     return cut + "…", text
 
 
-def _role_facts(role: Role) -> dict[str, FactValue]:
+def _employment_facts(employment: Employment) -> dict[str, FactValue]:
     facts: dict[str, FactValue] = {
-        "employer": role.organization or "",
+        "employer": employment.organization or "",
+        "employment_type": employment.employment_type or "",
+        "location": employment.location or "",
+        **_span(employment.dates),
+    }
+    if employment.section == "volunteer":
+        facts["role_type"] = "volunteer"
+    if employment.dates is not None and not employment.tenure_written:
+        # Worked out from the titles' dates; the resume doesn't state it.
+        facts["tenure"] = "from positions"
+    return facts
+
+
+def _position_facts(role: Role, employment: Employment) -> dict[str, FactValue]:
+    facts: dict[str, FactValue] = {"title": role.title or "", **_span(role.dates)}
+    if role.location and role.location != employment.location:
+        facts["location"] = role.location
+    if role.employment_type and role.employment_type != employment.employment_type:
+        facts["employment_type"] = role.employment_type
+    return facts
+
+
+def _engagement_facts(role: Role) -> dict[str, FactValue]:
+    return {
         "client": role.client or "",
         "title": role.title or "",
         "location": role.location or "",
-        "employment_type": role.employment_type or "",
+        **_span(role.dates),
     }
-    if role.section == "volunteer":
-        facts["role_type"] = "volunteer"
-    if role.dates is not None:
-        if role.dates.start is not None:
-            facts["start"] = role.dates.start.iso()
-        if role.dates.current:
-            facts["end"] = "present"
-        elif role.dates.end is not None:
-            facts["end"] = role.dates.end.iso()
+
+
+def _span(dates: DateRange | None) -> dict[str, FactValue]:
+    facts: dict[str, FactValue] = {}
+    if dates is None:
+        return facts
+    if dates.start is not None:
+        facts["start"] = dates.start.iso()
+    if dates.current:
+        facts["end"] = "present"
+    elif dates.end is not None:
+        facts["end"] = dates.end.iso()
     return facts
+
+
+def _own(role: Role, employment: Employment) -> list[int]:
+    """The role's own lines, without the employer line its employment cites."""
+    own = [b for b in role.header_blocks if b not in employment.header_blocks]
+    return own or role.header_blocks
 
 
 def _figures(text: str) -> dict[str, FactValue]:

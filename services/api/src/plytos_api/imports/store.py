@@ -221,6 +221,8 @@ class ImportStore:
         if current is not None and current.state == "approved":
             raise ImportConflictError("That card is already approved.")
         chosen = content or progress.edits.get(ref) or proposal.content
+        # It sits under the saved card of its nearest approved parent.
+        chosen = chosen.model_copy(update={"parent": _saved_parent(result, progress, proposal)})
         card = cards.create_card(proposal.kind, chosen, author, status="approved")
         progress.cards[ref] = CardDecision(state="approved", card_id=card.id)
         self._save_progress(import_id, progress)
@@ -339,6 +341,26 @@ def _proposal(result: ImportResult, ref: str) -> ProposedCard:
         if card.ref == ref:
             return card
     raise ImportNotFoundError(ref)
+
+
+def _saved_parent(
+    result: ImportResult, progress: ImportProgress, proposal: ProposedCard
+) -> UUID | None:
+    """The saved card a proposal sits under once approved. A dropped parent passes
+    its children up to its own parent; one still undecided must be approved first."""
+    ref = proposal.parent_ref
+    while ref is not None:
+        parent = _proposal(result, ref)
+        decision = progress.cards.get(ref)
+        if decision is not None and decision.state == "approved":
+            return decision.card_id
+        if decision is not None and decision.state == "dropped":
+            ref = parent.parent_ref
+            continue
+        raise ImportConflictError(
+            f"Approve “{parent.content.framing.headline}” first. This card sits under it."
+        )
+    return None
 
 
 def _rebuild_edits(result: ImportResult, progress: ImportProgress) -> None:

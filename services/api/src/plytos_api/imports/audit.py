@@ -164,6 +164,7 @@ CARD_RULES = frozenset(
         "dates.gap",
         "dates.many_current",
         "dates.missing",
+        "dates.outside_tenure",
         "dates.overlap",
         "dates.undated_engagements",
         "dates.year_only",
@@ -777,6 +778,8 @@ def _date_checks(parsed: ParsedResume, blocks: dict[int, Block], today: date) ->
     overlaps: list[tuple[Role, Role, int]] = []
     for i, (a, a_start, a_end) in enumerate(spans):
         for b, b_start, b_end in spans[i + 1 :]:
+            if a.employment_ref is not None and a.employment_ref == b.employment_ref:
+                continue  # two titles at once at one employer is normal
             months = min(a_end, b_end) - max(a_start, b_start)
             if months >= 2:
                 overlaps.append((a, b, months))
@@ -791,6 +794,30 @@ def _date_checks(parsed: ParsedResume, blocks: dict[int, Block], today: date) ->
             "read as a mistake.",
             _header_blocks([a, b], blocks),
         )
+
+    tenures = {
+        e.ref: (e, _months(e.dates, today))
+        for e in parsed.employments
+        if e.dates is not None and e.tenure_written and e.header_blocks
+    }
+    for role, start, end in spans:
+        employment, tenure = tenures.get(role.employment_ref or "", (None, None))
+        if employment is None or tenure is None or employment.dates is None:
+            continue
+        if start < tenure[0] or end > tenure[1]:
+            yield _finding(
+                "dates.outside_tenure",
+                "fix",
+                "dates",
+                "A title's dates fall outside the employer's",
+                f"{_role_label(role)} ({role.dates.raw if role.dates else ''}) runs outside "
+                f"your time at {employment.organization or 'that employer'} "
+                f"({employment.dates.raw}). One of the two is likely a typo.",
+                [
+                    blocks[b]
+                    for b in dict.fromkeys([*employment.header_blocks[:1], *role.header_blocks[:1]])
+                ],
+            )
 
     chronological = sorted(work, key=lambda item: item[1])
     reach: tuple[Role, int] | None = None
