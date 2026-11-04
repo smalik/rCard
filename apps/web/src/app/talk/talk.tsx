@@ -50,6 +50,7 @@ import {
   nextCheckInLabel,
   offerCheckIns,
   type Proposal,
+  readingShared,
   resumeNext,
   resumeProgress,
   type Thread,
@@ -123,7 +124,8 @@ export function Talk({ initial, failed }: { initial: Thread; failed: boolean }) 
   const picker = useRef<HTMLInputElement>(null);
   const inBrowser = useInBrowser();
   const busy = pending !== null || sharing !== null;
-  const waiting = busy || awaitingReply(thread, clock);
+  const readingResume = sharing !== null || readingShared(thread, resumes);
+  const waiting = busy || readingResume || awaitingReply(thread, clock);
 
   // Checks for Plytos's answer often while it's thinking, and now and then
   // otherwise, since the wins it joins arrive a little after a note.
@@ -257,7 +259,7 @@ export function Talk({ initial, failed }: { initial: Thread; failed: boolean }) 
                 <i />
                 <i />
               </span>
-              {sharing !== null ? "Plytos is reading your resume" : "Plytos is reading your note"}
+              {readingResume ? "Plytos is reading your resume" : "Plytos is reading your note"}
             </>
           ) : checkIns.plan ? (
             <>

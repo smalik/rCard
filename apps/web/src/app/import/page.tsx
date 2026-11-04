@@ -12,16 +12,23 @@ export default async function ImportPage() {
   const session = await currentSession();
   if (!session) redirect("/sign-in");
 
-  // The newest import that still has cards waiting, so the person can pick up
-  // where they left off.
+  // The newest import still being read, or with cards still waiting, so the
+  // person can pick up where they left off.
   let unfinished: Unfinished | null = null;
   try {
     const imports = await listImports(session);
     const open = imports
       .map((i) => ({ ...i, left: i.cards - i.approved - i.dropped }))
-      .filter((i) => i.left > 0)
+      .filter((i) => i.state === "reading" || i.left > 0)
       .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
-    if (open) unfinished = { id: open.id, name: open.file.name, left: open.left };
+    if (open) {
+      unfinished = {
+        id: open.id,
+        name: open.file.name,
+        left: open.left,
+        reading: open.state === "reading",
+      };
+    }
   } catch (error) {
     if (!(error instanceof ApiError)) throw error;
   }

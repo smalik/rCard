@@ -191,6 +191,14 @@ export function merge(thread: Message[], incoming: Message[]): Message[] {
 
 // Plytos usually answers within a few seconds. Until it does, the thread
 // shows it's thinking and checks back often.
+// Whether a resume the person shared here is still being read. Plytos answers
+// once it's done, however long that takes.
+export function readingShared(thread: Message[], resumes: Record<string, ImportSummary>): boolean {
+  return thread.some(
+    (m) => m.author === "person" && !!m.import_id && resumes[m.import_id]?.state === "reading",
+  );
+}
+
 export function awaitingReply(thread: Message[], now: Date, withinSeconds = 45): boolean {
   const last = thread.at(-1);
   if (!last || last.author !== "person") return false;
@@ -259,6 +267,8 @@ export function monthLabel(value: string): string {
 // Where "Go through them" leads: open questions first, then the cards.
 export function resumeNext(resume: ImportSummary): { href: string; label: string } {
   const id = encodeURIComponent(resume.id);
+  if (resume.state === "reading") return { href: `/import/${id}`, label: "See how it's going" };
+  if (resume.state === "failed") return { href: `/import/${id}`, label: "See what went wrong" };
   if (resume.to_settle > 0) return { href: `/import/${id}/settle`, label: "Answer the questions" };
   const left = resume.cards - resume.approved - resume.dropped;
   if (left > 0) return { href: `/import/${id}/approve`, label: "Go through them" };
@@ -267,6 +277,8 @@ export function resumeNext(resume: ImportSummary): { href: string; label: string
 
 // "26 cards · 4 kept", for the resume card in the thread.
 export function resumeProgress(resume: ImportSummary): string {
+  if (resume.state === "reading") return "Reading it now";
+  if (resume.state === "failed") return "Couldn't read it";
   const parts = [`${resume.cards} ${resume.cards === 1 ? "card" : "cards"}`];
   if (resume.approved > 0) parts.push(`${resume.approved} kept`);
   if (resume.to_settle > 0) {

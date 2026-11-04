@@ -85,6 +85,25 @@ def test_a_reading_that_keeps_breaking_is_tried_three_times_then_given_up(
     assert answers(stores, user) == [COULD_NOT_READ]
 
 
+def test_a_reading_tried_again_after_it_failed_gets_its_own_answer(
+    db: Database, vault: Vault, make_user: Callable[[], UUID], stores: Stores, drained: None
+) -> None:
+    user = make_user()
+    import_id = keep(stores, user)
+    ImportWorker(db, vault, Broken(), retry_base_seconds=0).run_until_idle()
+    assert answers(stores, user) == [COULD_NOT_READ]
+
+    with stores(user) as (imports, _):
+        assert imports.read_again(import_id).state == "reading"
+    ImportWorker(db, vault, None).run_until_idle()
+    ImportWorker(db, vault, None).run_until_idle()
+
+    assert status(stores, user, import_id).state == "read"
+    failed, read = answers(stores, user)
+    assert failed == COULD_NOT_READ
+    assert read.startswith("I read it: ")
+
+
 def test_a_reading_that_breaks_waits_before_it_is_tried_again(
     db: Database, vault: Vault, make_user: Callable[[], UUID], stores: Stores, drained: None
 ) -> None:

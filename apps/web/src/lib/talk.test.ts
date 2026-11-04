@@ -17,6 +17,7 @@ import {
   offerCheckIns,
   type Proposal,
   type ProposedCard,
+  readingShared,
   resumeNext,
   resumeProgress,
   timeLabel,
@@ -135,6 +136,8 @@ describe("a shared resume", () => {
     id: "r1",
     created_at: "2026-11-04T10:00:00Z",
     updated_at: "2026-11-04T10:00:00Z",
+    state: "read",
+    stage: null,
     file: { format: "docx", size: 1000, name: "Resume.docx" },
     cards: 26,
     approved: 0,
@@ -159,6 +162,24 @@ describe("a shared resume", () => {
     expect(resumeProgress({ ...resume, approved: 4, to_settle: 1 })).toBe(
       "26 cards · 4 kept · 1 question",
     );
+  });
+
+  it("follows a reading that's under way or failed", () => {
+    const reading = { ...resume, state: "reading" as const, stage: "structure" as const, cards: 0 };
+    expect(resumeProgress(reading)).toBe("Reading it now");
+    expect(resumeNext(reading)).toEqual({ href: "/import/r1", label: "See how it's going" });
+    const failed = { ...resume, state: "failed" as const, cards: 0 };
+    expect(resumeProgress(failed)).toBe("Couldn't read it");
+    expect(resumeNext(failed).label).toBe("See what went wrong");
+  });
+
+  it("keeps the conversation waiting while a shared resume is read", () => {
+    const shared = { ...message("a", "2026-11-04T09:00:00Z"), import_id: "r1" };
+    const reading = { r1: { ...resume, state: "reading" as const } };
+    expect(readingShared([shared], reading)).toBe(true);
+    expect(readingShared([shared], { r1: resume })).toBe(false);
+    // An upload that wasn't shared here doesn't hold the conversation.
+    expect(readingShared([message("a", "2026-11-04T09:00:00Z")], reading)).toBe(false);
   });
 });
 

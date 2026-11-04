@@ -132,11 +132,15 @@ class AgentStore:
         return shared
 
     def answer_shared_resume(self, import_id: UUID, text: str) -> MessageView | None:
-        """Plytos says what it read from a resume shared in the conversation, once.
-        Nothing is said about an upload the person didn't share here."""
+        """Plytos says how the reading of a resume shared in the conversation went,
+        once for each time it's read: a reading tried again after it failed gets its
+        own answer. Nothing is said about an upload the person didn't share here."""
+        # The reading starts no earlier than run_after; read-again moves it to then.
         row = self._conn.execute(
-            "select bool_or(author = 'person'), bool_or(author = 'plytos')"
-            " from plytos.message where import_id = %s",
+            "select bool_or(m.author = 'person'),"
+            " bool_or(m.author = 'plytos' and m.created_at >= i.run_after)"
+            " from plytos.message m join plytos.resume_import i on i.id = m.import_id"
+            " where m.import_id = %s",
             (import_id,),
         ).fetchone()
         if row is None or not row[0] or row[1]:

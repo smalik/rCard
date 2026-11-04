@@ -75,11 +75,18 @@ of the Hybrid designs in Figma: Bring in, Check, Approve, and See strengths
 the card and its source side by side.
 
 1. **Start** (`/import`): upload a Word, PDF or text file, or paste text.
-   Photo and voice are shown as coming soon. If an import still has cards
-   waiting, the screen offers to pick up where the person left off.
-2. **Reading**: the browser posts the file to `/import/upload`, which passes
-   it to `POST /v1/imports`. While the API reads, the screen shows progress,
-   then ticks off what was found with the real counts.
+   Photo and voice are shown as coming soon. If an import is still being
+   read, or still has cards waiting, the screen offers to pick up where the
+   person left off.
+2. **Reading** (`/import/{id}` until it's read): the browser posts the file to
+   `/import/upload`, which passes it to `POST /v1/imports`. The API keeps it
+   and answers at once, and the browser moves to the import's own page. That
+   page asks `/import/{id}/status` every second or two and shows the real
+   stage (opening the file, reading pictures, sorting lines into jobs and
+   titles, checking where each line belongs), then ticks off what was found
+   with the real counts. The person can leave and come back. If the reading
+   fails, the page says why in plain words and offers to try again (unless
+   the file can't be opened at all), try another way, or delete it.
 3. **Check** (`/import/{id}`): the starting proof (accomplishments with and
    without numbers), an audit checklist (jobs and dates, numbers, repeats,
    skills, wording tips, what was left out), the person's file with "View
@@ -103,15 +110,42 @@ contact details stay on the server. Nothing goes to browser storage.
 
 | Endpoint | What it does |
 | --- | --- |
-| `POST /v1/imports` | Reads the file in the request body and keeps the import. The file name comes in `X-Plytos-Filename` |
-| `GET /v1/imports` | The person's imports, with counts of cards approved, for later, left out and questions open |
-| `GET /v1/imports/{id}` | One import: what was read, and the person's progress |
+| `POST /v1/imports` | Keeps the file in the request body and queues its reading. Answers 202 at once with the import's status. The file name comes in `X-Plytos-Filename` |
+| `GET /v1/imports` | The person's imports, with their state and counts of cards approved, for later, left out and questions open |
+| `GET /v1/imports/{id}` | One import: its state, what was read once it's read, and the person's progress |
+| `GET /v1/imports/{id}/status` | Where the reading is: `reading` with its stage, `read`, or `failed` with a short error code. Cheap enough to ask often |
+| `POST /v1/imports/{id}/read-again` | Puts a failed reading back in the queue with its tries counted afresh. 409 for one that didn't fail |
 | `GET /v1/imports/{id}/original` | The original file, byte for byte |
 | `POST /v1/imports/{id}/settle` | Answers one question. A chosen number rewrites the proposed cards that use the other |
 | `POST /v1/imports/{id}/cards/{ref}/decision` | Sets a proposed card aside for later, leaves it out, or undoes that |
 | `POST /v1/imports/{id}/cards/{ref}/place` | Answers a placement question: the card it sits under (`parent_ref`, or null for none) |
 | `POST /v1/imports/{id}/cards/{ref}/approve` | Makes the card, as proposed or in the person's edited words, as an approved card written by the person |
 | `DELETE /v1/imports/{id}` | Deletes the original file and everything read from it. Approved cards stay |
+
+## Reading in the background
+
+An upload is kept as soon as it arrives (state `reading`) and read by the
+import worker, which runs beside the agents' worker (see
+[agents.md](agents.md#the-runtime)). Migration
+[`0009_import_reading.sql`](../services/api/migrations/0009_import_reading.sql)
+adds the state, the stage, the tries and the lease.
+
+- `plytos.claim_resume_imports` (security definer, `for update skip locked`)
+  hands the worker readings that are due and leases them for five minutes. It
+  returns only ids; the worker then reads each one as its owner, so row-level
+  security holds.
+- Each stage is written in a short transaction of its own, so the person
+  waiting sees it. Nothing is held open while Claude reads. Stage names are
+  fixed words, never content.
+- A reading that breaks is tried again after 30 seconds, then 60, up to three
+  tries; the error is a short code such as `error_runtime_error`. A file that
+  can't be opened at all fails at once as `unreadable`.
+- A reading whose worker stopped is claimed again when its lease runs out.
+  One that runs out on its third try is given up on as `gave_up`.
+- What was read is written once, when the reading finishes, and never changes
+  after that; a trigger refuses any change to it, and a read import stays read.
+- Deleting an import while it's read is fine: the worker finds nothing to
+  finish and stops.
 
 ## Reading the structure with Claude
 

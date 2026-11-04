@@ -410,8 +410,11 @@ def test_a_reading_that_fails_says_so_and_can_be_tried_again(
     assert (again.json()["state"], again.json()["error_code"]) == ("reading", None)
     reads.run_until_idle()
     assert client.get(f"/v1/imports/{import_id}/status", headers=me).json()["state"] == "failed"
-    # Plytos doesn't say it twice.
-    assert len(client.get("/v1/conversation", headers=me).json()) == 2
+    # Plytos says how each reading went, once.
+    said = client.get("/v1/conversation", headers=me).json()
+    assert [m["author"] for m in said] == ["person", "plytos", "plytos"]
+    reads.run_until_idle()
+    assert len(client.get("/v1/conversation", headers=me).json()) == 3
 
     read = upload(client, reads, promotions_text().encode(), "Avery Quinn.txt", me)
     refused = client.post(f"/v1/imports/{read['id']}/read-again", headers=me)
