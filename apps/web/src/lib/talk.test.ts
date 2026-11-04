@@ -12,8 +12,11 @@ import {
   monthLabel,
   type Proposal,
   type ProposedCard,
+  resumeNext,
+  resumeProgress,
   withWording,
 } from "./talk";
+import type { ImportSummary } from "./imports";
 
 function message(id: string, at: string, author: Message["author"] = "person"): Message {
   return { id, author, channel: "app", text: id, created_at: at, proposal: null };
@@ -118,5 +121,37 @@ describe("offers", () => {
     expect(monthLabel("2026-09")).toBe("Sep 2026");
     expect(monthLabel("2026-13")).toBe("2026-13");
     expect(monthLabel("Fall 2026")).toBe("Fall 2026");
+  });
+});
+
+describe("a shared resume", () => {
+  const resume: ImportSummary = {
+    id: "r1",
+    created_at: "2026-11-04T10:00:00Z",
+    updated_at: "2026-11-04T10:00:00Z",
+    file: { format: "docx", size: 1000, name: "Resume.docx" },
+    cards: 26,
+    approved: 0,
+    later: 0,
+    dropped: 0,
+    to_settle: 2,
+  };
+
+  it("leads to the questions, then the cards, then what was read", () => {
+    expect(resumeNext(resume)).toEqual({
+      href: "/import/r1/settle",
+      label: "Answer the questions",
+    });
+    expect(resumeNext({ ...resume, to_settle: 0 }).href).toBe("/import/r1/approve");
+    expect(resumeNext({ ...resume, to_settle: 0, approved: 20, dropped: 6 }).href).toBe(
+      "/import/r1",
+    );
+  });
+
+  it("says how far along it is", () => {
+    expect(resumeProgress(resume)).toBe("26 cards · 2 questions");
+    expect(resumeProgress({ ...resume, approved: 4, to_settle: 1 })).toBe(
+      "26 cards · 4 kept · 1 question",
+    );
   });
 });

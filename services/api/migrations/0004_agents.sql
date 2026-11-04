@@ -141,6 +141,11 @@ create trigger proposal_decided_once
 
 -- The person's messages and Plytos's replies, in order. A reply that offers
 -- something to keep points at its proposal. Messages never change.
+-- A resume shared in the conversation points at its import. Deleting the
+-- import deletes the file and what was read from it; the messages stay and
+-- lose the link.
+alter table plytos.resume_import add constraint resume_import_id_owner unique (id, owner_id);
+
 create table plytos.message (
   id uuid primary key default plytos.uuid_v7(),
   owner_id uuid not null references plytos.app_user (id),
@@ -148,9 +153,12 @@ create table plytos.message (
   channel text not null default 'app' check (channel in ('app', 'text_message', 'email')),
   body_ciphertext bytea not null,
   proposal_id uuid,
+  import_id uuid,
   created_at timestamptz not null default now(),
   unique (id, owner_id),
   foreign key (proposal_id, owner_id) references plytos.proposal (id, owner_id),
+  foreign key (import_id, owner_id) references plytos.resume_import (id, owner_id)
+    on delete set null (import_id),
   constraint only_plytos_offers_proposals
     check (proposal_id is null or author = 'plytos')
 );

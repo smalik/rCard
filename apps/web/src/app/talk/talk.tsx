@@ -4,14 +4,33 @@
 // Plytos answers, keeps the notes, and later offers wins it joined from them.
 // Nothing becomes a card until the person keeps it.
 
-import { faArrowUp, faCheck, faPen } from "@fortawesome/free-solid-svg-icons";
+import {
+  faArrowUp,
+  faCheck,
+  faFileLines,
+  faPaperclip,
+  faPen,
+} from "@fortawesome/free-solid-svg-icons";
 import Link from "next/link";
-import { type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  type FormEvent,
+  type KeyboardEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useSyncExternalStore } from "react";
 
 import { AppHeader, TabBar } from "../../components/hybrid";
 import { Icon } from "../../components/icon";
 import { HEADLINE_MAX } from "../../lib/cards";
+import {
+  ACCEPT_RESUME,
+  FILENAME_HEADER,
+  fileProblem,
+  type ImportSummary,
+} from "../../lib/imports";
 import {
   AGENT_LABELS,
   awaitingReply,
@@ -23,6 +42,9 @@ import {
   merge,
   monthLabel,
   type Proposal,
+  resumeNext,
+  resumeProgress,
+  type Thread,
   withWording,
 } from "../../lib/talk";
 
@@ -56,15 +78,26 @@ function useInBrowser(): boolean {
   );
 }
 
-export function Talk({ initial, failed }: { initial: Message[]; failed: boolean }) {
-  const [thread, setThread] = useState(initial);
+type Resumes = Record<string, ImportSummary>;
+
+function byId(resumes: ImportSummary[]): Resumes {
+  return Object.fromEntries(resumes.map((r) => [r.id, r]));
+}
+
+export function Talk({ initial, failed }: { initial: Thread; failed: boolean }) {
+  const [thread, setThread] = useState(initial.messages);
+  const [resumes, setResumes] = useState(() => byId(initial.resumes));
   const [clock, setClock] = useState(() => new Date());
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState<string | null>(null);
+  // The name of a resume on its way to Plytos.
+  const [sharing, setSharing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const end = useRef<HTMLDivElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
   const inBrowser = useInBrowser();
-  const waiting = pending !== null || awaitingReply(thread, clock);
+  const busy = pending !== null || sharing !== null;
+  const waiting = busy || awaitingReply(thread, clock);
 
   // Checks for Plytos's answer often while it's thinking, and now and then
   // otherwise, since the wins it joins arrive a little after a note.
@@ -76,9 +109,12 @@ export function Talk({ initial, failed }: { initial: Message[]; failed: boolean 
           if (!stopped) setClock(new Date());
           return;
         }
-        const fresh = await send<Message[]>("/talk/messages");
+        const fresh = await send<Thread>("/talk/messages");
         if (stopped) return;
-        if (fresh.ok) setThread((t) => merge(t, fresh.data));
+        if (fresh.ok) {
+          setThread((t) => merge(t, fresh.data.messages));
+          setResumes(byId(fresh.data.resumes));
+        }
         setClock(new Date());
       },
       waiting ? CHECK_WHILE_WAITING_MS : CHECK_WHILE_OPEN_MS,
@@ -91,12 +127,12 @@ export function Talk({ initial, failed }: { initial: Message[]; failed: boolean 
 
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end" });
-  }, [thread.length, pending, waiting]);
+  }, [thread.length, pending, sharing, waiting]);
 
   async function say(event?: FormEvent) {
     event?.preventDefault();
     const text = cleanMessage(draft);
-    if (text === null || pending !== null) return;
+    if (text === null || busy) return;
     setPending(text);
     setDraft("");
     setError(null);
@@ -109,6 +145,48 @@ export function Talk({ initial, failed }: { initial: Message[]; failed: boolean 
       setError(saved.error);
     }
     setPending(null);
+  }
+
+  async function share(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || busy) return;
+    const problem = fileProblem(file);
+    setError(problem);
+    if (problem) return;
+    setSharing(file.name);
+    let result: Sent<{ messages: Message[]; resume: ImportSummary }>;
+    try {
+      const response = await fetch("/talk/resume", {
+        method: "POST",
+        body: file,
+        headers: {
+          "Content-Type": "application/octet-stream",
+          [FILENAME_HEADER]: encodeURIComponent(file.name),
+        },
+      });
+      const data = (await response.json().catch(() => null)) as
+        | { messages: Message[]; resume: ImportSummary; error?: string }
+        | null;
+      result =
+        response.ok && data
+          ? { ok: true, data }
+          : { ok: false, error: data?.error ?? "Plytos couldn't read that just now." };
+    } catch {
+      result = { ok: false, error: "The connection dropped. Check you're online and try again." };
+    }
+    if (result.ok) {
+      const { messages, resume } = result.data;
+      setResumes((r) => ({ ...r, [resume.id]: resume }));
+      setThread((t) => merge(t, messages));
+    } else {
+      setError(result.error);
+    }
+    setSharing(null);
+  }
+
+  function pick() {
+    picker.current?.click();
   }
 
   function onKey(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -138,7 +216,7 @@ export function Talk({ initial, failed }: { initial: Message[]; failed: boolean 
                 <i />
                 <i />
               </span>
-              Plytos is reading your note
+              {sharing !== null ? "Plytos is reading your resume" : "Plytos is reading your note"}
             </>
           ) : (
             "Tell it as it happens. I'll join your notes into wins."
@@ -152,18 +230,30 @@ export function Talk({ initial, failed }: { initial: Message[]; failed: boolean 
             Plytos couldn&apos;t load the conversation just now. Try again in a moment.
           </p>
         )}
-        {!failed && thread.length === 0 && pending === null && <Welcome />}
+        {!failed && thread.length === 0 && !busy && <Welcome onResume={pick} />}
         {groups.map((group, i) => (
           <div className="talk-day" key={group.label || i}>
             {group.label && <p className="talk-day-label">{group.label}</p>}
             {group.messages.map((m) => (
-              <Line key={m.id} message={m} onDecided={decided} />
+              <Line
+                key={m.id}
+                message={m}
+                resume={m.import_id ? resumes[m.import_id] : undefined}
+                onDecided={decided}
+              />
             ))}
           </div>
         ))}
         {pending !== null && (
           <div className="said said-pending">
             <p>{pending}</p>
+          </div>
+        )}
+        {sharing !== null && (
+          <div className="said said-pending">
+            <p className="said-file">
+              <Icon icon={faFileLines} size={14} /> {sharing}
+            </p>
           </div>
         )}
         {waiting && pending === null && (
@@ -185,6 +275,25 @@ export function Talk({ initial, failed }: { initial: Message[]; failed: boolean 
             {error}
           </p>
         )}
+        <button
+          className="attach"
+          type="button"
+          aria-label="Share your resume"
+          title="Share your resume"
+          disabled={busy}
+          onClick={pick}
+        >
+          <Icon icon={faPaperclip} size={16} />
+        </button>
+        <input
+          ref={picker}
+          className="visually-hidden"
+          type="file"
+          accept={ACCEPT_RESUME}
+          tabIndex={-1}
+          aria-hidden="true"
+          onChange={share}
+        />
         <label className="visually-hidden" htmlFor="say">
           Tell Plytos what happened
         </label>
@@ -202,7 +311,7 @@ export function Talk({ initial, failed }: { initial: Message[]; failed: boolean 
           className="send"
           type="submit"
           aria-label="Send"
-          disabled={cleanMessage(draft) === null || pending !== null}
+          disabled={cleanMessage(draft) === null || busy}
         >
           <Icon icon={faArrowUp} size={16} />
         </button>
@@ -212,7 +321,7 @@ export function Talk({ initial, failed }: { initial: Message[]; failed: boolean 
   );
 }
 
-function Welcome() {
+function Welcome({ onResume }: { onResume: () => void }) {
   return (
     <div className="plytos">
       <span className="plytos-mark" aria-hidden="true">
@@ -228,20 +337,33 @@ function Welcome() {
           show it to you, and nothing becomes a card until you keep it.
         </p>
         <div className="talk-chips">
-          <Link className="talk-chip" href="/import">
+          <button className="talk-chip" type="button" onClick={onResume}>
             Start from my resume
-          </Link>
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-function Line({ message, onDecided }: { message: Message; onDecided: (p: Proposal) => void }) {
+function Line({
+  message,
+  resume,
+  onDecided,
+}: {
+  message: Message;
+  resume: ImportSummary | undefined;
+  onDecided: (p: Proposal) => void;
+}) {
   if (message.author === "person") {
     return (
       <div className="said">
         <p>{message.text}</p>
+        {resume && (
+          <p className="said-file">
+            <Icon icon={faFileLines} size={14} /> {resume.file.name}
+          </p>
+        )}
       </div>
     );
   }
@@ -255,6 +377,7 @@ function Line({ message, onDecided }: { message: Message; onDecided: (p: Proposa
       </span>
       <div className="plytos-body">
         <p className="plytos-text">{message.text}</p>
+        {resume && <ResumeCard resume={resume} />}
         {proposal?.body.card && <Offer proposal={proposal} onDecided={onDecided} />}
         {proposal && (
           <p className="trail">
@@ -264,6 +387,30 @@ function Line({ message, onDecided }: { message: Message; onDecided: (p: Proposa
         )}
       </div>
     </div>
+  );
+}
+
+// A resume shared in the conversation: what was read, and the next step.
+function ResumeCard({ resume }: { resume: ImportSummary }) {
+  const next = resumeNext(resume);
+  return (
+    <article className="resume-card" aria-label="Your resume">
+      <p className="resume-file">
+        <Icon icon={faFileLines} size={14} />
+        <span>{resume.file.name}</span>
+      </p>
+      <p className="resume-progress">{resumeProgress(resume)}</p>
+      <div className="offer-actions">
+        <Link className="keep" href={next.href}>
+          {next.label}
+        </Link>
+        {next.href !== `/import/${encodeURIComponent(resume.id)}` && (
+          <Link className="quiet" href={`/import/${encodeURIComponent(resume.id)}`}>
+            See what I read
+          </Link>
+        )}
+      </div>
+    </article>
   );
 }
 

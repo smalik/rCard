@@ -2,6 +2,7 @@
 // and the small pure helpers the thread uses. See docs/agents.md.
 
 import type { CardContent, CardKind } from "./cards";
+import type { ImportSummary } from "./imports";
 
 export const MAX_MESSAGE = 4000;
 
@@ -57,7 +58,12 @@ export type Message = {
   text: string;
   created_at: string;
   proposal: Proposal | null;
+  // A resume shared in the conversation, while its import is kept.
+  import_id?: string | null;
 };
+
+// What the thread needs to show: the messages and the resumes they share.
+export type Thread = { messages: Message[]; resumes: ImportSummary[] };
 
 // The text to send, or null when there's nothing to send.
 export function cleanMessage(text: string): string | null {
@@ -141,4 +147,23 @@ export function monthLabel(value: string): string {
   if (!match) return value;
   const month = MONTHS[Number(match[2]) - 1];
   return month ? `${month} ${match[1]}` : value;
+}
+
+// Where "Go through them" leads: open questions first, then the cards.
+export function resumeNext(resume: ImportSummary): { href: string; label: string } {
+  const id = encodeURIComponent(resume.id);
+  if (resume.to_settle > 0) return { href: `/import/${id}/settle`, label: "Answer the questions" };
+  const left = resume.cards - resume.approved - resume.dropped;
+  if (left > 0) return { href: `/import/${id}/approve`, label: "Go through them" };
+  return { href: `/import/${id}`, label: "See what I read" };
+}
+
+// "26 cards · 4 kept", for the resume card in the thread.
+export function resumeProgress(resume: ImportSummary): string {
+  const parts = [`${resume.cards} ${resume.cards === 1 ? "card" : "cards"}`];
+  if (resume.approved > 0) parts.push(`${resume.approved} kept`);
+  if (resume.to_settle > 0) {
+    parts.push(`${resume.to_settle} ${resume.to_settle === 1 ? "question" : "questions"}`);
+  }
+  return parts.join(" · ");
 }

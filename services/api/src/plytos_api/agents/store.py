@@ -86,9 +86,18 @@ class AgentStore:
         self._event("ai", "message.sent", "message", message.id, agent)
         return message
 
+    def share_resume(self, import_id: UUID, reading: str) -> list[MessageView]:
+        """The person shares a resume in the conversation, and Plytos says what
+        it read. The import itself is kept by ImportStore."""
+        shared = self._message("person", "Here's my resume.", "app", None, import_id)
+        self._event("person", "message.sent", "message", shared.id)
+        answer = self._message("plytos", reading, "app", None, import_id)
+        self._event("system", "message.sent", "message", answer.id, "import")
+        return [shared, answer]
+
     def message(self, message_id: UUID) -> MessageView:
         row = self._conn.execute(
-            "select id, author, channel, body_ciphertext, proposal_id, created_at"
+            "select id, author, channel, body_ciphertext, proposal_id, created_at, import_id"
             " from plytos.message where id = %s",
             (message_id,),
         ).fetchone()
@@ -99,7 +108,7 @@ class AgentStore:
     def conversation(self, limit: int = 50, before: UUID | None = None) -> list[MessageView]:
         """The latest messages, oldest first. `before` pages further back."""
         rows = self._conn.execute(
-            "select id, author, channel, body_ciphertext, proposal_id, created_at"
+            "select id, author, channel, body_ciphertext, proposal_id, created_at, import_id"
             " from plytos.message"
             " where %(before)s::uuid is null or (created_at, id) <"
             "   (select created_at, id from plytos.message where id = %(before)s)"
@@ -348,13 +357,19 @@ class AgentStore:
     # -- internals -------------------------------------------------------------
 
     def _message(
-        self, author: str, text: str, channel: Channel, proposal_id: UUID | None
+        self,
+        author: str,
+        text: str,
+        channel: Channel,
+        proposal_id: UUID | None,
+        import_id: UUID | None = None,
     ) -> MessageView:
         message_id = uuid7()
         row = self._conn.execute(
             "insert into plytos.message (id, owner_id, author, channel, body_ciphertext,"
-            " proposal_id) values (%s, %s, %s, %s, %s, %s)"
-            " returning id, author, channel, body_ciphertext, proposal_id, created_at",
+            " proposal_id, import_id) values (%s, %s, %s, %s, %s, %s, %s)"
+            " returning id, author, channel, body_ciphertext, proposal_id, created_at,"
+            " import_id",
             (
                 message_id,
                 self._user_id,
@@ -362,6 +377,7 @@ class AgentStore:
                 channel,
                 self._cipher.encrypt(text.encode(), _aad("message", message_id)),
                 proposal_id,
+                import_id,
             ),
         ).fetchone()
         assert row is not None
@@ -397,6 +413,7 @@ class AgentStore:
             text=self._cipher.decrypt(bytes(row[3]), _aad("message", row[0])).decode(),
             proposal=proposal,
             created_at=row[5],
+            import_id=row[6],
         )
 
     def _proposal_view(self, row: Sequence[Any]) -> ProposalView:

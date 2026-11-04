@@ -1,5 +1,5 @@
 from collections.abc import Iterator
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,6 +13,7 @@ from plytos_api.keys import Vault
 from plytos_api.main import create_app
 
 from .conftest import DbUrls, main_content
+from .resume_samples import promotions_text
 
 
 @pytest.fixture(scope="module")
@@ -307,3 +308,28 @@ def test_conversation_over_http(client: TestClient, db: Database, vault: Vault) 
     for state, proposal_id in (("kept", keep_id), ("dismissed", drop_id)):
         listed = client.get("/v1/proposals", params={"state": state}, headers=me).json()
         assert [p["id"] for p in listed] == [str(proposal_id)]
+
+
+def test_sharing_a_resume_in_the_conversation(client: TestClient) -> None:
+    me, other = as_user("api-resume"), as_user("api-resume-other")
+    shared = client.post(
+        "/v1/conversation/resume",
+        content=promotions_text().encode(),
+        headers=me | {"X-Plytos-Filename": quote("Avery Quinn.txt")},
+    )
+    assert shared.status_code == 201, shared.text
+    body = shared.json()
+    person, plytos = body["messages"]
+    assert person["author"] == "person" and plytos["author"] == "plytos"
+    assert plytos["text"].startswith("I read it:")
+    assert body["resume"]["file"]["name"] == "Avery Quinn.txt"
+    assert body["resume"]["cards"] > 0 and body["resume"]["approved"] == 0
+    assert person["import_id"] == plytos["import_id"] == body["resume"]["id"]
+    assert [m["id"] for m in client.get("/v1/conversation", headers=me).json()] == [
+        person["id"],
+        plytos["id"],
+    ]
+    assert client.get("/v1/conversation", headers=other).json() == []
+    assert client.get("/v1/agent-runs", headers=me).json() == []
+    empty = client.post("/v1/conversation/resume", content=b"", headers=me)
+    assert empty.status_code == 422

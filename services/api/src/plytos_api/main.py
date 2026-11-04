@@ -21,6 +21,7 @@ from plytos_api.agents.model import (
     RunView,
     TidbitView,
 )
+from plytos_api.agents.resume import reading
 from plytos_api.agents.runtime import BackgroundWorker, Worker
 from plytos_api.agents.store import AgentRecordNotFoundError, AgentStore, ProposalConflictError
 from plytos_api.auth import resolve_user
@@ -131,6 +132,11 @@ class Say(BaseModel):
 class Keep(BaseModel):
     # The person's edits to the proposed card, if they changed it before keeping it.
     content: MainContent | None = None
+
+
+class Shared(BaseModel):
+    messages: list[MessageView]
+    resume: ImportSummary
 
 
 class Kept(BaseModel):
@@ -425,6 +431,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """Saves the person's message. The Listener reads it and answers shortly after."""
         with db.as_user(user_id) as conn:
             return agents(conn, user_id).say(body.text)
+
+    @app.post("/v1/conversation/resume", status_code=status.HTTP_201_CREATED)
+    async def share_resume(request: Request, user_id: User) -> Shared:
+        """The person shares a resume in the conversation. It's read and kept like
+        any import, and Plytos answers with what it found. The file name comes in
+        a header, never the URL."""
+        data, filename = await read_upload(request)
+        result = await run_in_threadpool(import_resume, data, filename, reader=reader)
+
+        def store() -> Shared:
+            with db.as_user(user_id) as conn:
+                store = imports(conn, user_id)
+                kept = store.create(data, filename, result)
+                messages = agents(conn, user_id).share_resume(kept.id, reading(result))
+                return Shared(messages=messages, resume=store.summary(kept.id))
+
+        return await run_in_threadpool(store)
 
     @app.get("/v1/proposals")
     def proposals(user_id: User, state: ProposalState | None = "open") -> list[ProposalView]:

@@ -92,6 +92,8 @@ class MessageView(BaseModel):
     text: str
     created_at: datetime
     proposal: ProposalView | None = None
+    # A resume shared in the conversation, while its import is kept.
+    import_id: UUID | None = None
 
 
 class TidbitView(BaseModel):

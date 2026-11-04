@@ -10,6 +10,23 @@ import { BODY_MAX, type CardContent, type CardKind, type FactValue, HEADLINE_MAX
 export const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
 export const MAX_PASTE_CHARS = 60_000;
 export const FILENAME_HEADER = "X-Plytos-Filename";
+
+// What the file picker offers: Word, PDF and plain text.
+export const ACCEPT_RESUME =
+  ".docx,.pdf,.txt,application/pdf,text/plain," +
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+// Why a picked file can't be read, in words for the person, or null.
+export function fileProblem(file: { name: string; size: number }): string | null {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".doc")) {
+    return "That's an older Word file. Save it as .docx or PDF first, then try again.";
+  }
+  if (!/\.(docx|pdf|txt)$/.test(name)) return "Plytos can read Word (.docx), PDF and text files.";
+  if (file.size > MAX_IMPORT_BYTES) return "Resumes over 5 MB aren't supported.";
+  if (file.size === 0) return "The file is empty.";
+  return null;
+}
 // Cards per sitting: start with the strongest few, and do the rest any time.
 export const BATCH_SIZE = 10;
 

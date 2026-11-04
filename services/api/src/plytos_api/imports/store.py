@@ -15,8 +15,9 @@ The connection passed in must already be scoped to the person
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 import psycopg
@@ -236,33 +237,41 @@ class ImportStore:
             " result_ciphertext, progress_ciphertext from plytos.resume_import"
             " order by created_at desc"
         ).fetchall()
-        out: list[ImportSummary] = []
-        for r in rows:
-            import_id: UUID = r[0]
-            result = ImportResult.model_validate_json(self._open("result", import_id, r[6]))
-            progress = ImportProgress.model_validate_json(self._open("progress", import_id, r[7]))
-            states = [d.state for d in progress.cards.values()]
-            unsettled = [
-                i
-                for i in to_settle(result)
-                if (s := progress.settled.get(str(i))) is None or s.answer == "later"
-            ]
-            out.append(
-                ImportSummary(
-                    id=import_id,
-                    created_at=r[1],
-                    updated_at=r[2],
-                    file=ImportFile(
-                        format=r[3], size=r[4], name=self._open("name", import_id, r[5]).decode()
-                    ),
-                    cards=len(result.cards),
-                    approved=states.count("approved"),
-                    later=states.count("later"),
-                    dropped=states.count("dropped"),
-                    to_settle=len(unsettled),
-                )
-            )
-        return out
+        return [self._summary(r) for r in rows]
+
+    def summary(self, import_id: UUID) -> ImportSummary:
+        row = self._conn.execute(
+            "select id, created_at, updated_at, file_format, file_size, name_ciphertext,"
+            " result_ciphertext, progress_ciphertext from plytos.resume_import where id = %s",
+            (import_id,),
+        ).fetchone()
+        if row is None:
+            raise ImportNotFoundError(str(import_id))
+        return self._summary(row)
+
+    def _summary(self, r: Sequence[Any]) -> ImportSummary:
+        import_id: UUID = r[0]
+        result = ImportResult.model_validate_json(self._open("result", import_id, r[6]))
+        progress = ImportProgress.model_validate_json(self._open("progress", import_id, r[7]))
+        states = [d.state for d in progress.cards.values()]
+        unsettled = [
+            i
+            for i in to_settle(result)
+            if (s := progress.settled.get(str(i))) is None or s.answer == "later"
+        ]
+        return ImportSummary(
+            id=import_id,
+            created_at=r[1],
+            updated_at=r[2],
+            file=ImportFile(
+                format=r[3], size=r[4], name=self._open("name", import_id, r[5]).decode()
+            ),
+            cards=len(result.cards),
+            approved=states.count("approved"),
+            later=states.count("later"),
+            dropped=states.count("dropped"),
+            to_settle=len(unsettled),
+        )
 
     def get(self, import_id: UUID) -> ImportView:
         row = self._conn.execute(

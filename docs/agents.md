@@ -24,7 +24,7 @@ encrypted with that person's data key.
 
 | Record | Table | What it is |
 | --- | --- | --- |
-| Message | `plytos.message` | The conversation, from the person or from Plytos. Append-only: the app can't change or delete a message |
+| Message | `plytos.message` | The conversation, from the person or from Plytos. Append-only: the app can't change or delete a message. A message can point at a resume shared in the conversation (`import_id`); deleting the import removes the link |
 | Tidbit | `plytos.tidbit` | A note about work, kept as the person wrote it, forever. The Listener reads it once and files it under a job |
 | Proposal | `plytos.proposal` | Something an agent offers: a new card, and later a version, variant, resume, question or insight. Decided once |
 | Agent run | `plytos.agent_run` | One piece of agent work: queued, running, done or failed, with what it cost in tokens. Never content |
@@ -83,12 +83,23 @@ missing. A draft that gains a new note replaces the old one. A draft that
 claims a number its notes don't contain is dropped: the Stitcher joins and
 words what the person said, never adds to it.
 
+## A resume in the conversation
+
+The person can share a resume from the composer (or "Start from my resume"
+on an empty thread). It's read and kept like any import (see
+[resume-import.md](resume-import.md)), and Plytos answers in the thread with
+what it found: employers, titles, results, and how many questions need an
+answer first. The resume card in the thread leads to the next step: the
+questions, then the cards, then what was read. Going through the cards still
+uses the import screens for now.
+
 ## API
 
 | Method and path | What it does |
 | --- | --- |
 | `GET /v1/conversation?before=&limit=` | The latest messages, oldest first. `before` pages back |
 | `POST /v1/conversation` | The person says something. The Listener answers shortly after |
+| `POST /v1/conversation/resume` | The person shares a resume (the file is the body, its name in `X-Plytos-Filename`). Returns both messages and the import's summary |
 | `GET /v1/proposals?state=open` | Proposals, by state |
 | `POST /v1/proposals/{id}/keep` | Keeps a proposed card, as proposed or with the person's edits (`content`) |
 | `POST /v1/proposals/{id}/dismiss` | Says no to a proposal |

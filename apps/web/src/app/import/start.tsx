@@ -23,8 +23,9 @@ import { type ChangeEvent, type ReactNode, useRef, useState } from "react";
 import { PageHead, SketchCard } from "../../components/hybrid";
 import { Icon } from "../../components/icon";
 import {
+  ACCEPT_RESUME,
   FILENAME_HEADER,
-  MAX_IMPORT_BYTES,
+  fileProblem,
   MAX_PASTE_CHARS,
   plural,
   type Review,
@@ -39,21 +40,6 @@ type Sending = {
   review: Review | null;
   error: string | null;
 };
-
-const ACCEPT =
-  ".docx,.pdf,.txt,application/pdf,text/plain," +
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-
-function fileProblem(file: File): string | null {
-  const name = file.name.toLowerCase();
-  if (name.endsWith(".doc")) {
-    return "That's an older Word file. Save it as .docx or PDF first, then try again.";
-  }
-  if (!/\.(docx|pdf|txt)$/.test(name)) return "Plytos can read Word (.docx), PDF and text files.";
-  if (file.size > MAX_IMPORT_BYTES) return "Resumes over 5 MB aren't supported.";
-  if (file.size === 0) return "The file is empty.";
-  return null;
-}
 
 export function Start({ unfinished }: { unfinished: Unfinished | null }) {
   const [mode, setMode] = useState<"start" | "paste">("start");
@@ -222,7 +208,7 @@ export function Start({ unfinished }: { unfinished: Unfinished | null }) {
           ref={input}
           className="visually-hidden"
           type="file"
-          accept={ACCEPT}
+          accept={ACCEPT_RESUME}
           onChange={onFile}
           tabIndex={-1}
           aria-hidden="true"

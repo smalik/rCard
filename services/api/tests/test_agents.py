@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from plytos_api.agents.listener import FALLBACK_REPLY, Listener, ListenerAnswer
 from plytos_api.agents.model import NewCard, ProposalBody, Reading
+from plytos_api.agents.resume import reading
 from plytos_api.agents.runtime import Agent, Context, Worker
 from plytos_api.agents.stitcher import StitchedWin, Stitcher, StitcherAnswer
 from plytos_api.agents.store import (
@@ -30,7 +31,11 @@ from plytos_api.agents.thinking import Usage
 from plytos_api.cards.model import Framing, MainContent
 from plytos_api.cards.repository import Author, CardRepository
 from plytos_api.db import Database
+from plytos_api.imports.pipeline import import_resume
+from plytos_api.imports.store import ImportStore
 from plytos_api.keys import Vault
+
+from .resume_samples import promotions_text
 
 ME = Author("person")
 
@@ -539,3 +544,58 @@ def test_the_stitcher_joins_notes_into_one_win_and_improves_it(
         [win] = [c for c in cards.list_cards() if c.kind == "accomplishment"]
         assert win.parent_id == role
         assert store.proposals() == []
+
+
+# -- a resume shared in the conversation -----------------------------------------
+
+
+def share(db: Database, vault: Vault, user: UUID) -> tuple[UUID, list[UUID]]:
+    data = promotions_text().encode()
+    result = import_resume(data, "Avery Quinn.txt")
+    with db.as_user(user) as conn:
+        cipher = vault.cipher_for(conn, user)
+        kept = ImportStore(conn, user, cipher).create(data, "Avery Quinn.txt", result)
+        said = AgentStore(conn, user, cipher).share_resume(kept.id, reading(result))
+    return kept.id, [m.id for m in said]
+
+
+def test_a_shared_resume_sits_in_the_conversation_until_it_is_deleted(
+    make_user, stores: Stores, db: Database, vault: Vault
+) -> None:
+    user = make_user()
+    import_id, _ = share(db, vault, user)
+    with stores(user) as (store, _):
+        shared, answer = store.conversation()
+        assert (shared.author, shared.import_id) == ("person", import_id)
+        assert (answer.author, answer.import_id) == ("plytos", import_id)
+        assert answer.text == reading(import_resume(promotions_text().encode(), "Avery Quinn.txt"))
+        assert answer.text.startswith("I read it: ")
+        assert answer.text.endswith("Nothing becomes a card until you keep it.")
+        assert store.runs() == []  # Sharing a resume isn't a note for the Listener.
+    with db.as_user(user) as conn:
+        ImportStore(conn, user, vault.cipher_for(conn, user)).delete(import_id)
+    with stores(user) as (store, _):
+        assert [(m.author, m.import_id) for m in store.conversation()] == [
+            ("person", None),
+            ("plytos", None),
+        ]
+
+
+def test_a_message_cannot_point_at_someone_elses_resume(
+    make_user, db: Database, vault: Vault
+) -> None:
+    alice, bob = make_user(), make_user()
+    import_id, _ = share(db, vault, alice)
+    with pytest.raises(errors.ForeignKeyViolation), db.as_user(bob) as conn:
+        conn.execute(
+            "insert into plytos.message (owner_id, author, body_ciphertext, import_id)"
+            " values (%s, 'person', '\\x00', %s)",
+            (bob, import_id),
+        )
+
+
+def test_reading_says_what_was_found_and_what_is_left() -> None:
+    result = import_resume(promotions_text().encode(), "Avery Quinn.txt")
+    empty = result.model_copy(update={"cards": [], "findings": []})
+    assert reading(empty).startswith("I couldn't find roles or results")
+    assert "a quick answer first" in reading(result) or "Go through them" in reading(result)
