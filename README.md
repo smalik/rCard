@@ -6,6 +6,7 @@ career, and recombine cards for each application.
 
 - Product spec: [Plytos v1 candidate experience](https://claude.ai/artifact/FgjGX7dgMcExXqs6fmj2cy)
 - Data model and versioning rules: [docs/data-model.md](docs/data-model.md)
+- Resume import and its audit: [docs/resume-import.md](docs/resume-import.md)
 - Instructions for AI coding agents: [CLAUDE.md](CLAUDE.md)
 
 ## What's here
@@ -50,6 +51,14 @@ above, so restart with the same value if you want to keep reading old cards.
 Tests: `uv run pytest` in `services/api` (uses the same Postgres, in a
 throwaway database) and `npm test` in `apps/web`.
 
+To try the resume import on a file without running anything else:
+
+```sh
+cd services/api
+uv run python -m plytos_api.imports "path/to/resume.docx"    # Markdown audit
+uv run python -m plytos_api.imports "path/to/resume.pdf" --json
+```
+
 ## Status
 
 This is milestone M0, Foundations. Built so far:
@@ -60,8 +69,13 @@ This is milestone M0, Foundations. Built so far:
   wrapped by Cloud KMS, `noindex` everywhere, no public API.
 - Infrastructure as code for Google Cloud and CI with secret scanning.
 
-Still to come in M0: passkey sign-in, resume import (JSON Resume and PDF), and
-starting US carrier registration for check-in texts.
+- Resume import: reads Word, PDF and text resumes, splits them into proposed
+  cards, and audits them for problems a recruiter or an applicant tracking
+  system would trip on ([docs/resume-import.md](docs/resume-import.md)).
+
+Still to come in M0: a review screen for imports in the web app, and starting
+US carrier registration for check-in texts. Sign-in is deferred until much
+later; until then the app runs as a dev user.
 
 ## The 2014 to 2017 R-Card code
 

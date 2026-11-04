@@ -120,3 +120,44 @@ def test_unknown_parent_target_is_not_found(client: TestClient) -> None:
         headers=as_user("parent-check"),
     )
     assert response.status_code == 404
+
+
+def test_resume_preview_returns_cards_and_audit_without_storing(client: TestClient) -> None:
+    from .resume_samples import messy_docx
+
+    me = as_user("importer")
+    before = client.get("/v1/cards", headers=me).json()
+    response = client.post(
+        "/v1/imports/preview",
+        content=messy_docx(),
+        headers={**me, "X-Plytos-Filename": "Jordan%20Rivera%20Resume.docx"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    result = response.json()
+    assert result["facts"]["filename"] == "Jordan Rivera Resume.docx"
+    assert len(result["roles"]) == 4
+    assert any(f["rule"] == "consistency.tense" for f in result["findings"])
+    assert client.get("/v1/cards", headers=me).json() == before
+
+    kept = [c for c in result["cards"] if c["kind"] in ("role", "accomplishment")][:3]
+    accepted = client.post(
+        "/v1/imports/accept",
+        json={"cards": [{"kind": c["kind"], "content": c["content"]} for c in kept]},
+        headers=me,
+    )
+    assert accepted.status_code == 201, accepted.text
+    assert len(client.get("/v1/cards", headers=me).json()) == len(before) + 3
+
+
+def test_resume_preview_refuses_bad_files(client: TestClient) -> None:
+    me = as_user("importer")
+    old_doc = client.post(
+        "/v1/imports/preview", content=b"\xd0\xcf\x11\xe0" + b"\0" * 64, headers=me
+    )
+    assert old_doc.status_code == 422
+    assert ".docx" in old_doc.json()["detail"]
+    too_big = client.post("/v1/imports/preview", content=b"x" * (5 * 1024 * 1024 + 1), headers=me)
+    assert too_big.status_code == 413
+    assert client.post("/v1/imports/preview", content=b"", headers=me).status_code == 422
+    assert client.post("/v1/imports/preview", content=b"hello").status_code == 401

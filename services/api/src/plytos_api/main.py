@@ -3,10 +3,12 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Annotated
+from urllib.parse import unquote
 from uuid import UUID
 
 import psycopg
-from fastapi import Depends, FastAPI, Request, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -27,7 +29,12 @@ from plytos_api.cards.repository import (
 )
 from plytos_api.config import Settings, get_settings
 from plytos_api.db import Database
+from plytos_api.imports.extract import MAX_BYTES, UnsupportedFileError
+from plytos_api.imports.model import ImportResult
+from plytos_api.imports.pipeline import import_resume
 from plytos_api.keys import KeyShreddedError, Vault, kek_from_setting
+
+FILENAME_HEADER = "x-plytos-filename"
 
 # Sent on every response: nothing Plytos serves may be indexed or cached.
 SECURITY_HEADERS = {
@@ -63,6 +70,10 @@ class CreateVariant(BaseModel):
 class SaveVariantVersion(BaseModel):
     base_version_id: UUID
     content: VariantContent
+
+
+class AcceptImport(BaseModel):
+    cards: list[CreateCard] = Field(min_length=1, max_length=300)
 
 
 class Verification(BaseModel):
@@ -130,6 +141,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             {"detail": "This card already has a variant for that target."},
             status_code=status.HTTP_409_CONFLICT,
         )
+
+    @app.exception_handler(UnsupportedFileError)
+    async def unsupported_file(_: Request, exc: UnsupportedFileError) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=status.HTTP_422_UNPROCESSABLE_CONTENT)
 
     @app.exception_handler(KeyShreddedError)
     async def shredded(_: Request, __: KeyShreddedError) -> JSONResponse:
@@ -216,5 +231,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def create_target(body: CreateTarget, user_id: User) -> TargetView:
         with db.as_user(user_id) as conn:
             return repo(conn, user_id).create_target(body.kind, body.name, body.parent_id)
+
+    @app.post("/v1/imports/preview")
+    async def preview_import(request: Request, user_id: User) -> ImportResult:
+        """Reads a resume and returns proposed cards and an audit. Nothing is stored.
+
+        The body is the file itself. The file name comes in a header, not the
+        URL, because URLs land in request logs and resume file names carry names.
+        """
+        declared = request.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > MAX_BYTES:
+            raise HTTPException(
+                status.HTTP_413_CONTENT_TOO_LARGE, "Resumes over 5 MB aren't supported."
+            )
+        data = bytearray()
+        async for chunk in request.stream():
+            data += chunk
+            if len(data) > MAX_BYTES:
+                raise HTTPException(
+                    status.HTTP_413_CONTENT_TOO_LARGE, "Resumes over 5 MB aren't supported."
+                )
+        if not data:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "The file is empty.")
+        filename = unquote(request.headers.get(FILENAME_HEADER, "") or "resume")[:200]
+        return await run_in_threadpool(import_resume, bytes(data), filename)
+
+    @app.post("/v1/imports/accept", status_code=status.HTTP_201_CREATED)
+    def accept_import(body: AcceptImport, user_id: User) -> list[CardDetail]:
+        """Saves the cards the person kept from an import, all or none."""
+        with db.as_user(user_id) as conn:
+            cards = repo(conn, user_id)
+            return [cards.create_card(c.kind, c.content, person(user_id)) for c in body.cards]
 
     return app

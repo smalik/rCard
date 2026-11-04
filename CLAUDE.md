@@ -38,3 +38,7 @@ plus a gitleaks secret scan.
 - **AI proposes, the person decides.** AI output becomes a version only when
   the person accepts it, and is recorded with `author_kind = 'ai'`.
 - **Mobile first.** Design for a phone, then widen for laptops.
+- **No real resumes in the repo.** Import tests use made-up people built in
+  code (`services/api/tests/resume_samples.py`). Don't commit resume files,
+  their text, or audit output from a real person's resume. Resume text never
+  goes in logs, URLs or error messages.

@@ -9,6 +9,15 @@
 service-account*.json
 credentials*.json
 
+# Resumes and other personal documents stay out of the repo. Tests build
+# made-up resumes in code (services/api/tests/resume_samples.py).
+*.doc
+*.docx
+*.pdf
+*.rtf
+*.odt
+*.pages
+
 # OS and editors
 .DS_Store
 .idea/
