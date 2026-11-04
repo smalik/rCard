@@ -1,7 +1,7 @@
 # Google Cloud setup
 
 Terraform for everything Plytos runs on: Cloud Run (web app and API), Cloud SQL
-for Postgres 16, Cloud KMS, a private Storage bucket, Artifact Registry, and
+for Postgres 18, Cloud KMS, a private Storage bucket, Artifact Registry, and
 the identity GitHub Actions deploys with. No long-lived keys or database
 passwords exist: services sign in with their service accounts.
 

@@ -22,7 +22,7 @@ career, and recombine cards for each application.
 
 ## Run it locally
 
-You need Docker (or any Postgres 16), Node 22 and [uv](https://docs.astral.sh/uv/).
+You need Docker (or any Postgres 18), Node 22 and [uv](https://docs.astral.sh/uv/).
 
 ```sh
 docker compose up -d db

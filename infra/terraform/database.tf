@@ -4,7 +4,7 @@
 
 resource "google_sql_database_instance" "main" {
   name                = "plytos"
-  database_version    = "POSTGRES_16"
+  database_version    = "POSTGRES_18"
   region              = var.region
   deletion_protection = var.deletion_protection
 
