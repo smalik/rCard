@@ -1256,6 +1256,7 @@ dependencies = [
     { name = "cryptography" },
     { name = "fastapi" },
     { name = "pdfplumber" },
+    { name = "pillow" },
     { name = "psycopg", extra = ["binary"] },
     { name = "psycopg-pool" },
     { name = "pydantic" },
@@ -1282,11 +1283,12 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = ">=2.4" },
-    { name = "anthropic", extras = ["vertex"], marker = "extra == 'gcp'", specifier = ">=2.4.0" },
+    { name = "anthropic", extras = ["vertex"], marker = "extra == 'gcp'", specifier = ">=2.4" },
     { name = "cryptography", specifier = ">=44" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "google-cloud-kms", marker = "extra == 'gcp'", specifier = ">=3" },
     { name = "pdfplumber", specifier = ">=0.11.10" },
+    { name = "pillow", specifier = ">=11" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "psycopg-pool", specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.9" },

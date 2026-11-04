@@ -219,7 +219,7 @@ def _layout(
     doc: ExtractedDocument, parsed: ParsedResume, blocks: dict[int, Block]
 ) -> Iterable[Finding]:
     facts = doc.facts
-    if not facts.has_text_layer or not doc.blocks:
+    if not doc.blocks:
         yield _finding(
             "ats.no_text",
             "fix",
@@ -230,6 +230,31 @@ def _layout(
             "instead of scanning or printing to an image.",
         )
         return
+    if not facts.has_text_layer:
+        yield _finding(
+            "ats.no_text",
+            "fix",
+            "ats",
+            "No readable text",
+            "This file has no text layer; it's a scan or an image. Plytos read the words "
+            "from the picture for your cards, but applicant tracking systems will read it "
+            "as blank. Export it from Word or Google Docs instead of scanning or printing "
+            "to an image.",
+        )
+    else:
+        for page in facts.scanned_pages:
+            read = [b for b in doc.blocks if b.where == "image" and b.page == page]
+            yield _finding(
+                "ats.scanned_page",
+                "fix",
+                "ats",
+                f"Page {page} is a scan",
+                f"Page {page} has no text layer; it's a picture of a page. Applicant "
+                "tracking systems skip it, with everything on it. "
+                + ("Plytos read its words for your cards. " if read else "")
+                + "Export the whole resume from Word or Google Docs.",
+                [read[0]] if read else [],
+            )
 
     marked = [b for b in doc.blocks if is_marking(b, facts.markings)]
     if facts.markings or marked:
@@ -353,14 +378,25 @@ def _layout(
     for picture in big:
         after = blocks.get(picture.after_block) if picture.after_block is not None else None
         place = f' right after "{_loc(after).excerpt}"' if after else ""
+        if picture.lines_read:
+            detail = (
+                f"An image as wide as the text sits{place}, and it holds "
+                f"{_plural(picture.lines_read, 'line')} of text. Plytos read them for your "
+                "cards, but applicant tracking systems and screen readers can't read a word "
+                "of it, and it won't match any search. Retype its content as text."
+            )
+        else:
+            detail = (
+                f"An image as wide as the text sits{place}. If it shows text (a screenshot "
+                "of bullets, say), applicant tracking systems and screen readers can't read "
+                "a word of it, and it won't match any search. Retype its content as text."
+            )
         yield _finding(
             "ats.large_image",
             "fix",
             "ats",
             f"A {picture.width_in:g} × {picture.height_in:g} inch image in the page body",
-            f"An image as wide as the text sits{place}. If it shows text (a screenshot of "
-            "bullets, say), applicant tracking systems and screen readers can't read a word "
-            "of it, and it won't match any search. Retype its content as text.",
+            detail,
             [after] if after else [],
         )
     small = facts.images - len(big)

@@ -3,6 +3,8 @@
 Importing a resume does three things:
 
 1. **Reads** the file into lines in reading order (`imports/extract.py`).
+   With Claude configured, the words in its pictures (a scanned page, a
+   screenshot of bullets) become lines too (`imports/pictures.py`).
 2. **Splits** the lines into contact details, sections, roles, bullets,
    skills and entries. Claude Haiku 5.5 does this when it's configured
    (`imports/ai.py`); otherwise, or when it fails, the rule-based parser does
@@ -10,6 +12,9 @@ Importing a resume does three things:
 3. **Audits** it for problems a recruiter or an applicant tracking system
    (ATS) would trip on (`imports/audit.py`), and **proposes cards** in the
    resume's own words (`imports/cards.py`).
+4. **Checks** that every line landed somewhere (`imports/accounting.py`) and
+   that every result and title sits under the job it came from
+   (`imports/placement.py`).
 
 The import is kept, encrypted with the person's own key, so they can work
 through it over several sittings: the original file, exactly as uploaded;
@@ -20,8 +25,8 @@ person approves it, one card at a time.
 
 | Format | How it's read |
 | --- | --- |
-| Word (.docx) | From the XML, so text boxes, content controls, tracked insertions, page headers and footers aren't missed. Each line keeps where it sat (body, table, text box, header, footer), its list bullet, bold, capitals, fonts and sizes. |
-| PDF | From the text layer with pdfplumber. Two-column layouts are detected by an empty vertical strip and read column by column. A scan with no text layer is reported, not guessed at. |
+| Word (.docx) | From the XML, so text boxes, content controls, tracked insertions, page headers and footers aren't missed. Each line keeps where it sat (body, table, text box, header, footer), its list bullet, bold, capitals, fonts and sizes. Pictures big enough to hold words are kept to read. |
+| PDF | From the text layer with pdfplumber. Two-column layouts are detected by an empty vertical strip and read column by column. A page with no text layer (a scan) is kept as a picture to read, and reported. Pictures on a page are kept to read too, unless text-layer words sit over them (a background, or a scan that was already turned into text). |
 | Plain text | Line by line, with typed bullets. |
 
 Old `.doc` files are refused with a request to save as .docx or PDF. Files
@@ -104,6 +109,7 @@ contact details stay on the server. Nothing goes to browser storage.
 | `GET /v1/imports/{id}/original` | The original file, byte for byte |
 | `POST /v1/imports/{id}/settle` | Answers one question. A chosen number rewrites the proposed cards that use the other |
 | `POST /v1/imports/{id}/cards/{ref}/decision` | Sets a proposed card aside for later, leaves it out, or undoes that |
+| `POST /v1/imports/{id}/cards/{ref}/place` | Answers a placement question: the card it sits under (`parent_ref`, or null for none) |
 | `POST /v1/imports/{id}/cards/{ref}/approve` | Makes the card, as proposed or in the person's edited words, as an approved card written by the person |
 | `DELETE /v1/imports/{id}` | Deletes the original file and everything read from it. Approved cards stay |
 
@@ -148,6 +154,65 @@ different step and will be recorded with `author_kind = 'ai'`.
 A resume is a few thousand tokens in and out, which is well under a cent on
 Haiku 5.5.
 
+## Reading pictures
+
+Some resumes carry words the file's text doesn't: a screenshot of bullets, a
+heading or name drawn as an image, labelled skill bars, or a whole page
+scanned with no text layer. Before the lines are sorted, Claude reads them:
+
+- Extraction keeps the pixels of each picture at least 1 inch wide and a
+  quarter inch tall (icons and bullets aren't worth it), up to 10 per resume:
+  Word pictures from the file, PDF pictures and scanned pages rendered with
+  pdfium. They're shrunk to what Claude reads (1568 px on the long edge) and
+  never stored or logged; the import keeps only the lines read from them.
+- One request, at low effort, sends every picture with a label ("Picture 2:
+  page 1, which is a scan with no text in it"). Claude says what each is
+  (text, logo, photo, chart, decoration) and, for text, copies its lines
+  exactly, in reading order, with bullets and bold marked and `[?]` for a word
+  it can't make out (`AiPictures`).
+- Each line goes in right after the line the picture follows, marked
+  `where: "image"`, and the lines are renumbered. From there it's a line like
+  any other: Claude's reading, the audit, the cards and the line accounting
+  all see it. Logos, photos and charts add nothing.
+- Every card made from a picture's words asks the person to check the
+  wording, since reading a picture can get a word wrong.
+- The audit still says the picture is a problem for applicant tracking
+  systems (`ats.large_image`, `ats.no_text`, or `ats.scanned_page` for one
+  scanned page in a PDF with text), and says Plytos read its words.
+
+Without Claude, or when the request fails, pictures stay unread and the audit
+reports them as before.
+
+## Every line accounted for
+
+After the cards are proposed, every line of the resume must be in one of five
+places: on a card, in the contact details, a section heading, skipped for a
+stated reason (`page_number`, `page_header`, `decoration`, `references`, or a
+classification `marking`), or on a card of its own. A line nothing claimed
+gets that card, placed by the section it sits in (an accomplishment under the
+nearest job above it, a skill, an education entry, an activity), with a
+question asking the person to keep, move or drop it. The import records the
+count (`lines`), so nothing the person wrote is lost without them seeing it.
+
+## Checking where each line was filed
+
+An accomplishment under the wrong title misstates someone's career, so two
+checks go over the tree once it's built:
+
+- **Order.** On most resumes a line belongs to the title written above it,
+  and a title to the employer above it. Skipped for multi-column layouts,
+  where reading order isn't reliable.
+- **A second look by Claude**, separate from the reading. It gets the numbered
+  lines and the tree in short refs (E1 employer, T1 title, C1 client work) and
+  names anything filed in the wrong place, with the cue in the resume that
+  shows it.
+
+A card either check flags gets a question: "Which job is this from?", "Which
+employer was this title at?" or "Which job was this client work part of?".
+When both checks agree on another place, the card is moved there and the
+question asks the person to confirm; otherwise it stays put and the question
+offers the other place. The card can't be approved until the person answers.
+
 ## Proposed cards
 
 Cards are proposed as a career tree (see [data-model.md](data-model.md)).
@@ -168,6 +233,7 @@ under the title it was written under.
 | Certifications | `credential` | nothing |
 | Projects | `project` | nothing |
 | Awards | `accomplishment`, with the award as a fact | nothing |
+| Talks, publications, board seats, memberships, interests | `activity`, with its name and date | nothing |
 
 Titles join one employment when they share the employer's own line, or when
 they sit next to each other at the same employer with no more than six months
@@ -193,8 +259,8 @@ numbers" rule only lets a variant use numbers its main version has.
 
 ## Known gaps
 
-- Text inside images isn't read. The audit flags a large image in the body,
-  but recovering a screenshot's text needs OCR, which comes later.
+- Text inside images is read only when Claude is configured. Pictures in
+  formats Claude can't take (Windows metafiles) stay unread.
 - Spelling and grammar aren't checked beyond skill names.
 - Facts are compared only where a figure repeats between the summary or
   highlights and a role. Checking names and titles against each other needs

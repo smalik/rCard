@@ -4,6 +4,10 @@ Each line keeps the layout facts the audit needs: whether it sat in a table,
 text box, header or footer, its bullet, fonts and sizes. Word files are read
 from their XML so text boxes, content controls and tracked insertions aren't
 missed; PDFs are read from their text layer.
+
+Pictures that may hold words (a screenshot of bullets, a heading drawn as an
+image, a scanned page with no text layer) are kept as images too, so Claude can
+read them before the lines are sorted (imports/pictures.py).
 """
 
 import io
@@ -19,6 +23,7 @@ from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
 from docx.text.run import Run
 from lxml import etree
+from PIL import Image
 
 from plytos_api.imports.model import (
     Block,
@@ -26,10 +31,16 @@ from plytos_api.imports.model import (
     DocumentFacts,
     ExtractedDocument,
     Picture,
+    PictureImage,
 )
 
 MAX_BYTES = 5 * 1024 * 1024
 MAX_PAGES = 12
+# Pictures read for words, per resume. A resume rarely has more than a few that hold any.
+MAX_PICTURES = 10
+# Claude reads images up to about this many pixels on the long edge without shrinking them.
+_MAX_EDGE = 1568
+_MAX_PIXELS = 40_000_000
 _MAX_UNZIPPED = 60 * 1024 * 1024
 
 Where = Literal["body", "table", "text_box", "header", "footer"]
@@ -49,6 +60,7 @@ _IMAGES = etree.XPath(
     ".//a:blip[not(ancestor::mc:Fallback)] | .//v:imagedata[not(ancestor::mc:Fallback)]",
     namespaces=_NS,
 )
+_BLIPS = etree.XPath(".//a:blip[not(ancestor::mc:Fallback)]", namespaces=_NS)
 _COLS = etree.XPath(".//w:sectPr/w:cols", namespaces=_NS)
 _EXTENTS = etree.XPath(
     ".//wp:extent[not(ancestor::mc:Fallback)][following-sibling::*//a:blip or ../*//a:blip]",
@@ -141,6 +153,35 @@ def _is_caps(text: str) -> bool:
     return len(letters) >= 2 and all(c.isupper() for c in letters)
 
 
+def worth_reading(width_in: float, height_in: float) -> bool:
+    """Whether a picture is big enough to hold a line of words. Icons and bullets aren't."""
+    return width_in >= 1.0 and height_in >= 0.25
+
+
+def _prepared(raw: bytes | Image.Image) -> tuple[Literal["image/png", "image/jpeg"], bytes] | None:
+    """The picture as a PNG (a JPEG when that's too large), shrunk to what Claude reads,
+    or None when it isn't a picture Claude can take (a Windows metafile, say)."""
+    try:
+        image = raw if isinstance(raw, Image.Image) else Image.open(io.BytesIO(raw))
+        if image.width * image.height > _MAX_PIXELS:
+            return None
+        image.load()
+        if image.mode not in ("RGB", "L"):
+            rgba = image.convert("RGBA")
+            image = Image.new("RGB", rgba.size, "white")
+            image.paste(rgba, mask=rgba.getchannel("A"))
+        image.thumbnail((_MAX_EDGE, _MAX_EDGE))
+        out = io.BytesIO()
+        image.save(out, "PNG", optimize=True)
+        if out.tell() <= 3_500_000:
+            return "image/png", out.getvalue()
+        out = io.BytesIO()
+        image.convert("RGB").save(out, "JPEG", quality=85)
+        return "image/jpeg", out.getvalue()
+    except (OSError, ValueError, SyntaxError, Image.DecompressionBombError):
+        return None
+
+
 def _facts(fmt: DocFormat, filename: str, blocks: list[Block], **extra: Any) -> DocumentFacts:
     fonts: Counter[str] = Counter()
     sizes: Counter[str] = Counter()
@@ -182,6 +223,7 @@ class _DocxReader:
         self.markings = _markings(custom)
         self.blocks: list[Block] = []
         self.pictures: list[Picture] = []
+        self.images: list[PictureImage] = []
         self.tables = 0
         self.text_boxes = 0
         self.theme = self._theme_fonts()
@@ -212,7 +254,7 @@ class _DocxReader:
             pictures=self.pictures,
             text_width_in=self._text_width(),
         )
-        return ExtractedDocument(facts=facts, blocks=self.blocks)
+        return ExtractedDocument(facts=facts, blocks=self.blocks, images=self.images)
 
     def _text_width(self) -> float | None:
         section = self.doc.sections[-1]
@@ -310,14 +352,14 @@ class _DocxReader:
         for extent in _EXTENTS(p):
             nearest = _NEAREST_P(extent)
             if nearest and nearest[0] is p:
-                self.pictures.append(
-                    Picture(
-                        after_block=len(self.blocks) - 1 if self.blocks else None,
-                        width_in=round(int(extent.get("cx", "0")) / _EMU_PER_INCH, 2),
-                        height_in=round(int(extent.get("cy", "0")) / _EMU_PER_INCH, 2),
-                        where=where,
-                    )
+                picture = Picture(
+                    after_block=len(self.blocks) - 1 if self.blocks else None,
+                    width_in=round(int(extent.get("cx", "0")) / _EMU_PER_INCH, 2),
+                    height_in=round(int(extent.get("cy", "0")) / _EMU_PER_INCH, 2),
+                    where=where,
                 )
+                self.pictures.append(picture)
+                self._keep_image(extent, paragraph, picture)
         for box in _TEXT_BOXES(p):
             nearest = _NEAREST_P(box)
             if nearest and nearest[0] is p:
@@ -326,6 +368,27 @@ class _DocxReader:
                 else:
                     self.text_boxes += 1
                     self._walk(box, "text_box", owner)
+
+    def _keep_image(self, extent: Any, paragraph: Paragraph, picture: Picture) -> None:
+        """Keeps the picture's pixels when it's big enough to hold words."""
+        if len(self.images) >= MAX_PICTURES or not worth_reading(
+            picture.width_in, picture.height_in
+        ):
+            return
+        blips = _BLIPS(extent.getparent())
+        rid = blips[0].get(f"{{{_NS['r']}}}embed") if blips else None
+        part = paragraph.part.related_parts.get(rid) if rid else None
+        blob = getattr(part, "blob", None)
+        prepared = _prepared(blob) if isinstance(blob, bytes) else None
+        if prepared is not None:
+            self.images.append(
+                PictureImage(
+                    after_block=picture.after_block,
+                    picture=len(self.pictures) - 1,
+                    media_type=prepared[0],
+                    data=prepared[1],
+                )
+            )
 
     # Runs and formatting -----------------------------------------------------
 
@@ -565,6 +628,9 @@ def _read_pdf(data: bytes, filename: str) -> ExtractedDocument:
     bullet_x: dict[int, tuple[float, float]] = {}
     images = 0
     columns = 1
+    pictures: list[Picture] = []
+    kept: list[PictureImage] = []
+    scanned: list[int] = []
     try:
         pdf = pdfplumber.open(io.BytesIO(data))
     except Exception as exc:
@@ -577,7 +643,18 @@ def _read_pdf(data: bytes, filename: str) -> ExtractedDocument:
         for number, page in enumerate(pdf.pages, start=1):
             images += len(page.images)
             words = page.extract_words(extra_attrs=["fontname", "size"], keep_blank_chars=False)
+            before = len(blocks) - 1 if blocks else None
             if not words:
+                if page.images and len(kept) < MAX_PICTURES:
+                    # A scanned page: keep the whole page as a picture to read.
+                    image = _render(page, None, 150)
+                    if image is not None:
+                        scanned.append(number)
+                        kept.append(
+                            PictureImage(
+                                after_block=before, page=number, media_type=image[0], data=image[1]
+                            )
+                        )
                 continue
             has_text = True
             gutter = _gutter(words, float(page.width))
@@ -586,9 +663,15 @@ def _read_pdf(data: bytes, filename: str) -> ExtractedDocument:
                 regions: Iterable[list[dict[str, Any]]] = _split_columns(words, gutter)
             else:
                 regions = [words]
+            tops: list[tuple[int, float]] = []  # (block, top) of each line on this page
             for region in regions:
                 for line in _pdf_lines(region):
+                    count = len(blocks)
                     _add_pdf_line(blocks, line, number, bullet_x)
+                    if len(blocks) > count:
+                        tops.append((blocks[-1].index, line["top"]))
+            for img in page.images:
+                _pdf_picture(page, img, words, number, before, tops, pictures, kept)
     facts = _facts(
         "pdf",
         filename,
@@ -597,8 +680,70 @@ def _read_pdf(data: bytes, filename: str) -> ExtractedDocument:
         images=images,
         columns=columns,
         has_text_layer=has_text,
+        scanned_pages=scanned,
+        pictures=pictures,
     )
-    return ExtractedDocument(facts=facts, blocks=blocks)
+    return ExtractedDocument(facts=facts, blocks=blocks, images=kept)
+
+
+def _pdf_picture(
+    page: Any,
+    img: dict[str, Any],
+    words: list[dict[str, Any]],
+    number: int,
+    before: int | None,
+    tops: list[tuple[int, float]],
+    pictures: list[Picture],
+    kept: list[PictureImage],
+) -> None:
+    """Records an image on a page with text, and keeps it to read if it may hold words.
+
+    An image with text-layer words over it is a background, or the scan under a
+    PDF that was already turned into text; its words are read from the layer.
+    """
+    x0, x1 = max(0.0, float(img["x0"])), min(float(page.width), float(img["x1"]))
+    top, bottom = max(0.0, float(img["top"])), min(float(page.height), float(img["bottom"]))
+    if x1 - x0 < 1 or bottom - top < 1:
+        return
+    over = sum(
+        1
+        for w in words
+        if x0 <= (float(w["x0"]) + float(w["x1"])) / 2 <= x1
+        and top <= (float(w["top"]) + float(w["bottom"])) / 2 <= bottom
+    )
+    if over >= 3:
+        return
+    above = [block for block, line_top in tops if line_top <= top]
+    picture = Picture(
+        after_block=max(above) if above else before,
+        width_in=round((x1 - x0) / 72, 2),
+        height_in=round((bottom - top) / 72, 2),
+    )
+    pictures.append(picture)
+    if len(kept) >= MAX_PICTURES or not worth_reading(picture.width_in, picture.height_in):
+        return
+    image = _render(page, (x0, top, x1, bottom), 200)
+    if image is not None:
+        kept.append(
+            PictureImage(
+                after_block=picture.after_block,
+                page=number,
+                picture=len(pictures) - 1,
+                media_type=image[0],
+                data=image[1],
+            )
+        )
+
+
+def _render(
+    page: Any, box: tuple[float, float, float, float] | None, dpi: int
+) -> tuple[Literal["image/png", "image/jpeg"], bytes] | None:
+    """A page, or part of one, as a picture."""
+    try:
+        area = page.crop(box) if box is not None else page
+        return _prepared(area.to_image(resolution=dpi).original)
+    except Exception:  # a picture that won't render is left unread
+        return None
 
 
 def _font_name(raw: str) -> str:

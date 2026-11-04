@@ -25,7 +25,8 @@ class Block(BaseModel):
     all_caps: bool = False
     font_names: list[str] = Field(default_factory=list)
     font_sizes: list[float] = Field(default_factory=list)
-    where: Literal["body", "table", "text_box", "header", "footer"] = "body"
+    # "image": read from a picture in the file (a scanned page, a screenshot of bullets).
+    where: Literal["body", "table", "text_box", "header", "footer", "image"] = "body"
     page: int | None = None
     links: list[str] = Field(default_factory=list)
 
@@ -37,6 +38,20 @@ class Picture(BaseModel):
     width_in: float
     height_in: float
     where: Literal["body", "table", "text_box", "header", "footer"] = "body"
+    # How many lines of text were read from it.
+    lines_read: int = 0
+
+
+class PictureImage(BaseModel):
+    """A picture's pixels, kept only while the import reads the words in it. Never
+    stored or logged."""
+
+    after_block: int | None
+    page: int | None = None
+    # Its place in DocumentFacts.pictures, or None for a whole scanned page.
+    picture: int | None = None
+    media_type: Literal["image/png", "image/jpeg"]
+    data: bytes = Field(repr=False)
 
 
 class DocumentFacts(BaseModel):
@@ -52,6 +67,8 @@ class DocumentFacts(BaseModel):
     fonts: dict[str, int] = Field(default_factory=dict)
     font_sizes: dict[str, int] = Field(default_factory=dict)
     has_text_layer: bool = True
+    # PDF pages with no text layer (scans), read from their picture when Claude reads.
+    scanned_pages: list[int] = Field(default_factory=list)
     # Sensitivity or classification markings an organization's labelling tool added.
     markings: list[str] = Field(default_factory=list)
     pictures: list[Picture] = Field(default_factory=list)
@@ -61,6 +78,8 @@ class DocumentFacts(BaseModel):
 class ExtractedDocument(BaseModel):
     facts: DocumentFacts
     blocks: list[Block]
+    # Pictures that may hold words, to be read before the lines are. Never serialized.
+    images: list[PictureImage] = Field(default_factory=list, exclude=True, repr=False)
 
 
 class YearMonth(BaseModel):

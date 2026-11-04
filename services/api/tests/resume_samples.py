@@ -358,3 +358,35 @@ def stint_text() -> str:
             "References available upon request",
         ]
     )
+
+
+def scanned_pdf() -> bytes:
+    """A one-page PDF that is only a picture of a page, as a scanner makes. No text layer."""
+    from PIL import Image, ImageDraw
+
+    page = Image.new("L", (850, 1100), 255)
+    draw = ImageDraw.Draw(page)
+    for top in range(80, 700, 40):
+        draw.rectangle((80, top, 80 + (top * 7) % 600 + 100, top + 14), fill=0)
+    out = io.BytesIO()
+    page.save(out, "PDF", resolution=100)
+    return out.getvalue()
+
+
+def pictured_pdf() -> bytes:
+    """A PDF with text, a screenshot after the second line, and a shaded panel behind the
+    last lines. Casey Morgan is fictional."""
+    pdf = FPDF(format="Letter")
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 8, "Casey Morgan", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6, "casey.morgan@example.com", new_x="LMARGIN", new_y="NEXT")
+    pdf.image(io.BytesIO(_png(400, 80)), x=20, y=40, w=120, h=24)
+    pdf.set_y(80)
+    pdf.cell(0, 6, "EXPERIENCE", new_x="LMARGIN", new_y="NEXT")
+    pdf.image(io.BytesIO(_png(400, 120)), x=10, y=95, w=190, h=40)
+    pdf.set_y(100)
+    pdf.cell(0, 6, "Operations Lead, Tailspin Toys  2019 - 2024", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, "Ran a warehouse team of twelve people.", new_x="LMARGIN", new_y="NEXT")
+    return bytes(pdf.output())

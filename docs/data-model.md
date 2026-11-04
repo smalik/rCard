@@ -36,7 +36,7 @@ copying it. Change the employer's name once and everything under it follows.
 | project | employment, position, engagement |
 | accomplishment | employment, position, engagement, project |
 | story | accomplishment |
-| skill, education, credential | nothing |
+| skill, education, credential, activity | nothing |
 
 Every allowed parent ranks above its child and a card's kind never changes, so
 the tree can't loop. `role` is the flat kind from before the tree

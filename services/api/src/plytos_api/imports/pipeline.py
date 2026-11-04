@@ -3,12 +3,13 @@
 from datetime import date
 
 from plytos_api.imports.accounting import account
-from plytos_api.imports.ai import PlacementChecker, ResumeReader, to_parsed
+from plytos_api.imports.ai import PictureReader, PlacementChecker, ResumeReader, to_parsed
 from plytos_api.imports.audit import audit
 from plytos_api.imports.cards import propose_cards
 from plytos_api.imports.career import group_employments, settle_employments
 from plytos_api.imports.extract import extract
 from plytos_api.imports.model import ImportResult, ParsedResume
+from plytos_api.imports.pictures import add_picture_lines, mark_picture_cards
 from plytos_api.imports.placement import check_placements
 from plytos_api.imports.segment import segment
 
@@ -16,11 +17,15 @@ from plytos_api.imports.segment import segment
 def import_resume(
     data: bytes, filename: str, *, today: date | None = None, reader: ResumeReader | None = None
 ) -> ImportResult:
-    """Reads a resume. With a reader, Claude decides which line is which; without one,
-    or when it can't, the rule-based parser does."""
+    """Reads a resume. With a reader, Claude reads the words in its pictures and decides
+    which line is which; without one, or when it can't, the rule-based parser does."""
     doc = extract(data, filename)
     parsed: ParsedResume | None = None
     read_by: str | None = None
+    if isinstance(reader, PictureReader) and doc.images:
+        seen = reader.read_pictures(doc.images)
+        if seen is not None:
+            doc = add_picture_lines(doc, seen)
     if reader is not None:
         found = reader.read(doc)
         if found is not None:
@@ -38,6 +43,7 @@ def import_resume(
     checker = reader if isinstance(reader, PlacementChecker) and read_by is not None else None
     check_placements(doc, parsed, cards, checker)
     lines = account(doc, parsed, cards, skipped=parsed.skipped)
+    mark_picture_cards(doc.blocks, cards)
     return ImportResult(
         facts=doc.facts,
         contact=parsed.contact,
