@@ -152,7 +152,7 @@ def _version_view(row: Sequence[Any]) -> VersionView:
     )
 
 
-def _version_aad(version_id: UUID) -> bytes:
+def version_aad(version_id: UUID) -> bytes:
     return b"plytos.card_version:" + version_id.bytes
 
 
@@ -322,7 +322,7 @@ class CardRepository:
             headline = None
             if r[5] is not None:
                 content = MainContent.model_validate_json(
-                    self._cipher.decrypt(bytes(r[5]), _version_aad(r[3]))
+                    self._cipher.decrypt(bytes(r[5]), version_aad(r[3]))
                 )
                 headline = content.framing.headline
             summaries.append(
@@ -434,7 +434,7 @@ class CardRepository:
                 if expected != bytes(stored_chain):
                     problems.append(f"version {vid} chain hash does not match")
                 if ct is not None:
-                    raw = self._cipher.decrypt(bytes(ct), _version_aad(vid))
+                    raw = self._cipher.decrypt(bytes(ct), version_aad(vid))
                     if hashlib.sha256(raw).digest() != bytes(stored_content):
                         problems.append(f"version {vid} content hash does not match")
                 previous_chain = bytes(stored_chain)
@@ -473,7 +473,7 @@ class CardRepository:
         ).fetchone()
         if row is None or row[0] is None:
             raise CardNotFoundError(str(version.id))
-        return self._cipher.decrypt(bytes(row[0]), _version_aad(version.id))
+        return self._cipher.decrypt(bytes(row[0]), version_aad(version.id))
 
     def _main_content(self, version: VersionView) -> MainContent:
         return MainContent.model_validate_json(self._decrypt(version))
@@ -532,7 +532,7 @@ class CardRepository:
             based_on_main_version_id=based_on_main_version_id,
             content_hash=c_hash,
         )
-        ciphertext = self._cipher.encrypt(canonical_json(content), _version_aad(version_id))
+        ciphertext = self._cipher.encrypt(canonical_json(content), version_aad(version_id))
         try:
             row = self._conn.execute(
                 "insert into plytos.card_version (id, owner_id, card_id, line_id, number,"
