@@ -23,6 +23,19 @@ class Settings(BaseSettings):
     # Comma-separated login roles to grant plytos_app after migrating
     # (Cloud SQL IAM users for the API service account).
     app_login_roles: str = ""
+    # Reading resumes with Claude (imports/ai.py). "off" uses the rule-based parser only.
+    #   anthropic  the Claude API; the key comes from ANTHROPIC_API_KEY
+    #   vertex     Claude on Google Cloud Vertex AI, with the service's own identity
+    ai_provider: Literal["off", "anthropic", "vertex"] = "off"
+    ai_model: str = "claude-haiku-5-5"
+    ai_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
+    ai_vertex_project: str = ""
+    ai_vertex_region: str = "global"
+    # Agents (agents/). Inline runs a worker on a thread inside the API, for
+    # development; production runs `python -m plytos_api.agents` as its own service.
+    agents_inline: bool = False
+    # How long the Stitcher waits after a note, so a burst of notes is read together.
+    stitch_delay_seconds: int = 30
 
     @property
     def dev_shortcuts(self) -> bool:

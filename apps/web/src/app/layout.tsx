@@ -1,6 +1,16 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 
+// Self-hosted fonts: the CSP allows fonts only from Plytos itself.
+import "@fontsource/bricolage-grotesque/700.css";
+import "@fontsource/instrument-sans/400.css";
+import "@fontsource/instrument-sans/400-italic.css";
+import "@fontsource/instrument-sans/500.css";
+import "@fontsource/instrument-sans/600.css";
+import "@fontsource/instrument-sans/700.css";
+import "@fontsource/ibm-plex-mono/400.css";
+import "@fontsource/ibm-plex-mono/500.css";
+import "@fontsource/ibm-plex-mono/600.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -22,10 +32,7 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f7f6f2" },
-    { media: "(prefers-color-scheme: dark)", color: "#12171f" },
-  ],
+  themeColor: "#fbf6ee",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

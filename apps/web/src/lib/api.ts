@@ -1,18 +1,12 @@
 import "server-only";
 
+import type { CardContent, CardKind } from "./cards";
+import { type Answer, FILENAME_HEADER, type ImportSummary, type Progress } from "./imports";
 import type { Session } from "./session";
+import type { CheckInPlan, CheckIns, Message, Proposal, Thread } from "./talk";
 
 // The API is private: only this server talks to it, never the browser.
 const API_URL = process.env.PLYTOS_API_URL ?? "http://localhost:8000";
-
-export type CardKind =
-  | "role"
-  | "accomplishment"
-  | "skill"
-  | "project"
-  | "education"
-  | "credential"
-  | "story";
 
 export type CardSummary = {
   id: string;
@@ -28,8 +22,20 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    // The API's own explanation, when it gave one as plain text. Validation
+    // errors echo their input, so those never become a detail.
+    readonly detail: string | null = null,
   ) {
     super(message);
+  }
+}
+
+async function errorDetail(response: Response): Promise<string | null> {
+  try {
+    const body = (await response.json()) as { detail?: unknown };
+    return typeof body.detail === "string" ? body.detail : null;
+  } catch {
+    return null;
   }
 }
 
@@ -45,20 +51,197 @@ async function serviceIdentityToken(): Promise<string | null> {
   return response.text();
 }
 
-async function apiFetch<T>(path: string, session: Session, init: RequestInit = {}): Promise<T> {
+async function apiRequest(path: string, session: Session, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
-  headers.set("Accept", "application/json");
+  if (!headers.has("Accept")) headers.set("Accept", "application/json");
   const token = await serviceIdentityToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
   if (process.env.PLYTOS_ENV === "dev") headers.set("X-Plytos-Dev-User", session.subject);
 
   const response = await fetch(`${API_URL}${path}`, { ...init, headers, cache: "no-store" });
   if (!response.ok) {
-    throw new ApiError(response.status, `${init.method ?? "GET"} ${path} failed`);
+    throw new ApiError(
+      response.status,
+      `${init.method ?? "GET"} ${path} failed`,
+      await errorDetail(response),
+    );
   }
-  return (await response.json()) as T;
+  return response;
+}
+
+async function apiFetch<T>(path: string, session: Session, init: RequestInit = {}): Promise<T> {
+  return (await (await apiRequest(path, session, init)).json()) as T;
+}
+
+function json(body: unknown): RequestInit {
+  return {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json" },
+  };
 }
 
 export function listCards(session: Session): Promise<CardSummary[]> {
   return apiFetch<CardSummary[]>("/v1/cards", session);
+}
+
+// Reads a resume, keeps the original encrypted with the person's key, and
+// returns proposed cards and an audit. The file name goes in a header,
+// already URL-encoded, never in a URL.
+export function createImport(
+  session: Session,
+  file: ArrayBuffer,
+  encodedFilename: string,
+): Promise<unknown> {
+  return apiFetch<unknown>("/v1/imports", session, {
+    method: "POST",
+    body: file,
+    headers: {
+      "Content-Type": "application/octet-stream",
+      [FILENAME_HEADER]: encodedFilename,
+    },
+  });
+}
+
+export function listImports(session: Session): Promise<ImportSummary[]> {
+  return apiFetch<ImportSummary[]>("/v1/imports", session);
+}
+
+export function getImport(session: Session, id: string): Promise<unknown> {
+  return apiFetch<unknown>(`/v1/imports/${encodeURIComponent(id)}`, session);
+}
+
+// The person's original file, exactly as they gave it.
+export async function getOriginal(
+  session: Session,
+  id: string,
+): Promise<{ data: ArrayBuffer; type: string; name: string }> {
+  const response = await apiRequest(`/v1/imports/${encodeURIComponent(id)}/original`, session, {
+    headers: { Accept: "*/*" },
+  });
+  let name = "resume";
+  try {
+    name = decodeURIComponent(response.headers.get(FILENAME_HEADER) ?? "") || name;
+  } catch {
+    // A name that doesn't decode falls back to "resume".
+  }
+  return {
+    data: await response.arrayBuffer(),
+    type: response.headers.get("content-type") ?? "application/octet-stream",
+    name,
+  };
+}
+
+export async function deleteImport(session: Session, id: string): Promise<void> {
+  await apiRequest(`/v1/imports/${encodeURIComponent(id)}`, session, {
+    method: "DELETE",
+  });
+}
+
+export function settleQuestion(
+  session: Session,
+  id: string,
+  body: { finding: number; answer: Answer; value: string | null },
+): Promise<Progress> {
+  return apiFetch<Progress>(`/v1/imports/${encodeURIComponent(id)}/settle`, session, json(body));
+}
+
+export function decideCard(
+  session: Session,
+  id: string,
+  ref: string,
+  state: "later" | "dropped" | "pending",
+): Promise<Progress> {
+  return apiFetch<Progress>(
+    `/v1/imports/${encodeURIComponent(id)}/cards/${encodeURIComponent(ref)}/decision`,
+    session,
+    json({ state }),
+  );
+}
+
+export function placeCard(
+  session: Session,
+  id: string,
+  ref: string,
+  parentRef: string | null,
+): Promise<Progress> {
+  return apiFetch<Progress>(
+    `/v1/imports/${encodeURIComponent(id)}/cards/${encodeURIComponent(ref)}/place`,
+    session,
+    json({ parent_ref: parentRef }),
+  );
+}
+
+export function approveCard(
+  session: Session,
+  id: string,
+  ref: string,
+  content: CardContent | null,
+): Promise<{ card: { id: string }; progress: Progress }> {
+  return apiFetch(
+    `/v1/imports/${encodeURIComponent(id)}/cards/${encodeURIComponent(ref)}/approve`,
+    session,
+    json({ content }),
+  );
+}
+
+// -- the conversation ---------------------------------------------------------
+
+export function getConversation(session: Session, limit = 60): Promise<Message[]> {
+  return apiFetch<Message[]>(`/v1/conversation?limit=${limit}`, session);
+}
+
+// The thread, the resumes it shares and the check-in plan, read together.
+export async function getThread(session: Session): Promise<Thread> {
+  const [messages, resumes, check_ins] = await Promise.all([
+    getConversation(session),
+    listImports(session),
+    apiFetch<CheckIns>("/v1/check-ins", session),
+  ]);
+  return { messages, resumes, check_ins };
+}
+
+// Sets when Plytos checks in, or turns check-ins off. Plytos says what
+// changed in the conversation.
+export function setCheckIns(
+  session: Session,
+  plan: CheckInPlan,
+): Promise<{ check_ins: CheckIns; message: Message }> {
+  return apiFetch("/v1/check-ins", session, { ...json(plan), method: "PUT" });
+}
+
+// The person shares a resume in the conversation. It's read and kept like any
+// import, and Plytos answers with what it found. The name goes in a header.
+export function shareResume(
+  session: Session,
+  file: ArrayBuffer,
+  encodedFilename: string,
+): Promise<{ messages: Message[]; resume: ImportSummary }> {
+  return apiFetch("/v1/conversation/resume", session, {
+    method: "POST",
+    body: file,
+    headers: {
+      "Content-Type": "application/octet-stream",
+      [FILENAME_HEADER]: encodedFilename,
+    },
+  });
+}
+
+// Saves what the person said. The Listener reads it and answers shortly after.
+export function say(session: Session, text: string): Promise<Message> {
+  return apiFetch<Message>("/v1/conversation", session, json({ text }));
+}
+
+export function keepProposal(
+  session: Session,
+  id: string,
+  content: CardContent | null,
+): Promise<{ proposal: Proposal; card: { id: string } }> {
+  return apiFetch(`/v1/proposals/${encodeURIComponent(id)}/keep`, session, json({ content }));
+}
+
+export function dismissProposal(session: Session, id: string): Promise<Proposal> {
+  return apiFetch<Proposal>(`/v1/proposals/${encodeURIComponent(id)}/dismiss`, session, {
+    method: "POST",
+  });
 }

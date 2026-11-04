@@ -15,7 +15,7 @@ import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 import psycopg
@@ -30,10 +30,13 @@ from plytos_api.cards.model import (
     MainContent,
     TargetKind,
     VariantContent,
+    may_sit_under,
 )
 from plytos_api.cards.rules import facts_changed, unsupported_claims
 from plytos_api.ids import uuid7
 from plytos_api.keys import UserCipher
+
+CardStatus = Literal["draft", "approved"]
 
 
 class CardNotFoundError(Exception):
@@ -54,6 +57,11 @@ class UnsupportedClaimsError(Exception):
 
 class VariantExistsError(Exception):
     pass
+
+
+class ParentError(Exception):
+    """The card can't sit where it was put: the parent is missing or of a kind
+    that can't hold it (an accomplishment under a skill, say)."""
 
 
 @dataclass(frozen=True)
@@ -91,6 +99,7 @@ class CardDetail(BaseModel):
     status: str
     trust_level: int
     created_at: datetime
+    parent_id: UUID | None
     main: LineView
     variants: list[LineView]
 
@@ -99,6 +108,7 @@ class CardSummary(BaseModel):
     id: UUID
     kind: CardKind
     status: str
+    parent_id: UUID | None
     headline: str | None
     main_version: int
     variants: int
@@ -142,7 +152,7 @@ def _version_view(row: Sequence[Any]) -> VersionView:
     )
 
 
-def _version_aad(version_id: UUID) -> bytes:
+def version_aad(version_id: UUID) -> bytes:
     return b"plytos.card_version:" + version_id.bytes
 
 
@@ -158,12 +168,21 @@ class CardRepository:
 
     # -- cards and main line -------------------------------------------------
 
-    def create_card(self, kind: CardKind, content: MainContent, author: Author) -> CardDetail:
+    def create_card(
+        self,
+        kind: CardKind,
+        content: MainContent,
+        author: Author,
+        *,
+        status: CardStatus = "draft",
+    ) -> CardDetail:
+        self._check_parent(kind, content.parent)
         card_id = uuid7()
         line_id = uuid7()
         self._conn.execute(
-            "insert into plytos.card (id, owner_id, kind) values (%s, %s, %s)",
-            (card_id, self._user_id, kind),
+            "insert into plytos.card (id, owner_id, kind, status, parent_id)"
+            " values (%s, %s, %s, %s, %s)",
+            (card_id, self._user_id, kind, status, content.parent),
         )
         self._conn.execute(
             "insert into plytos.card_line (id, owner_id, card_id) values (%s, %s, %s)",
@@ -181,7 +200,17 @@ class CardRepository:
         self._check_head(line, base_version_id)
         parent = self._version(base_version_id)
         before = None if parent.redacted else self._main_content(parent)
+        kind, sits_under = self._card_place(card_id)
+        moved = content.parent != sits_under
+        if moved:
+            self._check_parent(kind, content.parent)
         version = self._append(line, parent, content, None, author)
+        if moved:
+            # The version above records the move; this keeps the clear mirror in step.
+            self._conn.execute(
+                "update plytos.card set parent_id = %s where id = %s", (content.parent, card_id)
+            )
+            self._event(author, "card.moved", "card", card_id)
 
         behind: list[UUID] = []
         if facts_changed(before, content):
@@ -280,7 +309,8 @@ class CardRepository:
             "  (select count(*) from plytos.card_line x"
             "    where x.card_id = c.id and x.target_id is not null),"
             "  (select count(*) from plytos.card_line x"
-            "    where x.card_id = c.id and x.state = 'behind')"
+            "    where x.card_id = c.id and x.state = 'behind'),"
+            "  c.parent_id"
             " from plytos.card c"
             " join plytos.card_line l on l.card_id = c.id and l.target_id is null"
             " join plytos.card_version v on v.id = l.head_version_id"
@@ -292,7 +322,7 @@ class CardRepository:
             headline = None
             if r[5] is not None:
                 content = MainContent.model_validate_json(
-                    self._cipher.decrypt(bytes(r[5]), _version_aad(r[3]))
+                    self._cipher.decrypt(bytes(r[5]), version_aad(r[3]))
                 )
                 headline = content.framing.headline
             summaries.append(
@@ -300,6 +330,7 @@ class CardRepository:
                     id=r[0],
                     kind=r[1],
                     status=r[2],
+                    parent_id=r[8],
                     headline=headline,
                     main_version=r[4],
                     variants=r[6],
@@ -310,7 +341,8 @@ class CardRepository:
 
     def card_detail(self, card_id: UUID) -> CardDetail:
         card = self._conn.execute(
-            "select kind, status, trust_level, created_at from plytos.card where id = %s",
+            "select kind, status, trust_level, created_at, parent_id from plytos.card"
+            " where id = %s",
             (card_id,),
         ).fetchone()
         if card is None:
@@ -358,6 +390,7 @@ class CardRepository:
             status=card[1],
             trust_level=card[2],
             created_at=card[3],
+            parent_id=card[4],
             main=main,
             variants=variants,
         )
@@ -401,7 +434,7 @@ class CardRepository:
                 if expected != bytes(stored_chain):
                     problems.append(f"version {vid} chain hash does not match")
                 if ct is not None:
-                    raw = self._cipher.decrypt(bytes(ct), _version_aad(vid))
+                    raw = self._cipher.decrypt(bytes(ct), version_aad(vid))
                     if hashlib.sha256(raw).digest() != bytes(stored_content):
                         problems.append(f"version {vid} content hash does not match")
                 previous_chain = bytes(stored_chain)
@@ -440,10 +473,30 @@ class CardRepository:
         ).fetchone()
         if row is None or row[0] is None:
             raise CardNotFoundError(str(version.id))
-        return self._cipher.decrypt(bytes(row[0]), _version_aad(version.id))
+        return self._cipher.decrypt(bytes(row[0]), version_aad(version.id))
 
     def _main_content(self, version: VersionView) -> MainContent:
         return MainContent.model_validate_json(self._decrypt(version))
+
+    def _card_place(self, card_id: UUID) -> tuple[str, UUID | None]:
+        row = self._conn.execute(
+            "select kind, parent_id from plytos.card where id = %s", (card_id,)
+        ).fetchone()
+        if row is None:
+            raise CardNotFoundError(str(card_id))
+        return row[0], row[1]
+
+    def _check_parent(self, kind: str, parent_id: UUID | None) -> None:
+        """Explains a bad placement before the database refuses it."""
+        if parent_id is None:
+            return
+        row = self._conn.execute(
+            "select kind from plytos.card where id = %s", (parent_id,)
+        ).fetchone()
+        if row is None:
+            raise ParentError("The card it should sit under doesn't exist.")
+        if not may_sit_under(kind, row[0]):
+            raise ParentError(f"A {kind} card can't sit under a {row[0]} card.")
 
     def _main_head(self, card_id: UUID) -> VersionView:
         return self._version(self._line(card_id, None).head_version_id)
@@ -479,7 +532,7 @@ class CardRepository:
             based_on_main_version_id=based_on_main_version_id,
             content_hash=c_hash,
         )
-        ciphertext = self._cipher.encrypt(canonical_json(content), _version_aad(version_id))
+        ciphertext = self._cipher.encrypt(canonical_json(content), version_aad(version_id))
         try:
             row = self._conn.execute(
                 "insert into plytos.card_version (id, owner_id, card_id, line_id, number,"

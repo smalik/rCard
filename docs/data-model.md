@@ -9,14 +9,47 @@ across hundreds of tailored variants. These rules make that hold. The schema is
 | Record | Table | What it is |
 | --- | --- | --- |
 | Person | `plytos.app_user` | The account. Identified by a sign-in subject, nothing else in clear text |
-| Data key | `vault.user_key` | The person's own 256-bit key, wrapped by the Cloud KMS key-encryption key |
-| Card | `plytos.card` | One claim, kept for a whole career: kind, status, trust level |
+| Data key | `plytos_vault.user_key` | The person's own 256-bit key, wrapped by the Cloud KMS key-encryption key |
+| Card | `plytos.card` | One claim, kept for a whole career: kind, status, trust level, and the card it sits under (`parent_id`) |
 | Target | `plytos.target` | An audience that spans cards (Finance, then JP Morgan under it). Name encrypted |
 | Line | `plytos.card_line` | A card's line of versions. `target_id` null is the main line; otherwise a variant for one target |
 | Version | `plytos.card_version` | One permanent snapshot on a line. Content encrypted; hashes in clear |
 | Event | `plytos.event` | Append-only history: who did what to which record, never the content |
+| Resume import | `plytos.resume_import` | A resume the person brought in: the original file, what was read from it, and their progress approving its cards. All encrypted; only the format, size and times are clear. Schema in [`0002_resume_import.sql`](../services/api/migrations/0002_resume_import.sql) |
+| Message, tidbit, proposal, agent run | `plytos.message`, `plytos.tidbit`, `plytos.proposal`, `plytos.agent_run` | The conversation with Plytos, the notes it keeps, what agents offer, and the work they did. Content encrypted. See [agents.md](agents.md) |
+| Check-in plan | `plytos.check_in_plan` | When Plytos checks in, once a month: a week of the month, a weekday, a local time and a time zone. No content. See [agents.md](agents.md) |
 
 ## Rules
+
+**Cards nest into a career tree.** An employment (employer and tenure) holds
+its positions, and a position holds its accomplishments. Agency, consulting
+and freelance work puts an engagement per client in between. A win that spans
+promotions sits on the employment. Each level is its own card with its own
+versions, so a fact lives at one level and the levels below show it without
+copying it. Change the employer's name once and everything under it follows.
+
+| Kind | May sit under |
+| --- | --- |
+| employment | nothing |
+| position | employment |
+| engagement | employment, position |
+| project | employment, position, engagement |
+| accomplishment | employment, position, engagement, project |
+| story | accomplishment |
+| skill, education, credential, activity | nothing |
+
+Every allowed parent ranks above its child and a card's kind never changes, so
+the tree can't loop. `role` is the flat kind from before the tree
+([`0003_career_tree.sql`](../services/api/migrations/0003_career_tree.sql));
+old cards keep it and new cards don't use it.
+
+**Where a card sits is a fact.** The parent is part of the main version's
+content (schema version 2), encrypted with the rest. `card.parent_id` mirrors
+the current main version's parent in clear, holding only IDs, so the tree can
+be read without decrypting. Moving a card is a new main version, so its
+history shows where it used to sit. Variants can't move a card. A trigger
+refuses a parent of the wrong kind, and a composite foreign key refuses a
+parent that belongs to someone else.
 
 **Facts live only on the main line.** Main versions hold `facts` (employer,
 client, agency, title, dates, numbers, scope, skills, evidence) and default
@@ -64,6 +97,6 @@ every row they own. Any copy left in a backup is unreadable without the key.
 Backups of the main database also contain wrapped data keys, so a key deleted
 today stays recoverable from backups until they expire (7 days of
 point-in-time recovery, 14 daily backups). Before launch, either move
-`vault.user_key` to a separate store with short retention, or give each person
+`plytos_vault.user_key` to a separate store with short retention, or give each person
 a Cloud KMS key of their own and destroy it on deletion (about $0.06 per
 person per month). Account deletion should promise erasure within that window.

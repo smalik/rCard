@@ -1,12 +1,19 @@
 from collections.abc import Iterator
+from urllib.parse import quote, unquote
 
 import pytest
 from fastapi.testclient import TestClient
 
+from plytos_api.agents.model import NewCard, ProposalBody
+from plytos_api.agents.store import AgentStore
+from plytos_api.auth import find_or_create_user
 from plytos_api.config import Settings
+from plytos_api.db import Database
+from plytos_api.keys import Vault
 from plytos_api.main import create_app
 
 from .conftest import DbUrls, main_content
+from .resume_samples import promotions_text
 
 
 @pytest.fixture(scope="module")
@@ -120,3 +127,249 @@ def test_unknown_parent_target_is_not_found(client: TestClient) -> None:
         headers=as_user("parent-check"),
     )
     assert response.status_code == 404
+
+
+def test_resume_import_keeps_the_original_and_saves_only_approved_cards(
+    client: TestClient,
+) -> None:
+    from .resume_samples import consultant_docx
+
+    me = as_user("importer")
+    before = client.get("/v1/cards", headers=me).json()
+    data = consultant_docx()
+    response = client.post(
+        "/v1/imports",
+        content=data,
+        headers={**me, "X-Plytos-Filename": "Casey%20Morgan%20Resume.docx"},
+    )
+    assert response.status_code == 201, response.text
+    assert response.headers["cache-control"] == "no-store"
+    view = response.json()
+    import_id = view["id"]
+    assert view["file"] == {"format": "docx", "size": len(data), "name": "Casey Morgan Resume.docx"}
+    assert view["progress"] == {"settled": {}, "cards": {}, "edits": {}, "moves": {}}
+    assert len(view["result"]["roles"]) == 4
+    assert client.get("/v1/cards", headers=me).json() == before
+
+    original = client.get(f"/v1/imports/{import_id}/original", headers=me)
+    assert original.status_code == 200
+    assert original.content == data
+    assert original.headers["content-type"].startswith("application/vnd.openxml")
+    assert unquote(original.headers["x-plytos-filename"]) == "Casey Morgan Resume.docx"
+
+    [summary] = [s for s in client.get("/v1/imports", headers=me).json() if s["id"] == import_id]
+    assert summary["cards"] == len(view["result"]["cards"])
+    assert summary["approved"] == 0
+    assert summary["to_settle"] >= 1
+
+    # The resume quotes the same result as ~30% and 25%. Picking 25% rewrites
+    # the card that said 30%, and only that card.
+    findings = view["result"]["findings"]
+    conflict = next(i for i, f in enumerate(findings) if f["rule"] == "consistency.figures")
+    assert conflict in view["to_settle"]
+    assert all(findings[i]["about"] == "cards" for i in view["to_settle"])
+    assert [loc["figure"] for loc in findings[conflict]["locations"]] == ["30%", "25%"]
+    bad = client.post(
+        f"/v1/imports/{import_id}/settle",
+        json={"finding": conflict, "answer": "chosen", "value": "40%"},
+        headers=me,
+    )
+    assert bad.status_code == 409
+    settled = client.post(
+        f"/v1/imports/{import_id}/settle",
+        json={"finding": conflict, "answer": "chosen", "value": "25%"},
+        headers=me,
+    )
+    assert settled.status_code == 200, settled.text
+    progress = settled.json()
+    [ref] = progress["settled"][str(conflict)]["changed"]
+    edited = progress["edits"][ref]
+    assert "~25%" in edited["framing"]["headline"]
+    assert edited["facts"]["figures"] == ["25%"]
+
+    # Changing the answer puts the import's own wording back.
+    unsure = client.post(
+        f"/v1/imports/{import_id}/settle",
+        json={"finding": conflict, "answer": "later"},
+        headers=me,
+    ).json()
+    assert unsure["edits"] == {}
+    client.post(
+        f"/v1/imports/{import_id}/settle",
+        json={"finding": conflict, "answer": "chosen", "value": "25%"},
+        headers=me,
+    )
+
+    # The card sits under a position, which sits under an employment: approving it
+    # first is refused, so nothing lands loose.
+    proposals = {c["ref"]: c for c in view["result"]["cards"]}
+    early = client.post(f"/v1/imports/{import_id}/cards/{ref}/approve", json={}, headers=me)
+    assert early.status_code == 409
+    assert "first" in early.json()["detail"]
+    chain: list[str] = []
+    up_ref = proposals[ref]["parent_ref"]
+    while up_ref is not None:
+        chain.insert(0, up_ref)
+        up_ref = proposals[up_ref]["parent_ref"]
+    # The highlight names the client, so it sits under that engagement.
+    assert [proposals[r]["kind"] for r in chain] == ["employment", "position", "engagement"]
+    saved: dict[str, str] = {}
+    for step in chain:
+        up = client.post(f"/v1/imports/{import_id}/cards/{step}/approve", json={}, headers=me)
+        assert up.status_code == 201, up.text
+        saved[step] = up.json()["card"]["id"]
+
+    approved = client.post(f"/v1/imports/{import_id}/cards/{ref}/approve", json={}, headers=me)
+    assert approved.status_code == 201, approved.text
+    card = approved.json()["card"]
+    assert card["status"] == "approved"
+    assert card["parent_id"] == saved[chain[-1]]
+    assert card["main"]["content"]["parent"] == saved[chain[-1]]
+    assert "~25%" in card["main"]["content"]["framing"]["headline"]
+    assert card["main"]["head"]["author_kind"] == "person"
+    again = client.post(f"/v1/imports/{import_id}/cards/{ref}/approve", json={}, headers=me)
+    assert again.status_code == 409
+
+    later = client.post(
+        f"/v1/imports/{import_id}/cards/card-1/decision", json={"state": "later"}, headers=me
+    )
+    assert later.json()["cards"]["card-1"] == {"state": "later", "card_id": None}
+    assert (
+        client.post(
+            f"/v1/imports/{import_id}/cards/card-999/decision",
+            json={"state": "later"},
+            headers=me,
+        ).status_code
+        == 404
+    )
+    assert len(client.get("/v1/cards", headers=me).json()) == len(before) + 4
+
+    someone = as_user("someone-else")
+    assert client.get(f"/v1/imports/{import_id}", headers=someone).status_code == 404
+    assert client.get(f"/v1/imports/{import_id}/original", headers=someone).status_code == 404
+    assert client.delete(f"/v1/imports/{import_id}", headers=someone).status_code == 404
+    assert client.get("/v1/imports", headers=someone).json() == []
+
+    assert client.delete(f"/v1/imports/{import_id}", headers=me).status_code == 204
+    assert client.get(f"/v1/imports/{import_id}", headers=me).status_code == 404
+    assert len(client.get("/v1/cards", headers=me).json()) == len(before) + 4
+
+
+def test_resume_import_refuses_bad_files(client: TestClient) -> None:
+    me = as_user("bad-files")
+    old_doc = client.post("/v1/imports", content=b"\xd0\xcf\x11\xe0" + b"\0" * 64, headers=me)
+    assert old_doc.status_code == 422
+    assert ".docx" in old_doc.json()["detail"]
+    too_big = client.post("/v1/imports", content=b"x" * (5 * 1024 * 1024 + 1), headers=me)
+    assert too_big.status_code == 413
+    assert client.post("/v1/imports", content=b"", headers=me).status_code == 422
+    assert client.post("/v1/imports", content=b"hello").status_code == 401
+    assert client.get("/v1/imports", headers=me).json() == []
+
+
+def test_conversation_over_http(client: TestClient, db: Database, vault: Vault) -> None:
+    me, other = as_user("api-talk"), as_user("api-talk-other")
+    said = client.post(
+        "/v1/conversation", json={"text": "Shipped the routing tool to 3 sites"}, headers=me
+    )
+    assert said.status_code == 201, said.text
+    assert said.json()["author"] == "person"
+    assert client.get("/v1/conversation", headers=me).json() == [said.json()]
+    assert client.get("/v1/conversation", headers=other).json() == []
+    [run] = client.get("/v1/agent-runs", headers=me).json()
+    assert (run["agent"], run["state"]) == ("listener", "queued")
+    too_long = client.post("/v1/conversation", json={"text": "x" * 4001}, headers=me)
+    assert too_long.status_code == 422
+    assert client.get("/v1/proposals", headers=me).json() == []
+
+    user = find_or_create_user(db, vault, "dev:api-talk")
+    card = NewCard(kind="accomplishment", content=main_content())
+    with db.as_user(user) as conn:
+        store = AgentStore(conn, user, vault.cipher_for(conn, user))
+        keep_id = store.propose(
+            "stitcher", "new_card", ProposalBody(message="One win?", card=card)
+        ).id
+        drop_id = store.propose(
+            "stitcher", "new_card", ProposalBody(message="Another?", card=card)
+        ).id
+    assert len(client.get("/v1/proposals", headers=me).json()) == 2
+    assert client.post(f"/v1/proposals/{keep_id}/keep", json={}, headers=other).status_code == 404
+
+    kept = client.post(f"/v1/proposals/{keep_id}/keep", json={}, headers=me)
+    assert kept.status_code == 201, kept.text
+    assert kept.json()["proposal"]["state"] == "kept"
+    assert kept.json()["card"]["main"]["head"]["author_kind"] == "ai"
+    again = client.post(f"/v1/proposals/{keep_id}/keep", json={}, headers=me)
+    assert again.status_code == 409
+
+    dropped = client.post(f"/v1/proposals/{drop_id}/dismiss", headers=me)
+    assert dropped.status_code == 200 and dropped.json()["state"] == "dismissed"
+    assert client.get("/v1/proposals", headers=me).json() == []
+    for state, proposal_id in (("kept", keep_id), ("dismissed", drop_id)):
+        listed = client.get("/v1/proposals", params={"state": state}, headers=me).json()
+        assert [p["id"] for p in listed] == [str(proposal_id)]
+
+
+def test_sharing_a_resume_in_the_conversation(client: TestClient) -> None:
+    me, other = as_user("api-resume"), as_user("api-resume-other")
+    shared = client.post(
+        "/v1/conversation/resume",
+        content=promotions_text().encode(),
+        headers=me | {"X-Plytos-Filename": quote("Avery Quinn.txt")},
+    )
+    assert shared.status_code == 201, shared.text
+    body = shared.json()
+    person, plytos = body["messages"]
+    assert person["author"] == "person" and plytos["author"] == "plytos"
+    assert plytos["text"].startswith("I read it:")
+    assert body["resume"]["file"]["name"] == "Avery Quinn.txt"
+    assert body["resume"]["cards"] > 0 and body["resume"]["approved"] == 0
+    assert person["import_id"] == plytos["import_id"] == body["resume"]["id"]
+    assert [m["id"] for m in client.get("/v1/conversation", headers=me).json()] == [
+        person["id"],
+        plytos["id"],
+    ]
+    assert client.get("/v1/conversation", headers=other).json() == []
+    assert client.get("/v1/agent-runs", headers=me).json() == []
+    empty = client.post("/v1/conversation/resume", content=b"", headers=me)
+    assert empty.status_code == 422
+
+
+def test_check_ins_over_http(client: TestClient) -> None:
+    me, other = as_user("api-check-ins"), as_user("api-check-ins-other")
+    assert client.get("/v1/check-ins", headers=me).json() == {
+        "plan": None,
+        "label": None,
+        "next_at": None,
+    }
+    plan = {"week": -1, "weekday": 5, "time": "16:00", "time_zone": "America/Chicago"}
+    saved = client.put("/v1/check-ins", json=plan, headers=me)
+    assert saved.status_code == 200, saved.text
+    check_ins = saved.json()["check_ins"]
+    assert check_ins["plan"] == plan | {"state": "on"}
+    assert check_ins["label"] == "The last Friday of the month at 4 PM"
+    assert check_ins["next_at"] is not None
+    message = saved.json()["message"]
+    assert message["author"] == "plytos"
+    assert message["text"].startswith("Got it. I'll check in once a month, on the last Friday")
+    assert client.get("/v1/conversation", headers=me).json() == [message]
+    assert client.get("/v1/check-ins", headers=me).json() == check_ins
+    assert client.get("/v1/check-ins", headers=other).json()["plan"] is None
+
+    off = client.put("/v1/check-ins", json=plan | {"state": "off"}, headers=me)
+    assert off.status_code == 200, off.text
+    assert off.json()["check_ins"]["next_at"] is None
+    assert off.json()["message"]["text"].startswith("Okay, no check-ins")
+
+    for bad in (
+        plan | {"time_zone": "Mars/Olympus"},
+        plan | {"time": "25:00"},
+        plan | {"week": 5},
+        plan | {"weekday": 0},
+        plan | {"weekdays": [1, 2]},
+        plan | {"channel": "text_message"},
+    ):
+        refused = client.put("/v1/check-ins", json=bad, headers=me)
+        assert refused.status_code == 422, bad
+    unknown = client.put("/v1/check-ins", json=plan | {"time_zone": "Mars/Olympus"}, headers=me)
+    assert unknown.json()["detail"] == "Plytos doesn't know that time zone."

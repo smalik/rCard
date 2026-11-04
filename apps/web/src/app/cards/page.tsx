@@ -1,25 +1,18 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { ApiError, type CardKind, type CardSummary, listCards } from "../../lib/api";
+import { AppHeader, kindStyle, TabBar } from "../../components/hybrid";
+import { ApiError, type CardSummary, listCards } from "../../lib/api";
+import { KIND_LABELS } from "../../lib/cards";
 import { currentSession } from "../../lib/session";
 
 export const metadata: Metadata = { title: "Your cards" };
 export const dynamic = "force-dynamic";
 
-const KIND_LABELS: Record<CardKind, string> = {
-  role: "Role",
-  accomplishment: "Accomplishment",
-  skill: "Skill",
-  project: "Project",
-  education: "Education",
-  credential: "Credential",
-  story: "Story",
-};
-
 function CardRow({ card }: { card: CardSummary }) {
   return (
-    <li className="card">
+    <li className={`card kind-${kindStyle(card.kind)}`}>
       <div className="card-top">
         <span className="chip">{KIND_LABELS[card.kind]}</span>
         <span className="muted small">v{card.main_version}</span>
@@ -40,9 +33,14 @@ function CardRow({ card }: { card: CardSummary }) {
   );
 }
 
-export default async function Cards() {
+export default async function Cards({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const session = await currentSession();
   if (!session) redirect("/sign-in");
+  const imported = Number((await searchParams).imported ?? "0");
 
   let cards: CardSummary[] | null = null;
   let failed = false;
@@ -55,9 +53,18 @@ export default async function Cards() {
 
   return (
     <main className="screen">
-      <header className="topbar">
+      <AppHeader />
+      <div className="topbar-row">
         <h1>Your cards</h1>
-      </header>
+        <Link className="link small" href="/import">
+          Bring in a resume
+        </Link>
+      </div>
+      {Number.isInteger(imported) && imported > 0 && (
+        <p className="panel notice" role="status">
+          Saved {imported} {imported === 1 ? "card" : "cards"} from your resume.
+        </p>
+      )}
       {failed && (
         <p className="panel attention" role="alert">
           Plytos couldn&apos;t load your cards just now. Try again in a moment.
@@ -68,8 +75,11 @@ export default async function Cards() {
           <h2>No cards yet</h2>
           <p className="muted">
             Cards are the building blocks of every resume you send: one role, one accomplishment,
-            one skill at a time. Importing your current resume will start your first ones.
+            one skill at a time. Bringing in your current resume will start your first ones.
           </p>
+          <Link className="button primary" href="/import">
+            Bring in your resume
+          </Link>
         </section>
       )}
       {cards && cards.length > 0 && (
@@ -79,6 +89,7 @@ export default async function Cards() {
           ))}
         </ul>
       )}
+      <TabBar current="/cards" />
     </main>
   );
 }

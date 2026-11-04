@@ -6,6 +6,8 @@ career, and recombine cards for each application.
 
 - Product spec: [Plytos v1 candidate experience](https://claude.ai/artifact/FgjGX7dgMcExXqs6fmj2cy)
 - Data model and versioning rules: [docs/data-model.md](docs/data-model.md)
+- Resume import and its audit: [docs/resume-import.md](docs/resume-import.md)
+- Agents, the conversation and proposals: [docs/agents.md](docs/agents.md)
 - Instructions for AI coding agents: [CLAUDE.md](CLAUDE.md)
 
 ## What's here
@@ -20,7 +22,7 @@ career, and recombine cards for each application.
 
 ## Run it locally
 
-You need Docker (or any Postgres 16), Node 22 and [uv](https://docs.astral.sh/uv/).
+You need Docker (or any Postgres 18), Node 22 and [uv](https://docs.astral.sh/uv/).
 
 ```sh
 docker compose up -d db
@@ -50,6 +52,14 @@ above, so restart with the same value if you want to keep reading old cards.
 Tests: `uv run pytest` in `services/api` (uses the same Postgres, in a
 throwaway database) and `npm test` in `apps/web`.
 
+To try the resume import on a file without running anything else:
+
+```sh
+cd services/api
+uv run python -m plytos_api.imports "path/to/resume.docx"    # Markdown audit
+uv run python -m plytos_api.imports "path/to/resume.pdf" --json
+```
+
 ## Status
 
 This is milestone M0, Foundations. Built so far:
@@ -60,8 +70,16 @@ This is milestone M0, Foundations. Built so far:
   wrapped by Cloud KMS, `noindex` everywhere, no public API.
 - Infrastructure as code for Google Cloud and CI with secret scanning.
 
-Still to come in M0: passkey sign-in, resume import (JSON Resume and PDF), and
-starting US carrier registration for check-in texts.
+- Resume import: reads Word, PDF and text resumes, splits them into proposed
+  cards, and audits them for problems a recruiter or an applicant tracking
+  system would trip on ([docs/resume-import.md](docs/resume-import.md)).
+- Bringing a resume in at `/import`, built from the Hybrid designs: start,
+  reading, checking what was found, settling what doesn't line up, and
+  approving cards one at a time. The original file is kept encrypted with the
+  person's own key until they delete it.
+
+Still to come in M0: starting US carrier registration for check-in texts. Sign-in is deferred until much
+later; until then the app runs as a dev user.
 
 ## The 2014 to 2017 R-Card code
 

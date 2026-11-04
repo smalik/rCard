@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import robots from "../app/robots";
-import { contentSecurityPolicy, securityHeaders } from "./security-headers";
+import {
+  contentSecurityPolicy,
+  fileContentSecurityPolicy,
+  securityHeaders,
+} from "./security-headers";
 
 function header(name: string, dev = false): string | undefined {
   return securityHeaders({ dev }).find((h) => h.key === name)?.value;
@@ -23,6 +27,13 @@ describe("privacy headers", () => {
   it("allows eval only in development", () => {
     expect(contentSecurityPolicy({ dev: false })).not.toContain("unsafe-eval");
     expect(contentSecurityPolicy({ dev: true })).toContain("unsafe-eval");
+  });
+
+  it("lets a resume file show but never run scripts or be framed", () => {
+    const policy = fileContentSecurityPolicy();
+    expect(policy).toContain("default-src 'none'");
+    expect(policy).toContain("frame-ancestors 'none'");
+    expect(policy).not.toContain("script-src");
   });
 
   it("disallows the whole site in robots.txt", () => {

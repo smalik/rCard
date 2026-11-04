@@ -22,6 +22,20 @@ export function contentSecurityPolicy({ dev }: { dev: boolean }): string {
   ].join("; ");
 }
 
+// The person's own resume file, opened in the browser. It runs no scripts of
+// Plytos's; the browser's PDF viewer needs object-src to show a PDF inline.
+export function fileContentSecurityPolicy(): string {
+  return [
+    "default-src 'none'",
+    "object-src 'self'",
+    "img-src 'self' data: blob:",
+    "style-src 'unsafe-inline'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+  ].join("; ");
+}
+
 export function securityHeaders({ dev }: { dev: boolean }): Header[] {
   return [
     { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive, nosnippet, noimageindex" },

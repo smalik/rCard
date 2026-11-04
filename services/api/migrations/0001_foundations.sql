@@ -13,7 +13,9 @@
 --   * Card content is stored encrypted with the owner's own data key.
 
 create schema if not exists plytos;
-create schema if not exists vault;
+-- Wrapped data keys live apart from the data they unlock. Not named "vault":
+-- Supabase projects already have a schema by that name.
+create schema if not exists plytos_vault;
 
 -- Group roles. Login roles (Cloud SQL IAM users, test users) are granted
 -- membership by the migration runner, never here.
@@ -71,7 +73,7 @@ create table plytos.app_user (
 -- Each person's data encryption key, wrapped by a key-encryption key held in
 -- Cloud KMS. Deleting this row makes every copy of the person's content
 -- unreadable (crypto-shredding).
-create table vault.user_key (
+create table plytos_vault.user_key (
   user_id uuid primary key references plytos.app_user (id),
   kek_name text not null,
   wrapped_dek bytea not null,
@@ -281,10 +283,10 @@ $$;
 -- including backups, is unreadable), then deletes every row they own.
 create or replace function plytos.purge_user(target_user uuid) returns void
 language plpgsql security definer
-set search_path = pg_catalog, plytos, vault
+set search_path = pg_catalog, plytos, plytos_vault
 as $$
 begin
-  delete from vault.user_key where user_id = target_user;
+  delete from plytos_vault.user_key where user_id = target_user;
   delete from plytos.event where owner_id = target_user;
   update plytos.card_line set head_version_id = null where owner_id = target_user;
   delete from plytos.card_version where owner_id = target_user;
@@ -308,8 +310,8 @@ create policy app_user_self on plytos.app_user
   using (id = plytos.current_user_id())
   with check (id = plytos.current_user_id());
 
-alter table vault.user_key enable row level security;
-create policy user_key_self on vault.user_key
+alter table plytos_vault.user_key enable row level security;
+create policy user_key_self on plytos_vault.user_key
   using (user_id = plytos.current_user_id())
   with check (user_id = plytos.current_user_id());
 
@@ -332,16 +334,16 @@ $$;
 -- Privileges
 -- ---------------------------------------------------------------------------
 
-revoke all on schema plytos, vault from public;
+revoke all on schema plytos, plytos_vault from public;
 revoke all on all functions in schema plytos from public;
 
-grant usage on schema plytos, vault to plytos_app;
+grant usage on schema plytos, plytos_vault to plytos_app;
 grant execute on function plytos.uuid_v7(), plytos.current_user_id(),
   plytos.user_id_for_subject(text) to plytos_app;
 
 grant select, insert on plytos.app_user to plytos_app;
 grant update (status) on plytos.app_user to plytos_app;
-grant select, insert on vault.user_key to plytos_app;
+grant select, insert on plytos_vault.user_key to plytos_app;
 grant select, insert on plytos.card to plytos_app;
 grant update (status, trust_level) on plytos.card to plytos_app;
 grant select, insert on plytos.target to plytos_app;

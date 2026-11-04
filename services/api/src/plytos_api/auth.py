@@ -1,6 +1,7 @@
 """Who is calling.
 
-Passkey sign-in is the next M0 step and isn't built yet. Until then:
+Sign-in is deferred until much later (decided 2026-11-04); resume import comes
+first. Until sign-in exists:
 
 * In dev and test, the X-Plytos-Dev-User header names a sign-in subject, and
   the person is created on first use.
