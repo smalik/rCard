@@ -38,7 +38,7 @@ create table plytos.agent_run (
   output_tokens integer check (output_tokens >= 0),
   -- A short code such as 'model_unavailable'. Never content or model output.
   error_code text check (error_code ~ '^[a-z][a-z_]{0,63}$'),
-  created_at timestamptz not null default now(),
+  created_at timestamptz not null default clock_timestamp(),
   finished_at timestamptz,
   unique (id, owner_id),
   constraint agent_run_finish_is_consistent
@@ -101,7 +101,7 @@ create table plytos.proposal (
   decided_at timestamptz,
   -- The card version made when the person kept it.
   result_version_id uuid references plytos.card_version (id),
-  created_at timestamptz not null default now(),
+  created_at timestamptz not null default clock_timestamp(),
   unique (id, owner_id),
   foreign key (card_id, owner_id) references plytos.card (id, owner_id),
   foreign key (run_id, owner_id) references plytos.agent_run (id, owner_id),
@@ -144,6 +144,9 @@ create trigger proposal_decided_once
 -- A resume shared in the conversation points at its import. Deleting the
 -- import deletes the file and what was read from it; the messages stay and
 -- lose the link.
+-- created_at in this file comes from clock_timestamp(), not now(): a message and
+-- its reply are often written in one transaction, and now() would give both
+-- the same time, losing their order.
 alter table plytos.resume_import add constraint resume_import_id_owner unique (id, owner_id);
 
 create table plytos.message (
@@ -154,7 +157,7 @@ create table plytos.message (
   body_ciphertext bytea not null,
   proposal_id uuid,
   import_id uuid,
-  created_at timestamptz not null default now(),
+  created_at timestamptz not null default clock_timestamp(),
   unique (id, owner_id),
   foreign key (proposal_id, owner_id) references plytos.proposal (id, owner_id),
   foreign key (import_id, owner_id) references plytos.resume_import (id, owner_id)
@@ -186,7 +189,7 @@ create table plytos.tidbit (
   card_id uuid,
   reading_ciphertext bytea,
   read_at timestamptz,
-  created_at timestamptz not null default now(),
+  created_at timestamptz not null default clock_timestamp(),
   unique (id, owner_id),
   foreign key (message_id, owner_id) references plytos.message (id, owner_id),
   foreign key (card_id, owner_id) references plytos.card (id, owner_id),
