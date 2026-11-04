@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     ai_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     ai_vertex_project: str = ""
     ai_vertex_region: str = "global"
+    # Agents (agents/). Inline runs a worker on a thread inside the API, for
+    # development; production runs `python -m plytos_api.agents` as its own service.
+    agents_inline: bool = False
+    # How long the Stitcher waits after a note, so a burst of notes is read together.
+    stitch_delay_seconds: int = 30
 
     @property
     def dev_shortcuts(self) -> bool:

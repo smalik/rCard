@@ -7,6 +7,7 @@ career, and recombine cards for each application.
 - Product spec: [Plytos v1 candidate experience](https://claude.ai/artifact/FgjGX7dgMcExXqs6fmj2cy)
 - Data model and versioning rules: [docs/data-model.md](docs/data-model.md)
 - Resume import and its audit: [docs/resume-import.md](docs/resume-import.md)
+- Agents, the conversation and proposals: [docs/agents.md](docs/agents.md)
 - Instructions for AI coding agents: [CLAUDE.md](CLAUDE.md)
 
 ## What's here

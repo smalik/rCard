@@ -16,6 +16,7 @@ across hundreds of tailored variants. These rules make that hold. The schema is
 | Version | `plytos.card_version` | One permanent snapshot on a line. Content encrypted; hashes in clear |
 | Event | `plytos.event` | Append-only history: who did what to which record, never the content |
 | Resume import | `plytos.resume_import` | A resume the person brought in: the original file, what was read from it, and their progress approving its cards. All encrypted; only the format, size and times are clear. Schema in [`0002_resume_import.sql`](../services/api/migrations/0002_resume_import.sql) |
+| Message, tidbit, proposal, agent run | `plytos.message`, `plytos.tidbit`, `plytos.proposal`, `plytos.agent_run` | The conversation with Plytos, the notes it keeps, what agents offer, and the work they did. Content encrypted. See [agents.md](agents.md) |
 
 ## Rules
 

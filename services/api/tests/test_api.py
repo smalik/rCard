@@ -4,7 +4,12 @@ from urllib.parse import unquote
 import pytest
 from fastapi.testclient import TestClient
 
+from plytos_api.agents.model import NewCard, ProposalBody
+from plytos_api.agents.store import AgentStore
+from plytos_api.auth import find_or_create_user
 from plytos_api.config import Settings
+from plytos_api.db import Database
+from plytos_api.keys import Vault
 from plytos_api.main import create_app
 
 from .conftest import DbUrls, main_content
@@ -259,3 +264,46 @@ def test_resume_import_refuses_bad_files(client: TestClient) -> None:
     assert client.post("/v1/imports", content=b"", headers=me).status_code == 422
     assert client.post("/v1/imports", content=b"hello").status_code == 401
     assert client.get("/v1/imports", headers=me).json() == []
+
+
+def test_conversation_over_http(client: TestClient, db: Database, vault: Vault) -> None:
+    me, other = as_user("api-talk"), as_user("api-talk-other")
+    said = client.post(
+        "/v1/conversation", json={"text": "Shipped the routing tool to 3 sites"}, headers=me
+    )
+    assert said.status_code == 201, said.text
+    assert said.json()["author"] == "person"
+    assert client.get("/v1/conversation", headers=me).json() == [said.json()]
+    assert client.get("/v1/conversation", headers=other).json() == []
+    [run] = client.get("/v1/agent-runs", headers=me).json()
+    assert (run["agent"], run["state"]) == ("listener", "queued")
+    too_long = client.post("/v1/conversation", json={"text": "x" * 4001}, headers=me)
+    assert too_long.status_code == 422
+    assert client.get("/v1/proposals", headers=me).json() == []
+
+    user = find_or_create_user(db, vault, "dev:api-talk")
+    card = NewCard(kind="accomplishment", content=main_content())
+    with db.as_user(user) as conn:
+        store = AgentStore(conn, user, vault.cipher_for(conn, user))
+        keep_id = store.propose(
+            "stitcher", "new_card", ProposalBody(message="One win?", card=card)
+        ).id
+        drop_id = store.propose(
+            "stitcher", "new_card", ProposalBody(message="Another?", card=card)
+        ).id
+    assert len(client.get("/v1/proposals", headers=me).json()) == 2
+    assert client.post(f"/v1/proposals/{keep_id}/keep", json={}, headers=other).status_code == 404
+
+    kept = client.post(f"/v1/proposals/{keep_id}/keep", json={}, headers=me)
+    assert kept.status_code == 201, kept.text
+    assert kept.json()["proposal"]["state"] == "kept"
+    assert kept.json()["card"]["main"]["head"]["author_kind"] == "ai"
+    again = client.post(f"/v1/proposals/{keep_id}/keep", json={}, headers=me)
+    assert again.status_code == 409
+
+    dropped = client.post(f"/v1/proposals/{drop_id}/dismiss", headers=me)
+    assert dropped.status_code == 200 and dropped.json()["state"] == "dismissed"
+    assert client.get("/v1/proposals", headers=me).json() == []
+    for state, proposal_id in (("kept", keep_id), ("dismissed", drop_id)):
+        listed = client.get("/v1/proposals", params={"state": state}, headers=me).json()
+        assert [p["id"] for p in listed] == [str(proposal_id)]

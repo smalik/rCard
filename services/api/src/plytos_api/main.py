@@ -7,11 +7,22 @@ from urllib.parse import quote, unquote
 from uuid import UUID
 
 import psycopg
-from fastapi import Depends, FastAPI, HTTPException, Path, Request, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request, Response, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from plytos_api.agents.crew import crew
+from plytos_api.agents.model import (
+    MAX_MESSAGE,
+    MessageView,
+    ProposalState,
+    ProposalView,
+    RunView,
+    TidbitView,
+)
+from plytos_api.agents.runtime import BackgroundWorker, Worker
+from plytos_api.agents.store import AgentRecordNotFoundError, AgentStore, ProposalConflictError
 from plytos_api.auth import resolve_user
 from plytos_api.cards.model import CardKind, MainContent, TargetKind, VariantContent
 from plytos_api.cards.repository import (
@@ -113,6 +124,20 @@ class Verification(BaseModel):
     problems: list[str]
 
 
+class Say(BaseModel):
+    text: str = Field(min_length=1, max_length=MAX_MESSAGE)
+
+
+class Keep(BaseModel):
+    # The person's edits to the proposed card, if they changed it before keeping it.
+    content: MainContent | None = None
+
+
+class Kept(BaseModel):
+    proposal: ProposalView
+    card: CardDetail
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     db = Database(settings.database_url)
@@ -125,12 +150,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.ai_vertex_region,
     )
 
+    background = (
+        BackgroundWorker(Worker(db, vault, crew(settings))) if settings.agents_inline else None
+    )
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         db.open()
+        if background:
+            background.start()
         try:
             yield
         finally:
+            if background:
+                background.stop()
             db.close()
 
     docs = settings.dev_shortcuts
@@ -195,6 +228,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(ImportConflictError)
     async def import_conflict(_: Request, exc: ImportConflictError) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=status.HTTP_409_CONFLICT)
+
+    @app.exception_handler(AgentRecordNotFoundError)
+    async def agent_record_not_found(_: Request, __: AgentRecordNotFoundError) -> JSONResponse:
+        return JSONResponse({"detail": "Not found"}, status_code=status.HTTP_404_NOT_FOUND)
+
+    @app.exception_handler(ProposalConflictError)
+    async def proposal_conflict(_: Request, exc: ProposalConflictError) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=status.HTTP_409_CONFLICT)
 
     @app.exception_handler(KeyShreddedError)
@@ -367,5 +408,52 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 import_id, ref, body.content, repo(conn, user_id), person(user_id)
             )
         return Approved(card=card, progress=progress)
+
+    def agents(conn: psycopg.Connection, user_id: UUID) -> AgentStore:
+        return AgentStore(conn, user_id, vault.cipher_for(conn, user_id))
+
+    @app.get("/v1/conversation")
+    def conversation(
+        user_id: User, before: UUID | None = None, limit: int = Query(50, ge=1, le=200)
+    ) -> list[MessageView]:
+        """The latest messages, oldest first. Pass the oldest id as `before` to page back."""
+        with db.as_user(user_id) as conn:
+            return agents(conn, user_id).conversation(limit, before)
+
+    @app.post("/v1/conversation", status_code=status.HTTP_201_CREATED)
+    def say(body: Say, user_id: User) -> MessageView:
+        """Saves the person's message. The Listener reads it and answers shortly after."""
+        with db.as_user(user_id) as conn:
+            return agents(conn, user_id).say(body.text)
+
+    @app.get("/v1/proposals")
+    def proposals(user_id: User, state: ProposalState | None = "open") -> list[ProposalView]:
+        with db.as_user(user_id) as conn:
+            return agents(conn, user_id).proposals(state)
+
+    @app.post("/v1/proposals/{proposal_id}/keep", status_code=status.HTTP_201_CREATED)
+    def keep(proposal_id: UUID, body: Keep, user_id: User) -> Kept:
+        """Keeps a proposed card, as proposed or as the person edited it."""
+        with db.as_user(user_id) as conn:
+            proposal, card = agents(conn, user_id).keep(
+                proposal_id, repo(conn, user_id), body.content
+            )
+        return Kept(proposal=proposal, card=card)
+
+    @app.post("/v1/proposals/{proposal_id}/dismiss")
+    def dismiss(proposal_id: UUID, user_id: User) -> ProposalView:
+        with db.as_user(user_id) as conn:
+            return agents(conn, user_id).dismiss(proposal_id)
+
+    @app.get("/v1/tidbits")
+    def tidbits(user_id: User, card_id: UUID | None = None) -> list[TidbitView]:
+        with db.as_user(user_id) as conn:
+            return agents(conn, user_id).tidbits(card_id)
+
+    @app.get("/v1/agent-runs")
+    def agent_runs(user_id: User) -> list[RunView]:
+        """What the agents did lately, for "how I got here". Never content."""
+        with db.as_user(user_id) as conn:
+            return agents(conn, user_id).runs()
 
     return app

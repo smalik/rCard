@@ -6,6 +6,8 @@ import psycopg
 import pytest
 from psycopg import errors
 
+from plytos_api.agents.model import ProposalBody
+from plytos_api.agents.store import AgentStore
 from plytos_api.cards.repository import Author, CardNotFoundError
 from plytos_api.db import Database
 from plytos_api.imports.pipeline import import_resume
@@ -122,6 +124,13 @@ def test_deleting_an_account_shreds_the_key_and_every_row(
     with repo_for(other) as repo:
         repo.create_card("skill", main_content(), ME)
     _import(db, vault, user)
+    with db.as_user(user) as conn:
+        store = AgentStore(conn, user, vault.cipher_for(conn, user))
+        said = store.say("Cut late shipments from 12% to 7%")
+        tidbit = store.add_tidbit("text", said.text, message_id=said.id)
+        store.propose(
+            "stitcher", "question", ProposalBody(message="Which site?"), cites=[tidbit.id]
+        )
 
     with psycopg.connect(test_db.app_url) as app, pytest.raises(errors.InsufficientPrivilege):
         app.execute("select plytos.purge_user(%s)", (user,))
@@ -140,6 +149,10 @@ def test_deleting_an_account_shreds_the_key_and_every_row(
             ("plytos.target", "owner_id"),
             ("plytos.event", "owner_id"),
             ("plytos.resume_import", "owner_id"),
+            ("plytos.message", "owner_id"),
+            ("plytos.tidbit", "owner_id"),
+            ("plytos.proposal", "owner_id"),
+            ("plytos.agent_run", "owner_id"),
         ):
             row = owner.execute(
                 f"select count(*) from {table} where {column} = %s",  # noqa: S608
