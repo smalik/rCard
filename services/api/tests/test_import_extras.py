@@ -202,3 +202,16 @@ def test_claude_is_asked_for_facts_at_low_effort() -> None:
     assert sent[0]["system"] == FACTS_INSTRUCTIONS
     assert sent[0]["output_config"]["effort"] == "low"
     assert sent[0]["messages"][0]["content"] == "Accomplishments:\n[R1] Ran billing for 3 clinics."
+
+
+def test_facts_find_their_card_however_the_ref_is_written() -> None:
+    def answers(results: list[tuple[str, str]]) -> list[dict[str, Any]]:
+        er, scheduling = _ref(results, "ER wait"), _ref(results, "scheduling")
+        return [
+            {"result": f"[{er}]", "skills": [], "scope": ["across 4 sites"], "outcome": ""},
+            {"result": scheduling[1:], "skills": ["scheduling"], "scope": [], "outcome": ""},
+        ]
+
+    result = _import(FakeReader(reading(), facts=answers))
+    assert _card(result, "ER wait").content.facts["scope"] == ["across 4 sites"]
+    assert _card(result, "scheduling").content.facts["skills"] == ["scheduling"]

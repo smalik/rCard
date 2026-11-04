@@ -432,3 +432,42 @@ def workstream_text() -> str:
             "University of Texas, B.S. Statistics, 2015",
         ]
     )
+
+
+def title_first_text(second_employer: str = "Contoso Bank") -> str:
+    """Each title written above its employer's line, the newest first; by default
+    two titles at one bank, written as two back-to-back jobs. Made up."""
+    return "\n".join(
+        [
+            "Robin Diaz",
+            "robin.diaz@example.com | 555-0110",
+            "EXPERIENCE",
+            "ETL Developer",
+            "Contoso Bank, Dallas, TX\tJun 2005 – Jan 2007",
+            "• Built nightly loads into Oracle with SQL and shell scripts.",
+            "• Cut load time by 40%.",
+            "Database Developer",
+            f"{second_employer}, Dallas, TX\t2002 – 2005",
+            "• Wrote stored procedures for 12 reports.",
+            "EDUCATION",
+            "University of North Texas, B.S. Computer Science, 2002",
+        ]
+    )
+
+
+def wrapped_text() -> str:
+    """A job whose duties were run together and cut at the page's line wraps, with
+    no bullet marks, as some PDF exports leave them. Made up."""
+    return "\n".join(
+        [
+            "Jamie Fox",
+            "jamie.fox@example.com",
+            "EXPERIENCE",
+            "Public Relations Specialist, Company Name, City, State\tJan 2015 – Dec 2019",
+            "Wrote press releases for 6 product launches. Managed media relations with",
+            "trade press and pitched 40 stories a year. Coordinated events for the",
+            "firm.",
+            "Account Coordinator, Company Name, City, State\tJan 2012 – Dec 2014",
+            "Tracked coverage for 12 clients.",
+        ]
+    )

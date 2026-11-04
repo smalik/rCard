@@ -121,27 +121,39 @@ def propose_cards(
             if role.description and not prose:
                 card.content.framing.body = role.description
                 card.source_blocks += role.description_blocks
-            for bullet in role.bullets:
-                extra: dict[str, FactValue] = {"workstream": bullet.group} if bullet.group else {}
-                add(
-                    "accomplishment",
-                    {**extra, **_figures(bullet.text)},
-                    bullet.text,
-                    [bullet.block],
-                    role.ref,
-                    card.ref,
-                )
+            bullets = {b.block: b for b in role.bullets}
+            lines = [(b.block, b.text, b.bullet_char is not None) for b in role.bullets]
+            for run in _wrapped(lines):
+                lead = bullets[run[0][0]]
+                extra: dict[str, FactValue] = {"workstream": lead.group} if lead.group else {}
+                if len(run) == 1:
+                    pieces = [(lead.text, [lead.block])]
+                else:
+                    # A bullet that wraps onto lines of its own, with no bullet mark to
+                    # tell where the next begins: a card per sentence, not per line.
+                    pieces = _sentences_over(run, shortest=3)
+                for text, spanned in pieces:
+                    add(
+                        "accomplishment",
+                        {**extra, **_figures(text)},
+                        text,
+                        spanned,
+                        role.ref,
+                        card.ref,
+                    )
             if prose:
-                # One proposed card per sentence of a paragraph-style role.
-                for block in role.description_blocks:
-                    for sentence in sentences(parsed_blocks[block]):
+                # One proposed card per sentence of a paragraph-style role, joining
+                # the lines a sentence wraps over.
+                prose_lines = [(b, parsed_blocks[b], False) for b in role.description_blocks]
+                for run in _wrapped(prose_lines):
+                    for sentence, spanned in _sentences_over(run):
                         if len(sentence.split()) < 5:
                             continue
                         add(
                             "accomplishment",
                             _figures(sentence),
                             sentence,
-                            [block],
+                            spanned,
                             role.ref,
                             card.ref,
                         )
@@ -305,6 +317,64 @@ def _own(role: Role, employment: Employment) -> list[int]:
 _ROUND_THE_CLOCK = re.compile(r"\b24\s*[/x]\s*7\b", re.IGNORECASE)
 # A capitalised word right before a number, past the start: "Dynamics 365", "Windows 11".
 _NAMED_BEFORE = re.compile(r"(?<=\S)\s+[A-Z][A-Za-z]*\s$")
+
+
+_ENDS = (".", "!", "?", ":", ";")
+# A line that ends on one of these words runs on to the next.
+_RUNS_ON = re.compile(
+    r"(?:[,&/–-]|\b(?:and|or|of|the|a|an|to|for|with|in|on|at|by|from|as|into|across))$",
+    re.IGNORECASE,
+)
+
+
+def _wrapped(lines: list[tuple[int, str, bool]]) -> list[list[tuple[int, str]]]:
+    """Lines grouped into runs where one wraps onto the next: the next line follows
+    it directly, has no bullet mark of its own, and the line breaks mid-sentence
+    (it starts lowercase, or the line before ends on "and", "of", a comma...).
+    ``lines`` holds each line's block, text and whether it has a bullet mark."""
+    runs: list[list[tuple[int, str]]] = []
+    for block, text, marked in lines:
+        if runs:
+            prev_block, prev_text = runs[-1][-1]
+            prev, nxt = prev_text.rstrip(), text.lstrip()
+            if (
+                block == prev_block + 1
+                and not marked
+                and nxt
+                and not prev.endswith(_ENDS)
+                and (nxt[0].islower() or _RUNS_ON.search(prev) is not None)
+            ):
+                runs[-1].append((block, text))
+                continue
+        runs.append([(block, text)])
+    return runs
+
+
+def _sentences_over(run: list[tuple[int, str]], shortest: int = 0) -> list[tuple[str, list[int]]]:
+    """Each sentence of a run of lines, with the lines it sits on. A piece shorter
+    than ``shortest`` words joins the sentence before it."""
+    text = ""
+    spans: list[tuple[int, int, int]] = []  # (start, end, block)
+    for block, line in run:
+        line = line.strip()
+        if text:
+            text += " "
+        spans.append((len(text), len(text) + len(line), block))
+        text += line
+    out: list[tuple[str, list[int]]] = []
+    at = 0
+    for sentence in sentences(text):
+        start = text.find(sentence, at)
+        start = start if start >= 0 else at
+        end = start + len(sentence)
+        at = end
+        blocks = [b for s, e, b in spans if s < end and e > start]
+        if out and len(sentence.split()) < shortest:
+            prev_text, prev_blocks = out[-1]
+            out[-1] = (f"{prev_text} {sentence}", sorted({*prev_blocks, *blocks}))
+            continue
+        out.append((sentence, blocks))
+    return out
 
 
 def _figures(text: str) -> dict[str, FactValue]:

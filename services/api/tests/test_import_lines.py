@@ -8,7 +8,7 @@ from typing import Any
 from plytos_api.imports.ai import AiResume
 from plytos_api.imports.model import ExtractedDocument, ImportResult
 from plytos_api.imports.pipeline import import_resume
-from tests.resume_samples import stint_text, workstream_text
+from tests.resume_samples import stint_text, workstream_text, wrapped_text
 
 TODAY = date(2026, 11, 4)
 LINES = 20
@@ -298,3 +298,101 @@ def test_the_rules_alone_keep_workstream_labels_off_cards() -> None:
     assert result.lines is not None
     assert result.lines.guessed == []
     assert set(_workstreams(result).values()) == {"Enterprise AI", "Workforce Strategies"}
+
+
+def test_duties_cut_at_line_wraps_become_one_card_each() -> None:
+    """Claude lists each wrapped line as a bullet, as it did on such a PDF: the cards
+    follow the sentences, not the wraps."""
+    found = {
+        "name": "Jamie Fox",
+        "contact_lines": [0, 1],
+        "sections": [
+            {"kind": "contact", "heading_line": -1, "lines": [0, 1]},
+            {"kind": "experience", "heading_line": 2, "lines": list(range(3, 9))},
+        ],
+        "summary_lines": [],
+        "employments": [],
+        "roles": [
+            _role(
+                title="Public Relations Specialist",
+                employer="Company Name",
+                dates="Jan 2015 – Dec 2019",
+                header_lines=[3],
+                bullet_lines=[4, 5, 6],
+            ),
+            _role(
+                title="Account Coordinator",
+                employer="Company Name",
+                dates="Jan 2012 – Dec 2014",
+                header_lines=[7],
+                bullet_lines=[8],
+            ),
+        ],
+        "skills": [],
+        "entries": [],
+        "skipped": [],
+    }
+    result = import_resume(
+        wrapped_text().encode(), "jamie.txt", today=TODAY, reader=FakeReader(found)
+    )
+    duties = [
+        (c.content.framing.headline, c.source_blocks)
+        for c in result.cards
+        if c.kind == "accomplishment"
+    ]
+    assert duties == [
+        ("Wrote press releases for 6 product launches.", [4]),
+        ("Managed media relations with trade press and pitched 40 stories a year.", [4, 5]),
+        ("Coordinated events for the firm.", [5, 6]),
+        ("Tracked coverage for 12 clients.", [8]),
+    ]
+    _all_lines_placed(result)
+    # Two jobs at "Company Name" are two employers, not one stint.
+    assert len([c for c in result.cards if c.kind == "employment"]) == 2
+
+
+def test_entries_listed_under_a_year_take_that_year() -> None:
+    text = "\n".join(
+        [
+            "Lee Park",
+            "lee.park@example.com",
+            "EXHIBITIONS",
+            "2019",
+            "Group show, Contoso Gallery, Austin",
+            "Solo show, Fabrikam Arts Center, Dallas",
+            "2017",
+            "Open studio, Northwind Studios, Austin",
+        ]
+    )
+    found = {
+        "name": "Lee Park",
+        "contact_lines": [0, 1],
+        "sections": [
+            {"kind": "contact", "heading_line": -1, "lines": [0, 1]},
+            {"kind": "activities", "heading_line": 2, "lines": [3, 4, 5, 6, 7]},
+        ],
+        "summary_lines": [],
+        "employments": [],
+        "roles": [],
+        "skills": [],
+        "entries": [
+            {"kind": "activity", "lines": [4], "dates": "2019"},
+            {"kind": "activity", "lines": [5], "dates": "2019"},
+            {"kind": "activity", "lines": [7], "dates": "2017"},
+        ],
+        "skipped": [],
+    }
+    result = import_resume(text.encode(), "lee.txt", today=TODAY, reader=FakeReader(found))
+    dated = {
+        c.content.framing.headline: c.content.facts.get("date")
+        for c in result.cards
+        if c.kind == "activity"
+    }
+    assert dated == {
+        "Group show, Contoso Gallery, Austin": "2019",
+        "Solo show, Fabrikam Arts Center, Dallas": "2019",
+        "Open studio, Northwind Studios, Austin": "2017",
+    }
+    # The year lines head the entries under them.
+    assert result.lines is not None
+    assert result.lines.guessed == [] and {3, 6} <= set(result.lines.headings)

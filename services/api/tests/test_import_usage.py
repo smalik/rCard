@@ -161,7 +161,7 @@ def test_the_bench_stops_at_the_budget_across_runs(tmp_path: Path) -> None:
     assert ledger["spent_usd"] == 0.008 and ledger["resumes"] == 2
     assert len(measured_ids(out)) == 2
     assert len((out / "index.jsonl").read_text().splitlines()) == 2
-    readings = sorted((out / "readings").glob("*.json"))
+    readings = sorted((out / "readings" / "first").glob("*.json"))
     assert [p.stem for p in readings] == sorted(measured_ids(out))
     assert (readings[0].stat().st_mode & 0o777) == 0o600
     assert (out.stat().st_mode & 0o777) == 0o700
@@ -192,3 +192,40 @@ def test_an_answer_that_breaks_the_schema_is_asked_for_once_more(caplog: Any) ->
     assert second.ok and second.cost_usd is not None
     # The log says where the answer broke, never what it said.
     assert "typos: list_type" in caplog.text and "not a list" not in caplog.text
+
+
+def test_a_run_can_be_read_again_and_compared(tmp_path: Path) -> None:
+    from plytos_api.imports.bench import compare, rerun_items
+
+    root = _folders(tmp_path)
+    out = tmp_path / "bench"
+    items = pick(find_resumes([root]), 3, seed=1)
+    run(items, MeteredFake(0.001), out, budget=1.0, run_id="base")
+    again = rerun_items(out, "base")
+    assert [p for p, _ in again] == [p for p, _ in items]
+    records = run(again, MeteredFake(0.002), out, budget=1.0, run_id="low", label="structure=low")
+    assert {r["label"] for r in records} == {"structure=low"}
+    assert "Variant: structure=low" in (out / "summary-low.md").read_text()
+
+    report = compare(out, "base", "low")
+    assert "3 resumes read in both." in report
+    # The same rules read the same files the same way.
+    assert "Employers (mean overlap): 100.0%" in report
+    assert "Accomplishments under the same job: 100.0%" in report
+    assert "| Mean cost (USD) | 0.0010 | 0.0020 |" in report
+    assert "Avery" not in report and "Casey" not in report
+
+
+def test_a_step_can_run_at_another_effort() -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append(json.loads(request.content)["output_config"]["effort"])
+        return httpx2.Response(200, json=_reply('{"typos": []}', {"input_tokens": 10}))
+
+    reader = ClaudeReader(_client(handler), "claude-haiku-5-5", "medium")
+    reader.step_efforts = {"proofread": "high"}
+    metered = reader.metered()
+    metered.proofread(extract(promotions_text().encode(), "avery.txt"))
+    assert seen == ["high"]
+    assert metered.calls[0].effort == "high"

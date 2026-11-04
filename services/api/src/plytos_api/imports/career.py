@@ -76,7 +76,50 @@ def settle_employments(
         employment.role_refs = [r.ref for r in members[employment.ref]]
         _settle(employment, members[employment.ref], texts)
         _describe(employment, members[employment.ref], texts)
-    return kept
+    return _join_back_to_back(kept, members)
+
+
+# Names some resumes and datasets put in place of the employer's: two of these in a
+# row aren't the same employer.
+_STAND_INS = {"company name", "company", "employer", "confidential", "client", "n a"}
+
+
+def _join_back_to_back(
+    employments: list[Employment], members: dict[str, list[Role]]
+) -> list[Employment]:
+    """Joins neighbouring employments at the same employer whose dates run on from
+    each other: a title written with its employer's name, then the next title with
+    the same name again, is one stint holding both titles."""
+    out: list[Employment] = []
+    for employment in employments:
+        prev = out[-1] if out else None
+        if prev is None or not _same_stint(prev, employment):
+            out.append(employment)
+            continue
+        for ref in employment.role_refs:
+            for role in members[employment.ref]:
+                if role.ref == ref:
+                    role.employment_ref = role.employment_key = prev.ref
+        members[prev.ref] += members.pop(employment.ref)
+        prev.role_refs += employment.role_refs
+        prev.header_blocks = sorted({*prev.header_blocks, *employment.header_blocks})
+        prev.description_blocks = sorted({*prev.description_blocks, *employment.description_blocks})
+        prev.description = " ".join(d for d in (prev.description, employment.description) if d)
+        both = [d for d in (prev.dates, employment.dates) if d is not None]
+        prev.dates = span(both) if len(both) == 2 else prev.dates
+        prev.tenure_written = False
+        prev.location = prev.location if prev.location == employment.location else None
+    return out
+
+
+def _same_stint(a: Employment, b: Employment) -> bool:
+    name = _name(a.organization)
+    plain = re.sub(r"[^a-z0-9]+", " ", (a.organization or "").lower()).strip()
+    if not name or plain in _STAND_INS or name != _name(b.organization):
+        return False
+    if a.section != b.section or a.dates is None or b.dates is None:
+        return False
+    return _gap(a.dates, b.dates) <= REJOIN_GAP_MONTHS
 
 
 def _describe(employment: Employment, held: list[Role], texts: dict[int, str]) -> None:

@@ -13,6 +13,7 @@ import re
 
 from plytos_api.cards.model import CardKind, FactValue, Framing, MainContent
 from plytos_api.imports.cards import _figures, _framing
+from plytos_api.imports.dates import find_range, strip_range
 from plytos_api.imports.model import (
     ExtractedDocument,
     LineAccount,
@@ -84,7 +85,13 @@ def account(
             left.append(i)
 
     for i in list(left):
-        if _labels_bullets(i, doc, parsed, cards):
+        year_heading = _only_a_date(blocks[i].text) and _section(i, parsed.sections) not in (
+            "experience",
+            "volunteer",
+        )
+        if year_heading or _labels_bullets(i, doc, parsed, cards):
+            # A label over the lines below it: a year heading a list, or a workstream.
+            # A job's dates left on a line of their own still get asked about.
             left.remove(i)
             headings.add(i)
     for i in left:
@@ -97,6 +104,12 @@ def account(
         skipped=skips,
         guessed=left,
     )
+
+
+def _only_a_date(text: str) -> bool:
+    stripped = text.strip(" :–-")
+    found = find_range(stripped)
+    return found is not None and strip_range(stripped, found).strip(" ,:–-") == ""
 
 
 def _labels_bullets(

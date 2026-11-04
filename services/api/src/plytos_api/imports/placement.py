@@ -15,6 +15,8 @@ accomplishment belongs to. Two checks go over that, independently:
 A card either check flags gets a question for the person. When both agree on
 where it belongs, the card is moved there and the question asks them to
 confirm it; otherwise it stays put and the question offers the other place.
+An unsure second-look flag that names no other place in the tree, on a card
+the order check agrees with, raises no question: it could only list every job.
 Either way nothing is saved until the person answers, so a result never sits
 under the wrong job without them being asked.
 """
@@ -72,7 +74,11 @@ def check_placements(
         named = names.get(flagged.belongs_under.strip().upper()) if flagged else None
         if flagged is not None and named is not None and not _fits(card, by_ref[named]):
             named = None
-        if flagged is not None and named == current:
+        if flagged is not None and (
+            named == current or (named is None and by_order is None and not flagged.sure)
+        ):
+            # Filed where its own line puts it, and the second look can't say where
+            # else and isn't sure: a question would only list every job.
             flagged = None
         if by_order is None and flagged is None:
             continue
@@ -136,7 +142,7 @@ def _by_order(
             # An employer written only on its titles' lines starts at the first of them.
             lines = employment.header_blocks or role_lines.get(employment.ref, [])
             if lines:
-                anchors.append((min(lines), card.ref))
+                anchors.append((_title_first(employment, parsed.roles, min(lines)), card.ref))
         elif card.kind in _JOBS and card.ref in keys:
             anchors.append((keys[card.ref], card.ref))
     anchors.sort()
@@ -164,6 +170,19 @@ def _by_order(
         if above:
             out[card.ref] = above[-1]
     return out
+
+
+def _title_first(employment: Employment, roles: list[Role], start: int) -> int:
+    """Where an employment starts when a title is written just above the employer's
+    line ("Data Engineer" over "Contoso, 2019 - 2021"): at that title."""
+    shared = set(employment.header_blocks)
+    for role in roles:
+        if role.employment_ref != employment.ref:
+            continue
+        own = sorted(b for b in role.header_blocks if b not in shared)
+        if own and own[-1] + 1 == start and own == list(range(own[0], start)):
+            return own[0]
+    return start
 
 
 def _above(ref: str, child: str | None, by_ref: dict[str, ProposedCard]) -> bool:

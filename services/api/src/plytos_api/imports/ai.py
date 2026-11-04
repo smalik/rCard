@@ -39,7 +39,7 @@ from anthropic.types import (
 from anthropic.types.message_content_param import MessageContentParam
 from pydantic import BaseModel, ValidationError
 
-from plytos_api.imports.dates import find_range
+from plytos_api.imports.dates import find_range, strip_range
 from plytos_api.imports.model import (
     Block,
     Bullet,
@@ -276,11 +276,14 @@ section's lines, without the heading.
 phone, links or location, and a headline under the name.
 - summary_lines: the lines of a summary, profile or objective.
 - skills: group skills the way the resume does. category is the resume's own label for \
-the group (for example "Languages"). items are the skills, copied exactly.
+the group (for example "Languages"). items are the skills, copied exactly. A list of \
+skills, tools or strengths is skills whatever its heading says (such as "Highlights" \
+or "Core Qualifications"), not entries.
 - entries: one per degree, certificate, project, award, highlight (a key achievement \
 listed apart from the roles) or activity (a talk, publication, board seat, \
 membership, volunteer work that isn't a job, or interest), with all of its lines and \
-its date or date range as written. kind is one of: {", ".join(ENTRY_KINDS)}.
+its date or date range as written (for entries listed under a year written on a line \
+of its own, that year). kind is one of: {", ".join(ENTRY_KINDS)}.
 - skipped: lines with nothing to keep, each with a reason: page_number; page_header \
 (the name or contact details repeated on a later page); decoration (rules or symbols); \
 references ("References available on request"). Never skip a line that says anything \
@@ -438,10 +441,14 @@ class ClaudeReader:
         # What each call cost. One reader serves many imports, so each import takes its
         # own copy with metered().
         self.calls: list[AiCall] = []
+        # Effort for a named step in place of its usual one, for measuring the trade.
+        self.step_efforts: dict[str, Effort] = {}
 
     def metered(self) -> ClaudeReader:
         """A reader on the same client that records only its own calls."""
-        return ClaudeReader(self._client, self._model, self._effort)
+        reader = ClaudeReader(self._client, self._model, self._effort)
+        reader.step_efforts = self.step_efforts
+        return reader
 
     def read(self, doc: ExtractedDocument) -> AiResume | None:
         return self.ask(
@@ -461,7 +468,7 @@ class ClaudeReader:
         """One request whose answer must match ``schema``, or None when it can't be had.
         ``step`` names what it's for in the usage record. An answer that doesn't match
         is asked for once more."""
-        effort = effort or self._effort
+        effort = self.step_efforts.get(step) or effort or self._effort
         images = 0 if isinstance(content, str) else sum(_is_image(b) for b in content)
         started = time.monotonic()
         try:
@@ -988,12 +995,29 @@ def _entries(found: list[AiEntry], blocks: dict[int, Block], lines: _Claim) -> l
         if not own:
             continue
         texts = [_strip_inline(blocks[i].text) for i in own]
+        given = _given(ai.dates)
         entries.append(
             Entry(
                 text=texts[0],
                 blocks=own,
-                dates=_dates(_given(ai.dates), texts) or find_range(" ".join(texts)),
+                dates=_dates(given, texts)
+                or find_range(" ".join(texts))
+                or _dates(given, _year_above(own[0], blocks)),
                 details=texts[1:],
             )
         )
     return entries
+
+
+def _year_above(line: int, blocks: dict[int, Block], reach: int = 40) -> list[str]:
+    """The nearest line above that holds only a year or a date range, as in a list of
+    exhibitions or talks grouped under "2019", or nothing."""
+    for i in range(line - 1, max(-1, line - 1 - reach), -1):
+        block = blocks.get(i)
+        if block is None:
+            continue
+        text = block.text.strip(" :–-")
+        found = find_range(text)
+        if found is not None and strip_range(text, found).strip(" ,:–-") == "":
+            return [text]
+    return []

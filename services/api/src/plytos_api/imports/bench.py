@@ -18,9 +18,18 @@ machine that has them and is created readable by its owner only:
   step, how its lines were accounted for, questions raised).
 * index.jsonl: the resumes read, with what's needed to group similar ones
   later (category, size, employers, titles, years, skills).
-* readings/<id>.json: everything the import read from each resume, for
+* readings/<run>/<id>.json: everything the import read from each resume, for
   checking it against the file.
 * summary-<run>.md: cost per resume and per step, and what a budget buys.
+
+To measure a change (a lower effort for a step, say) on the same resumes:
+
+    python -m plytos_api.imports.bench --rerun RUN --effort structure=low --budget 20
+    python -m plytos_api.imports.bench --compare RUN NEW_RUN
+
+--compare reads the two runs' readings and says, in numbers only, how often they
+agree on employers, titles, dates and which job each accomplishment is under.
+It makes no Claude calls.
 """
 
 from __future__ import annotations
@@ -39,11 +48,11 @@ from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast, get_args
 
 from plytos_api.imports.ai import ResumeReader
 from plytos_api.imports.extract import UnsupportedFileError
-from plytos_api.imports.model import ImportResult
+from plytos_api.imports.model import ImportResult, ProposedCard
 from plytos_api.imports.pipeline import import_resume
 
 SUFFIXES = (".pdf", ".docx")
@@ -130,6 +139,7 @@ def run(
     workers: int = 1,
     pace: float = 0.0,
     run_id: str | None = None,
+    label: str | None = None,
 ) -> list[dict[str, Any]]:
     """Imports each resume, records it, and returns the records of this run."""
     out.mkdir(parents=True, exist_ok=True)
@@ -154,9 +164,11 @@ def run(
             record = {"id": "", "run": run_id, "path": str(path), "category": category}
             record.update(error=type(exc).__name__, cost_usd=0.0, seconds=0.0)
         ledger.add(record["cost_usd"] or 0.0)
+        if label:
+            record["label"] = label
         reading = record.pop("reading", None)
         if reading is not None:
-            _write_private(out / "readings" / f"{record['id']}.json", reading)
+            _write_private(out / "readings" / run_id / f"{record['id']}.json", reading)
         with lock:
             records.append(record)
             _append(out / "results.jsonl", record)
@@ -173,7 +185,7 @@ def run(
     else:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             list(pool.map(one, items))
-    summary = summarize(records, run_id, ledger, stopped=stop.is_set())
+    summary = summarize(records, run_id, ledger, stopped=stop.is_set(), label=label)
     (out / f"summary-{run_id}.md").write_text(summary)
     return records
 
@@ -322,10 +334,155 @@ def measured_ids(out: Path) -> set[str]:
     return {json.loads(line)["id"] for line in path.read_text().splitlines() if line.strip()}
 
 
+def rerun_items(out: Path, run_id: str) -> list[tuple[Path, str]]:
+    """The resumes an earlier run read, in the order it read them."""
+    items: list[tuple[Path, str]] = []
+    for row in _rows(out):
+        if row.get("run") == run_id and "error" not in row:
+            items.append((Path(row["path"]), row["category"]))
+    return items
+
+
+def _rows(out: Path) -> list[dict[str, Any]]:
+    path = out / "results.jsonl"
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+# --- Comparing two runs ----------------------------------------------------------------
+
+
+def _key(value: object) -> str:
+    return " ".join(str(value or "").lower().split())
+
+
+def _tree(result: ImportResult) -> dict[str, Any]:
+    """The career tree as plain keys: employers, jobs (employer > title or client), each
+    job's dates, and the job each accomplishment line is under, keyed by its text."""
+    by_ref = {c.ref: c for c in result.cards}
+    texts = {b.index: _key(b.text) for b in result.blocks}
+
+    def path(card: ProposedCard | None) -> tuple[str, ...]:
+        out: list[str] = []
+        while card is not None:
+            facts = card.content.facts
+            if card.kind == "employment":
+                out.append(_key(facts.get("employer")))
+            elif card.kind == "position":
+                out.append(_key(facts.get("title")))
+            elif card.kind == "engagement":
+                out.append(f"{_key(facts.get('client'))} / {_key(facts.get('title'))}")
+            card = by_ref.get(card.parent_ref) if card.parent_ref else None
+        return tuple(reversed(out))
+
+    jobs: dict[tuple[str, ...], tuple[str, str]] = {}
+    placed: dict[str, tuple[str, ...]] = {}
+    for card in result.cards:
+        if card.kind in ("position", "engagement"):
+            facts = card.content.facts
+            jobs[path(card)] = (_key(facts.get("start")), _key(facts.get("end")))
+        elif card.kind == "accomplishment" and card.source_blocks:
+            parent = by_ref.get(card.parent_ref) if card.parent_ref else None
+            placed[texts.get(card.source_blocks[0], "")] = path(parent)
+    employers = {
+        _key(c.content.facts.get("employer")) for c in result.cards if c.kind == "employment"
+    }
+    return {"employers": employers, "jobs": jobs, "placed": placed}
+
+
+def _jaccard(a: set[Any], b: set[Any]) -> float:
+    return len(a & b) / len(a | b) if a | b else 1.0
+
+
+def _reading(out: Path, run_id: str, rid: str) -> ImportResult | None:
+    for path in (out / "readings" / run_id / f"{rid}.json", out / "readings" / f"{rid}.json"):
+        if path.exists():
+            return ImportResult.model_validate_json(path.read_text())
+    return None
+
+
+def compare(out: Path, first: str, second: str) -> str:
+    """How two runs' readings of the same resumes agree. Numbers only."""
+    rows = _rows(out)
+    runs = {
+        name: {r["id"]: r for r in rows if r.get("run") == name and "error" not in r}
+        for name in (first, second)
+    }
+    shared = sorted(set(runs[first]) & set(runs[second]))
+    employers: list[float] = []
+    jobs: list[float] = []
+    same_dates = [0, 0]
+    same_place = [0, 0]
+    resumes_all_placed_alike = 0
+    for rid in shared:
+        a, b = _reading(out, first, rid), _reading(out, second, rid)
+        if a is None or b is None:
+            continue
+        ta, tb = _tree(a), _tree(b)
+        employers.append(_jaccard(ta["employers"], tb["employers"]))
+        jobs.append(_jaccard(set(ta["jobs"]), set(tb["jobs"])))
+        for job in set(ta["jobs"]) & set(tb["jobs"]):
+            same_dates[0] += ta["jobs"][job] == tb["jobs"][job]
+            same_dates[1] += 1
+        lines = set(ta["placed"]) & set(tb["placed"])
+        alike = sum(ta["placed"][t] == tb["placed"][t] for t in lines)
+        same_place[0] += alike
+        same_place[1] += len(lines)
+        resumes_all_placed_alike += alike == len(lines)
+
+    def mean(run: str, key: str) -> float:
+        return _mean(runs[run][rid][key] for rid in shared)
+
+    def guessed(run: str) -> float:
+        rs = [runs[run][rid]["lines"] for rid in shared if runs[run][rid].get("lines")]
+        total = sum(r["total"] for r in rs)
+        return sum(r["guessed"] for r in rs) / total if total else 0.0
+
+    compared = len(employers)
+    out_lines = [
+        f"# Comparing run {first} with run {second}",
+        "",
+        f"{compared} resumes read in both.",
+        "",
+        "## Agreement",
+        "",
+        f"- Employers (mean overlap): {_mean(employers):.1%}",
+        f"- Jobs, employer and title (mean overlap): {_mean(jobs):.1%}",
+        f"- Dates of jobs found in both: {_ratio(same_dates)}",
+        f"- Accomplishments under the same job: {_ratio(same_place)}; resumes with every "
+        f"accomplishment under the same job: {resumes_all_placed_alike} of {compared}",
+        "",
+        "## Side by side",
+        "",
+        f"| | {first} | {second} |",
+        "| --- | --- | --- |",
+        f"| Mean cost (USD) | {mean(first, 'cost_usd'):.4f} | {mean(second, 'cost_usd'):.4f} |",
+        f"| Mean seconds | {mean(first, 'seconds'):.1f} | {mean(second, 'seconds'):.1f} |",
+        f"| Placement questions per resume | {mean(first, 'placement_questions'):.2f} | "
+        f"{mean(second, 'placement_questions'):.2f} |",
+        f"| Lines no step claimed | {guessed(first):.1%} | {guessed(second):.1%} |",
+        f"| Accomplishments per resume | {mean(first, 'accomplishments'):.1f} | "
+        f"{mean(second, 'accomplishments'):.1f} |",
+    ]
+    return "\n".join(out_lines) + "\n"
+
+
+def _ratio(pair: list[int]) -> str:
+    return f"{pair[0] / pair[1]:.1%} of {pair[1]}" if pair[1] else "none to compare"
+
+
 # --- Summary -------------------------------------------------------------------------
 
 
-def summarize(records: list[dict[str, Any]], run_id: str, ledger: Ledger, *, stopped: bool) -> str:
+def summarize(
+    records: list[dict[str, Any]],
+    run_id: str,
+    ledger: Ledger,
+    *,
+    stopped: bool,
+    label: str | None = None,
+) -> str:
     """Numbers only: nothing from the resumes' text."""
     read = [r for r in records if "error" not in r]
     errors = Counter(r["error"] for r in records if "error" in r)
@@ -333,6 +490,8 @@ def summarize(records: list[dict[str, Any]], run_id: str, ledger: Ledger, *, sto
     costs = [r["cost_usd"] for r in read]
     spent = sum(costs)
     out = [f"# Import bench, run {run_id}", ""]
+    if label:
+        out += [f"Variant: {label}", ""]
     out.append(
         f"{len(records)} resumes tried: {len(read)} read, {len(by_claude)} by Claude, "
         f"{len(read) - len(by_claude)} by the rules alone"
@@ -445,6 +604,7 @@ def _append(path: Path, record: dict[str, Any]) -> None:
 
 
 def _write_private(path: Path, text: str) -> None:
+    path.parent.parent.mkdir(mode=0o700, exist_ok=True)
     path.parent.mkdir(mode=0o700, exist_ok=True)
     path.write_text(text)
     os.chmod(path, 0o600)
@@ -463,28 +623,47 @@ def _now() -> str:
 
 def main(argv: list[str] | None = None) -> int:
     from plytos_api.config import Settings
-    from plytos_api.imports.ai import reader_for
+    from plytos_api.imports.ai import ClaudeReader, Effort, reader_for
 
     parser = argparse.ArgumentParser(prog="python -m plytos_api.imports.bench")
-    parser.add_argument("roots", type=Path, nargs="+", help="folders of resumes")
-    parser.add_argument("--budget", type=float, required=True, help="USD, across all runs")
+    parser.add_argument("roots", type=Path, nargs="*", help="folders of resumes")
+    parser.add_argument("--budget", type=float, help="USD, across all runs")
     parser.add_argument("--sample", type=int, default=50, help="resumes to try this run")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--out", type=Path, default=Path.home() / ".plytos" / "bench")
     parser.add_argument("--workers", type=int, default=1, help="resumes at once (at most 4)")
     parser.add_argument("--pace", type=float, default=0.0, help="seconds between resumes")
     parser.add_argument("--again", action="store_true", help="include resumes measured before")
+    parser.add_argument("--rerun", metavar="RUN", help="read the resumes of an earlier run again")
+    parser.add_argument(
+        "--effort",
+        action="append",
+        default=[],
+        metavar="STEP=LEVEL",
+        help="a step's effort in place of its usual one, e.g. structure=low",
+    )
+    parser.add_argument("--label", help="a name for this run's variant, kept with its results")
+    parser.add_argument("--compare", nargs=2, metavar="RUN", help="compare two runs' readings")
     args = parser.parse_args(argv)
 
-    found = find_resumes(args.roots)
-    if not args.again:
-        done = measured_ids(args.out)
-        found = [
-            item
-            for item in found
-            if hashlib.sha256(item[0].read_bytes()).hexdigest()[:16] not in done
-        ]
-    items = pick(found, args.sample, args.seed)
+    if args.compare:
+        sys.stdout.write(compare(args.out, *args.compare))
+        return 0
+    if args.budget is None:
+        parser.error("--budget is required")
+    efforts = dict(e.split("=", 1) for e in args.effort)
+    for step, level in efforts.items():
+        if step not in STEPS or level not in get_args(Effort):
+            parser.error(f"--effort {step}={level}: unknown step or level")
+
+    if args.rerun:
+        items = rerun_items(args.out, args.rerun)[: args.sample]
+        if not items:
+            parser.error(f"run {args.rerun} has no resumes in {args.out}")
+    else:
+        if not args.roots:
+            parser.error("give the folders of resumes, or --rerun")
+        items = _new_items(args.roots, args.out, args.sample, args.seed, again=args.again)
     settings = Settings()
     provider = "anthropic" if settings.ai_provider == "off" else settings.ai_provider
     reader = reader_for(
@@ -494,11 +673,37 @@ def main(argv: list[str] | None = None) -> int:
         settings.ai_vertex_project,
         settings.ai_vertex_region,
     )
-    print(f"{len(found)} resumes not yet measured; trying {len(items)}.", file=sys.stderr)
-    run(items, reader, args.out, args.budget, workers=min(4, args.workers), pace=args.pace)
+    if isinstance(reader, ClaudeReader):
+        reader.step_efforts = cast(dict[str, Effort], efforts)
+    label = args.label or (" ".join(f"{k}={v}" for k, v in efforts.items()) or None)
+    print(f"Trying {len(items)} resumes.", file=sys.stderr)
+    run(
+        items,
+        reader,
+        args.out,
+        args.budget,
+        workers=min(4, args.workers),
+        pace=args.pace,
+        label=label,
+    )
     latest = max(args.out.glob("summary-*.md"), key=lambda p: p.stat().st_mtime)
     sys.stdout.write(latest.read_text())
     return 0
+
+
+def _new_items(
+    roots: list[Path], out: Path, sample: int, seed: int, *, again: bool
+) -> list[tuple[Path, str]]:
+    found = find_resumes(roots)
+    if not again:
+        done = measured_ids(out)
+        found = [
+            item
+            for item in found
+            if hashlib.sha256(item[0].read_bytes()).hexdigest()[:16] not in done
+        ]
+    print(f"{len(found)} resumes not yet measured.", file=sys.stderr)
+    return pick(found, sample, seed)
 
 
 if __name__ == "__main__":

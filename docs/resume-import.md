@@ -180,6 +180,16 @@ years, skills) and a summary of cost per resume and per step and what $1, $3
 and $20 buy. The output holds what was read from the resumes, so it stays on
 the machine that has them.
 
+To try a cheaper or better setting on the same resumes, read an earlier run's
+resumes again with a step's effort changed, then compare the two readings (no
+Claude calls; numbers only: how often they agree on employers, titles, dates and
+which job each accomplishment is under, and the cost and time of each):
+
+```sh
+uv run python -m plytos_api.imports.bench --rerun RUN --effort structure=low --budget 20
+uv run python -m plytos_api.imports.bench --compare RUN NEW_RUN
+```
+
 A reply that doesn't fit the schema is asked for once more before the import
 falls back to the rules; only the error's field and type are logged. A call
 made with a model missing from the price table is counted at the dearest priced
@@ -270,6 +280,12 @@ employer was this title at?" or "Which job was this client work part of?".
 When both checks agree on another place, the card is moved there and the
 question asks the person to confirm; otherwise it stays put and the question
 offers the other place. The card can't be approved until the person answers.
+A second look that isn't sure and names no other place, on a card the order
+check agrees with, raises no question, since it could only list every job.
+
+A title written just above its employer's line ("Data Engineer" over
+"Contoso, 2019 – 2021") starts that employment, so the order check doesn't
+read it as belonging to the employer above.
 
 ## Proposed cards
 
@@ -283,7 +299,7 @@ under the title it was written under.
 | Each employer, with the tenure | `employment`: employer, start, end, location, employment type | nothing |
 | Each title held there | `position`: title, its own start and end, and a location or type only when it differs from the employment's | its employment |
 | Each client engagement under an agency or consultancy role | `engagement`: client, title, dates | the agency position |
-| Each bullet | `accomplishment`: its workstream label if it sits under one, and every number in the text as `figures`, except ones in a name or code ("Dynamics 365", "Q3") and "24/7" | its position or engagement |
+| Each bullet | `accomplishment`: its workstream label if it sits under one, and every number in the text as `figures`, except ones in a name or code ("Dynamics 365", "Q3") and "24/7". A bullet wrapped onto lines with no bullet mark of their own, broken mid-sentence, is joined and proposed one sentence per card | its position or engagement |
 | Each sentence of a role written as a paragraph | `accomplishment`, as for a bullet | its position or engagement |
 | Key achievements | `accomplishment`; one that names a single client or employer is proposed under that work, with a question to confirm it | that work, or nothing |
 | Each skills line | `skill`, with the category and skills as facts | nothing |
@@ -291,7 +307,7 @@ under the title it was written under.
 | Certifications | `credential` | nothing |
 | Projects | `project` | nothing |
 | Awards | `accomplishment`, with the award as a fact | nothing |
-| Talks, publications, board seats, memberships, interests | `activity`, with its name and date | nothing |
+| Talks, publications, board seats, memberships, interests | `activity`, with its name and date (or the year written above it, for a list grouped under years) | nothing |
 
 Titles join one employment when they share the employer's own line, or when
 they sit next to each other at the same employer with no more than six months
@@ -301,6 +317,10 @@ when the resume writes one, and is otherwise worked out from the titles'
 dates (marked `tenure: from positions`). A title whose dates fall outside a
 written tenure is flagged (`dates.outside_tenure`). Overlapping titles at one
 employer aren't flagged; overlapping jobs at different employers still are.
+The same holds when Claude reads the structure: two jobs in a row written with
+the same employer's name and dates that run on (within six months) are joined
+into one employment, unless the name is a stand-in like "Company Name" or
+"Confidential".
 
 Approving keeps the tree: a card sits under the saved card of its nearest
 approved parent. A card whose parent is still undecided can't be approved

@@ -12,7 +12,7 @@ from plytos_api.imports.ai import AiPlacementCheck, AiResume
 from plytos_api.imports.model import ExtractedDocument, ImportResult, ProposedCard
 from plytos_api.imports.pipeline import import_resume
 from plytos_api.imports.store import ImportConflictError, ImportNotFoundError, ImportStore
-from tests.resume_samples import one_line_text, stint_text
+from tests.resume_samples import one_line_text, stint_text, title_first_text
 from tests.test_import_lines import _role, reading
 
 TODAY = date(2026, 11, 4)
@@ -145,8 +145,13 @@ def test_a_title_filed_under_the_wrong_employer_is_questioned() -> None:
     ]
 
 
-def test_misfiled_with_no_place_offers_every_job() -> None:
-    misfiled = [{"line": 13, "belongs_under": "", "sure": False, "reason": "Unclear."}]
+def test_misfiled_with_no_place_offers_every_job_only_when_sure() -> None:
+    unsure = [{"line": 13, "belongs_under": "", "sure": False, "reason": "Unclear."}]
+    result, _ = _import(reading(), unsure)
+    # The line sits under its own title, and the second look can't say where else.
+    assert _card(result, 13).placement is None
+
+    misfiled = [{"line": 13, "belongs_under": "", "sure": True, "reason": "Another client."}]
     result, _ = _import(reading(), misfiled)
     card = _card(result, 13)
     assert card.placement is not None
@@ -281,3 +286,66 @@ def test_one_line_jobs_and_later_sections_raise_no_questions() -> None:
         "Analyst": "Fabrikam Inc.",
     }
     assert [(c.kind, min(c.source_blocks)) for c in result.cards if c.placement] == []
+
+
+def _title_first_reading(employer: str) -> dict[str, Any]:
+    """Claude's reading of title_first_text(): two employments, each title above its
+    employer's line."""
+    return {
+        "name": "Robin Diaz",
+        "contact_lines": [0, 1],
+        "sections": [
+            {"kind": "contact", "heading_line": -1, "lines": [0, 1]},
+            {"kind": "experience", "heading_line": 2, "lines": list(range(3, 10))},
+            {"kind": "education", "heading_line": 10, "lines": [11]},
+        ],
+        "summary_lines": [],
+        "employments": [
+            {
+                "employer": "Contoso Bank",
+                "location": "Dallas, TX",
+                "dates": "Jun 2005 – Jan 2007",
+                "header_lines": [4],
+                "description_lines": [],
+            },
+            {
+                "employer": employer,
+                "location": "Dallas, TX",
+                "dates": "2002 – 2005",
+                "header_lines": [8],
+                "description_lines": [],
+            },
+        ],
+        "roles": [
+            _role(title="ETL Developer", header_lines=[3], bullet_lines=[5, 6]),
+            _role(employment=1, title="Database Developer", header_lines=[7], bullet_lines=[9]),
+        ],
+        "skills": [],
+        "entries": [{"kind": "education", "lines": [11], "dates": "2002"}],
+        "skipped": [],
+    }
+
+
+def _import_title_first(employer: str) -> ImportResult:
+    reader = FakeReader(_title_first_reading(employer), [])
+    text = title_first_text(employer)
+    return import_resume(text.encode(), "robin.txt", today=TODAY, reader=reader)
+
+
+def test_titles_written_above_their_employer_raise_no_questions() -> None:
+    result = _import_title_first("Fabrikam Bank")
+    assert [c.ref for c in result.cards if c.placement] == []
+    employers = [c for c in result.cards if c.kind == "employment"]
+    assert [c.content.facts["employer"] for c in employers] == ["Contoso Bank", "Fabrikam Bank"]
+
+
+def test_back_to_back_jobs_at_one_employer_are_one_stint() -> None:
+    result = _import_title_first("Contoso Bank")
+    [bank] = [c for c in result.cards if c.kind == "employment"]
+    positions = [c for c in result.cards if c.kind == "position"]
+    assert [c.content.facts["title"] for c in positions] == ["ETL Developer", "Database Developer"]
+    assert {c.parent_ref for c in positions} == {bank.ref}
+    assert (bank.content.facts["start"], bank.content.facts["end"]) == ("2002", "2007-01")
+    assert [c.ref for c in result.cards if c.placement] == []
+    [stint] = result.employments
+    assert stint.tenure_written is False
