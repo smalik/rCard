@@ -157,6 +157,9 @@ def test_the_bench_stops_at_the_budget_across_runs(tmp_path: Path) -> None:
     assert ledger["spent_usd"] == 0.008 and ledger["resumes"] == 2
     assert len(measured_ids(out)) == 2
     assert len((out / "index.jsonl").read_text().splitlines()) == 2
+    readings = sorted((out / "readings").glob("*.json"))
+    assert [p.stem for p in readings] == sorted(measured_ids(out))
+    assert (readings[0].stat().st_mode & 0o777) == 0o600
     assert (out.stat().st_mode & 0o777) == 0o700
 
     summary = (out / "summary-first.md").read_text()

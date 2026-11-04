@@ -18,6 +18,8 @@ machine that has them and is created readable by its owner only:
   step, how its lines were accounted for, questions raised).
 * index.jsonl: the resumes read, with what's needed to group similar ones
   later (category, size, employers, titles, years, skills).
+* readings/<id>.json: everything the import read from each resume, for
+  checking it against the file.
 * summary-<run>.md: cost per resume and per step, and what a budget buys.
 """
 
@@ -152,6 +154,9 @@ def run(
             record = {"id": "", "run": run_id, "path": str(path), "category": category}
             record.update(error=type(exc).__name__, cost_usd=0.0, seconds=0.0)
         ledger.add(record["cost_usd"] or 0.0)
+        reading = record.pop("reading", None)
+        if reading is not None:
+            _write_private(out / "readings" / f"{record['id']}.json", reading)
         with lock:
             records.append(record)
             _append(out / "results.jsonl", record)
@@ -198,6 +203,7 @@ def measure(
         return record, None
     record["seconds"] = round(time.monotonic() - started, 2)
     record.update(_numbers(result))
+    record["reading"] = result.model_dump_json()
     return record, _index_entry(rid, path, category, result, run_id)
 
 
@@ -434,6 +440,12 @@ def _append(path: Path, record: dict[str, Any]) -> None:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
     if new:
         os.chmod(path, 0o600)
+
+
+def _write_private(path: Path, text: str) -> None:
+    path.parent.mkdir(mode=0o700, exist_ok=True)
+    path.write_text(text)
+    os.chmod(path, 0o600)
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
