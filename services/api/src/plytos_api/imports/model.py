@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from plytos_api.cards.model import CardKind, MainContent
+from plytos_api.imports.usage import AiUsage
 
 DocFormat = Literal["docx", "pdf", "text"]
 Severity = Literal["fix", "improve", "note"]
@@ -333,3 +334,5 @@ class ImportResult(BaseModel):
     read_by: str | None = None
     # Where every line of the resume went. None on imports from before it was kept.
     lines: LineAccount | None = None
+    # What each Claude call cost (imports/usage.py). None when Claude didn't read it.
+    usage: AiUsage | None = None

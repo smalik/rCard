@@ -9,6 +9,7 @@ from plytos_api.imports.ai import (
     AiFacts,
     AiProofread,
     FactReader,
+    Metered,
     PictureReader,
     PlacementChecker,
     Proofreader,
@@ -25,6 +26,7 @@ from plytos_api.imports.pictures import add_picture_lines, mark_picture_cards
 from plytos_api.imports.placement import check_placements
 from plytos_api.imports.proofread import proofread_findings
 from plytos_api.imports.segment import segment
+from plytos_api.imports.usage import AiCall, AiUsage
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +39,11 @@ def import_resume(
     accomplishment and proofreads it; without one, or when it can't, the rule-based
     parser does the reading and the rest is left out."""
     doc = extract(data, filename)
+    calls: list[AiCall] | None = None
+    if isinstance(reader, Metered):
+        # Its own copy, so this import's calls are counted apart from any other's.
+        reader = reader.metered()
+        calls = reader.calls
     if isinstance(reader, PictureReader) and doc.images:
         seen = reader.read_pictures(doc.images)
         if seen is not None:
@@ -94,6 +101,7 @@ def import_resume(
         blocks=doc.blocks,
         read_by=read_by,
         lines=lines,
+        usage=AiUsage(calls=list(calls)) if calls is not None else None,
     )
 
 

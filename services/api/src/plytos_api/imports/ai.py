@@ -25,6 +25,7 @@ import base64
 import json
 import logging
 import re
+import time
 from collections.abc import Iterable
 from typing import Literal, Protocol, cast, get_args, runtime_checkable
 
@@ -61,6 +62,7 @@ from plytos_api.imports.segment import (
     parse_contact,
     plain_skip,
 )
+from plytos_api.imports.usage import AiCall, failed, record
 
 log = logging.getLogger(__name__)
 
@@ -382,6 +384,15 @@ class PlacementChecker(Protocol):
 
 
 @runtime_checkable
+class Metered(Protocol):
+    """A reader that records what each of its calls cost (imports/usage.py)."""
+
+    calls: list[AiCall]
+
+    def metered(self) -> Metered: ...
+
+
+@runtime_checkable
 class FactReader(Protocol):
     """Pulls facts out of accomplishments, given as (ref, words)."""
 
@@ -424,9 +435,18 @@ class ClaudeReader:
         self._model = model
         self._effort: Effort = effort
         self.name = model
+        # What each call cost. One reader serves many imports, so each import takes its
+        # own copy with metered().
+        self.calls: list[AiCall] = []
+
+    def metered(self) -> ClaudeReader:
+        """A reader on the same client that records only its own calls."""
+        return ClaudeReader(self._client, self._model, self._effort)
 
     def read(self, doc: ExtractedDocument) -> AiResume | None:
-        return self.ask(INSTRUCTIONS, "Resume lines:\n" + resume_lines(doc), AiResume)
+        return self.ask(
+            INSTRUCTIONS, "Resume lines:\n" + resume_lines(doc), AiResume, step="structure"
+        )
 
     def ask[T: BaseModel](
         self,
@@ -434,10 +454,14 @@ class ClaudeReader:
         content: MessageContentParam,
         schema: type[T],
         *,
+        step: str,
         effort: Effort | None = None,
     ) -> T | None:
-        """One request whose answer must match ``schema``, or None when it can't be had."""
+        """One request whose answer must match ``schema``, or None when it can't be had.
+        ``step`` names what it's for in the usage record."""
         effort = effort or self._effort
+        images = 0 if isinstance(content, str) else sum(_is_image(b) for b in content)
+        started = time.monotonic()
         try:
             response = self._client.messages.parse(
                 model=self._model,
@@ -452,22 +476,52 @@ class ClaudeReader:
             # The API turned the request down, for example because the schema is more
             # than it can enforce. Ask for the same JSON unenforced and check it here.
             log.warning("Enforced reading refused, asking for plain JSON: %s", type(exc).__name__)
-            return self._ask_plain(system, content, schema, effort)
+            self._failed(step, effort, type(exc).__name__, started)
+            return self._ask_plain(system, content, schema, effort, step, images)
         except anthropic.APIError as exc:
             log.warning("Reading the resume with Claude failed: %s", type(exc).__name__)
+            self._failed(step, effort, type(exc).__name__, started)
             return None
         except ValidationError as exc:
             log.warning("Claude's reading didn't match the schema: %s", type(exc).__name__)
+            # Answered, so billed, but the answer and its usage are lost with the error.
+            self._failed(step, effort, type(exc).__name__, started, billed=True)
             return None
+        self.calls.append(
+            record(
+                step,
+                self._model,
+                effort,
+                response.usage,
+                seconds=time.monotonic() - started,
+                stop_reason=response.stop_reason,
+                images=images,
+            )
+        )
         if response.stop_reason != "end_turn" or response.parsed_output is None:
             log.warning("Claude stopped without a reading: %s", response.stop_reason)
             return None
         return response.parsed_output
 
+    def _failed(
+        self, step: str, effort: Effort, error: str, started: float, *, billed: bool = False
+    ) -> None:
+        call = failed(step, self._model, effort, error, seconds=time.monotonic() - started)
+        if billed:
+            call.cost_usd = None
+        self.calls.append(call)
+
     def _ask_plain[T: BaseModel](
-        self, system: str, content: MessageContentParam, schema: type[T], effort: Effort
+        self,
+        system: str,
+        content: MessageContentParam,
+        schema: type[T],
+        effort: Effort,
+        step: str,
+        images: int,
     ) -> T | None:
         wanted = json.dumps(schema.model_json_schema())
+        started = time.monotonic()
         try:
             response = self._client.messages.create(
                 model=self._model,
@@ -478,7 +532,19 @@ class ClaudeReader:
             )
         except anthropic.APIError as exc:
             log.warning("Reading the resume with Claude failed: %s", type(exc).__name__)
+            self._failed(step, effort, type(exc).__name__, started)
             return None
+        self.calls.append(
+            record(
+                step,
+                self._model,
+                effort,
+                response.usage,
+                seconds=time.monotonic() - started,
+                stop_reason=response.stop_reason,
+                images=images,
+            )
+        )
         if response.stop_reason != "end_turn":
             log.warning("Claude stopped without a reading: %s", response.stop_reason)
             return None
@@ -492,17 +558,23 @@ class ClaudeReader:
 
     def check_placements(self, doc: ExtractedDocument, tree: str) -> AiPlacementCheck | None:
         content = f"Resume lines:\n{resume_lines(doc)}\n\nHow the lines were filed:\n{tree}"
-        return self.ask(PLACEMENT_INSTRUCTIONS, content, AiPlacementCheck)
+        return self.ask(PLACEMENT_INSTRUCTIONS, content, AiPlacementCheck, step="placement")
 
     def read_facts(self, results: list[tuple[str, str]]) -> AiFacts | None:
         if not results:
             return None
         lines = "\n".join(f"[{ref}] {_norm(text)}" for ref, text in results)
-        return self.ask(FACTS_INSTRUCTIONS, "Accomplishments:\n" + lines, AiFacts, effort="low")
+        return self.ask(
+            FACTS_INSTRUCTIONS, "Accomplishments:\n" + lines, AiFacts, step="facts", effort="low"
+        )
 
     def proofread(self, doc: ExtractedDocument) -> AiProofread | None:
         return self.ask(
-            PROOFREAD_INSTRUCTIONS, "Resume lines:\n" + resume_lines(doc), AiProofread, effort="low"
+            PROOFREAD_INSTRUCTIONS,
+            "Resume lines:\n" + resume_lines(doc),
+            AiProofread,
+            step="proofread",
+            effort="low",
         )
 
     def read_pictures(self, images: list[PictureImage]) -> AiPictures | None:
@@ -518,7 +590,11 @@ class ClaudeReader:
             )
             content.append(ImageBlockParam(type="image", source=source))
         # Copying words out needs little thought.
-        return self.ask(PICTURE_INSTRUCTIONS, content, AiPictures, effort="low")
+        return self.ask(PICTURE_INSTRUCTIONS, content, AiPictures, step="pictures", effort="low")
+
+
+def _is_image(block: object) -> bool:
+    return isinstance(block, dict) and block.get("type") == "image"
 
 
 def _picture_label(number: int, image: PictureImage) -> str:

@@ -154,6 +154,32 @@ different step and will be recorded with `author_kind = 'ai'`.
 A resume is a few thousand tokens in and out, which is well under a cent on
 Haiku 5.5.
 
+### What it costs
+
+Every Claude call is recorded (`imports/usage.py`) with the step it served
+(`pictures`, `structure`, `placement`, `facts`, `proofread`), its effort, the
+tokens the API reported (input, output, thinking, cache reads and writes), its
+seconds and its list price. The import keeps them with its result (`usage`),
+and each is logged as one line of numbers, never the resume's text. Each
+import counts its own calls (`ClaudeReader.metered()`), and resumes share no
+prompt cache: each is read as one person's upload.
+
+To measure it over many resumes, the bench runs the same import over folders
+of files and stops at a spend cap kept across runs:
+
+```sh
+cd services/api
+PLYTOS_AI_PROVIDER=anthropic uv run python -m plytos_api.imports.bench \
+  ~/resumes --budget 20 --sample 50 --out ~/.plytos/bench
+```
+
+It samples across the folders (one category per subfolder), skips resumes it
+measured before, and writes `results.jsonl` (numbers per resume), `index.jsonl`
+(what grouping similar resumes needs: category, size, employers, titles,
+years, skills) and a summary of cost per resume and per step and what $1, $3
+and $20 buy. The output holds what was read from the resumes, so it stays on
+the machine that has them.
+
 ## Reading pictures
 
 Some resumes carry words the file's text doesn't: a screenshot of bullets, a
