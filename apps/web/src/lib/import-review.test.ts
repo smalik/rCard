@@ -100,9 +100,24 @@ describe("findings and cards", () => {
   });
 
   it("shows only findings about the words on a card", () => {
-    const notes = findingsForCard(CARDS[2]!, [image, tense]);
+    const notes = findingsForCard(CARDS[2]!, [image, tense], CARDS);
     expect(notes.map((n) => n.finding.rule)).toEqual(["consistency.tense"]);
     expect(notes[0]!.excerpts).toEqual(["Rebuilt the discount model"]);
+  });
+
+  it("tells apart cards built from sentences of the same paragraph", () => {
+    const paragraph = [
+      card({ ref: "p-1", kind: "accomplishment", role_ref: "role-9", content: { facts: {}, framing: { headline: "Built the claims model for the payer team.", body: "" } }, source_blocks: [30] }),
+      card({ ref: "p-2", kind: "accomplishment", role_ref: "role-9", content: { facts: {}, framing: { headline: "Provide weekly reports to the board.", body: "" } }, source_blocks: [30] }),
+    ];
+    const slip = finding({
+      rule: "consistency.tense",
+      severity: "fix",
+      about: "cards",
+      locations: [{ block: 30, excerpt: "Provide weekly reports to the board." }],
+    });
+    expect(cardsForFinding(slip, paragraph)).toEqual(["p-2"]);
+    expect(findingsForCard(paragraph[0]!, [slip], paragraph)).toEqual([]);
   });
 
   it("puts fixes before improvements before notes", () => {

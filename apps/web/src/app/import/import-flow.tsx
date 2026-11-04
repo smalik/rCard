@@ -269,6 +269,7 @@ function Review({ preview, onRestart }: { preview: ImportPreview; onRestart: () 
               byRef={byRef}
               decisions={decisions}
               findings={preview.findings}
+              cards={preview.cards}
               onKeep={setKeep}
               onEdit={setEditing}
             />
@@ -458,6 +459,7 @@ function GroupSection({
   byRef,
   decisions,
   findings,
+  cards,
   onKeep,
   onEdit,
 }: {
@@ -466,6 +468,7 @@ function GroupSection({
   byRef: Map<string, ProposedCard>;
   decisions: Decisions;
   findings: Finding[];
+  cards: ProposedCard[];
   onKeep: (refs: string[], keep: boolean) => void;
   onEdit: (ref: string) => void;
 }) {
@@ -498,6 +501,7 @@ function GroupSection({
             card={byRef.get(ref)!}
             decision={decisions[ref]!}
             findings={findings}
+            cards={cards}
             onKeep={(keep) => onKeep([ref], keep)}
             onEdit={() => onEdit(ref)}
           />
@@ -511,18 +515,20 @@ function ReviewCard({
   card,
   decision,
   findings,
+  cards,
   onKeep,
   onEdit,
 }: {
   card: ProposedCard;
   decision: Decision;
   findings: Finding[];
+  cards: ProposedCard[];
   onKeep: (keep: boolean) => void;
   onEdit: () => void;
 }) {
   const { content, keep } = decision;
   const facts = visibleFacts(card, content);
-  const notes = findingsForCard(card, findings);
+  const notes = findingsForCard(card, findings, cards);
   const problems = contentProblems(content);
 
   return (

@@ -113,25 +113,58 @@ export function findingKey(finding: Finding, index: number): string {
   return `${finding.rule}#${index}`;
 }
 
-// The cards a finding is about: those built from a line the finding points at.
+function normalize(text: string): string {
+  return text.replace(/…$/, "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+// How many cards were built from each line. A paragraph can become several
+// cards, one per sentence.
+function cardsPerBlock(cards: ProposedCard[]): Map<number, number> {
+  const counts = new Map<number, number>();
+  for (const card of cards) {
+    for (const block of card.source_blocks) counts.set(block, (counts.get(block) ?? 0) + 1);
+  }
+  return counts;
+}
+
+// Whether a finding's location is about this card. When several cards came
+// from the same line, the excerpt has to match the card's own words.
+function locationMatches(
+  card: ProposedCard,
+  location: FindingLocation,
+  perBlock: Map<number, number>,
+): boolean {
+  if (location.block === null || !card.source_blocks.includes(location.block)) return false;
+  if ((perBlock.get(location.block) ?? 0) <= 1) return true;
+  const excerpt = normalize(location.excerpt);
+  const text = normalize(`${card.content.framing.headline} ${card.content.framing.body}`);
+  if (!excerpt || !text) return false;
+  return text.includes(excerpt.slice(0, 60)) || excerpt.includes(text.slice(0, 60));
+}
+
+// The cards a finding is about: those built from the lines it points at.
 export function cardsForFinding(finding: Finding, cards: ProposedCard[]): string[] {
-  const blocks = new Set(
-    finding.locations.flatMap((loc) => (loc.block === null ? [] : [loc.block])),
-  );
-  return cards.filter((card) => card.source_blocks.some((b) => blocks.has(b))).map((c) => c.ref);
+  const perBlock = cardsPerBlock(cards);
+  return cards
+    .filter((card) => finding.locations.some((loc) => locationMatches(card, loc, perBlock)))
+    .map((card) => card.ref);
 }
 
 export type CardFinding = { finding: Finding; excerpts: string[] };
 
 // The findings to show on a card: only ones about its words, with the
 // excerpts that came from the card's own lines.
-export function findingsForCard(card: ProposedCard, findings: Finding[]): CardFinding[] {
-  const blocks = new Set(card.source_blocks);
+export function findingsForCard(
+  card: ProposedCard,
+  findings: Finding[],
+  cards: ProposedCard[],
+): CardFinding[] {
+  const perBlock = cardsPerBlock(cards);
   const out: CardFinding[] = [];
   for (const finding of bySeverity(findings)) {
     if (!isAboutCards(finding)) continue;
     const excerpts = finding.locations
-      .filter((loc) => loc.block !== null && blocks.has(loc.block))
+      .filter((loc) => locationMatches(card, loc, perBlock))
       .map((loc) => loc.excerpt);
     if (excerpts.length > 0) out.push({ finding, excerpts: [...new Set(excerpts)] });
   }
