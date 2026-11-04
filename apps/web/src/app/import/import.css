@@ -1626,3 +1626,54 @@ section[id] {
     transition: none;
   }
 }
+
+/* Where a card sits in the career: "Under Northwind Logistics › Director". */
+.hero-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  letter-spacing: 0.5px;
+  color: var(--ink-60);
+}
+
+/* The career as read: employers, the titles inside each, results under each. */
+.career-outline,
+.career-outline ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.career-outline {
+  display: grid;
+  gap: 12px;
+}
+.career-outline .outline-job {
+  border: 1px solid var(--ink-12);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: var(--paper, transparent);
+}
+.career-outline ul {
+  margin-top: 8px;
+  padding-left: 14px;
+  border-left: 2px solid var(--ink-12);
+  display: grid;
+  gap: 8px;
+}
+.career-outline li {
+  display: grid;
+  gap: 2px;
+}
+.outline-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.outline-job > .outline-name {
+  font-size: 17px;
+}
+.outline-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--ink-60);
+}

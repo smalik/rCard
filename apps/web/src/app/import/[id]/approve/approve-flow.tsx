@@ -26,10 +26,12 @@ import {
   cardPlace,
   contentFor,
   factRows,
+  factsAbove,
   figureChoices,
   findingsForCard,
   highlight,
   isFigureQuestion,
+  pathLabel,
   plural,
   type Proposal,
   type Review,
@@ -47,8 +49,16 @@ function figuresOf(content: CardContent): string[] {
   return Array.isArray(figures) ? figures : [];
 }
 
-function Facts({ card, content }: { card: Proposal; content: CardContent }) {
-  const rows = factRows(card, content);
+function Facts({
+  card,
+  content,
+  review,
+}: {
+  card: Proposal;
+  content: CardContent;
+  review: Review;
+}) {
+  const rows = factRows(card, content, factsAbove(card, review));
   if (rows.length === 0) return null;
   return (
     <div className="facts">
@@ -366,7 +376,8 @@ export function ApproveFlow({ review: initial }: { review: Review }) {
 
   const content = contentFor(card, review.progress);
   const style = kindStyle(card.kind);
-  const place = cardPlace(content);
+  const place = cardPlace(content, factsAbove(card, review));
+  const path = pathLabel(card, review);
   const tips = wordingTips(card, review).slice(0, 2);
   const segments: Segment[] = batch.map((r, i) => {
     if (i === position) return "current";
@@ -414,6 +425,7 @@ export function ApproveFlow({ review: initial }: { review: Review }) {
                 </button>
               </div>
               <p className="label small">{flipped ? "Back · in full" : "Front · how it's told"}</p>
+              {path && <p className="hero-path">Under {path}</p>}
               <h2
                 id="card-headline"
                 className={`hero-headline${content.framing.headline.length > 110 ? " long" : ""}`}
@@ -427,7 +439,7 @@ export function ApproveFlow({ review: initial }: { review: Review }) {
                   <p className="hero-meta">
                     {[kindLabel(card.kind, content.facts), place].filter(Boolean).join(" · ")}
                   </p>
-                  <Facts card={card} content={content} />
+                  <Facts card={card} content={content} review={review} />
                 </>
               )}
               {flipped && (

@@ -104,7 +104,8 @@ export function PageHead({
 export type KindStyle = "role" | "result" | "skill" | "people";
 
 export function kindStyle(kind: CardKind): KindStyle {
-  if (kind === "role") return "role";
+  if (kind === "role" || kind === "employment" || kind === "position" || kind === "engagement")
+    return "role";
   if (kind === "accomplishment" || kind === "project") return "result";
   if (kind === "skill") return "skill";
   return "people";
@@ -114,6 +115,9 @@ export function kindLabel(kind: CardKind, facts?: Record<string, unknown>): stri
   if (kind === "accomplishment") return facts?.award ? "Award" : "Result";
   if (kind === "story") return facts?.use === "summary" ? "Summary" : "Story";
   return {
+    employment: "Employer",
+    position: "Title",
+    engagement: "Client work",
     role: "Role",
     project: "Project",
     skill: "Skill",

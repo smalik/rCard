@@ -14,6 +14,7 @@ import {
   FOUND_LABELS,
   type FoundRow,
   foundRows,
+  factsAbove,
   foundSoFar,
   plural,
   type Review,
@@ -213,7 +214,12 @@ export function Reading({
           </div>
           <div className="mini-grid">
             {shown.map((card) => (
-              <MiniCard key={card.ref} card={card} content={card.content} />
+              <MiniCard
+                key={card.ref}
+                card={card}
+                content={card.content}
+                above={review ? factsAbove(card, review) : undefined}
+              />
             ))}
           </div>
         </section>

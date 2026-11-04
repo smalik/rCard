@@ -20,7 +20,12 @@ import type { CSSProperties, ReactNode } from "react";
 
 import { PageHead } from "../../../components/hybrid";
 import { Icon } from "../../../components/icon";
-import { FannedCards, FileCard, fileDetail } from "../../../components/import-parts";
+import {
+  CareerOutline,
+  FannedCards,
+  FileCard,
+  fileDetail,
+} from "../../../components/import-parts";
 import {
   BATCH_SIZE,
   minutesFor,
@@ -177,6 +182,22 @@ export default async function ImportOverview({ params }: { params: Promise<{ id:
             </section>
           )}
 
+          <section className="stack tight" aria-labelledby="career">
+            <div className="row">
+              <h2 className="section-title" id="career">
+                Your career, as we read it
+              </h2>
+              <span className="label medium">
+                {plural(o.employers, "employer")} · {plural(o.roles, "title")}
+              </span>
+            </div>
+            <p className="small-copy muted">
+              Each title sits under its employer, and each result under the title you earned it
+              in. You&apos;ll approve them in this order.
+            </p>
+            <CareerOutline review={review} />
+          </section>
+
           <section className="stack" aria-labelledby="checklist">
             <div className="row">
               <h2 className="section-title" id="checklist">
@@ -198,7 +219,7 @@ export default async function ImportOverview({ params }: { params: Promise<{ id:
                     : done
                 }
               >
-                {plural(o.roles, "role")}
+                {plural(o.roles, "title")} at {plural(o.employers, "employer")}
                 {o.years ? `, ${o.years[0]}–${o.years[1]}` : ""}.{" "}
                 {o.dateQuestions > 0
                   ? `${plural(o.dateQuestions, "date question")} to confirm.`

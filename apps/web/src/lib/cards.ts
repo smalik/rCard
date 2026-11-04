@@ -1,6 +1,12 @@
 // Card types shared by the server and the browser. See docs/data-model.md.
 
+// Cards nest into a career tree: an employment holds its positions, a
+// position holds its accomplishments, and client work under an agency is an
+// engagement in between. "role" is the flat kind from before the tree.
 export type CardKind =
+  | "employment"
+  | "position"
+  | "engagement"
   | "role"
   | "accomplishment"
   | "skill"
@@ -10,6 +16,9 @@ export type CardKind =
   | "story";
 
 export const KIND_LABELS: Record<CardKind, string> = {
+  employment: "Employer",
+  position: "Title",
+  engagement: "Client work",
   role: "Role",
   accomplishment: "Accomplishment",
   skill: "Skill",
@@ -29,8 +38,10 @@ export type Framing = {
   shown_facts?: string[] | null;
 };
 
-// A main-line version: the facts, and the default way to tell them.
+// A main-line version: the card it sits under, the facts, and the default way
+// to tell them.
 export type CardContent = {
+  parent?: string | null;
   facts: Record<string, FactValue>;
   framing: Framing;
 };

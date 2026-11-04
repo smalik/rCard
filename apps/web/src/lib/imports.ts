@@ -40,6 +40,9 @@ export type Proposal = {
   ref: string;
   kind: CardKind;
   content: CardContent;
+  // The proposed card this one sits under: a position's employment, an
+  // accomplishment's position.
+  parent_ref: string | null;
   role_ref: string | null;
   source_blocks: number[];
   source: SourceLine[];
@@ -147,6 +150,7 @@ export function toReview(raw: unknown): Review {
         ref: card.ref,
         kind: card.kind,
         content: card.content,
+        parent_ref: card.parent_ref ?? null,
         role_ref: card.role_ref ?? null,
         source_blocks: sourceBlocks,
         source: sourceBlocks.flatMap((i) => {
@@ -287,27 +291,96 @@ export function strength(card: Proposal, content: CardContent): number {
     return Array.isArray(figures) && figures.length > 0 ? 4 : 3;
   }
   if (card.kind === "project") return 2;
-  if (card.kind === "role") return 1;
+  if (FRAME_KINDS.has(card.kind)) return 1;
   return 0;
 }
 
-// Cards still to review, strongest first; cards set aside for later come last.
+// The kinds that frame a career: where and as what the person worked.
+const FRAME_KINDS = new Set<CardKind>(["employment", "position", "engagement", "role"]);
+
+// --- The career tree ---------------------------------------------------------
+
+// The cards a proposal sits under, nearest first.
+export function ancestors(card: Proposal, review: Review): Proposal[] {
+  const byRef = new Map(review.cards.map((c) => [c.ref, c]));
+  const out: Proposal[] = [];
+  let ref = card.parent_ref;
+  while (ref) {
+    const parent = byRef.get(ref);
+    if (!parent || out.includes(parent)) break;
+    out.push(parent);
+    ref = parent.parent_ref;
+  }
+  return out;
+}
+
+// Facts a card shows from the cards above it (the employer, the title, the
+// dates), nearest first. Its own facts win.
+export function factsAbove(card: Proposal, review: Review): Record<string, FactValue> {
+  const out: Record<string, FactValue> = {};
+  for (const parent of ancestors(card, review)) {
+    for (const [key, value] of Object.entries(contentFor(parent, review.progress).facts)) {
+      if (!(key in out)) out[key] = value;
+    }
+  }
+  return out;
+}
+
+// "Northwind Logistics › Director": where a card sits.
+export function pathLabel(card: Proposal, review: Review): string | null {
+  const path = ancestors(card, review)
+    .reverse()
+    .map((c) => contentFor(c, review.progress).framing.headline);
+  return path.length > 0 ? path.join(" › ") : null;
+}
+
+export type OutlineNode = { card: Proposal; children: OutlineNode[] };
+
+// Every proposal under the ones above it, in resume order.
+export function outline(review: Review): OutlineNode[] {
+  const refs = new Set(review.cards.map((c) => c.ref));
+  const nodes = new Map(review.cards.map((c) => [c.ref, { card: c, children: [] } as OutlineNode]));
+  const roots: OutlineNode[] = [];
+  for (const card of review.cards) {
+    const node = nodes.get(card.ref)!;
+    const parent = card.parent_ref && refs.has(card.parent_ref) ? nodes.get(card.parent_ref) : null;
+    (parent ? parent.children : roots).push(node);
+  }
+  return roots;
+}
+
+// Cards still to review. A card comes after the one it sits under, so each
+// employer comes first, then its titles, then what was done in each, strongest
+// first. Cards set aside for later come last.
 export function reviewQueue(review: Review): string[] {
-  const ranked = review.cards
-    .map((card, index) => ({
-      card,
-      index,
-      state: stateOf(card.ref, review.progress),
-      score: strength(card, contentFor(card, review.progress)),
-    }))
-    .filter((c) => c.state === "pending" || c.state === "later");
-  ranked.sort(
-    (a, b) =>
-      Number(a.state === "later") - Number(b.state === "later") ||
-      b.score - a.score ||
-      a.index - b.index,
-  );
-  return ranked.map((c) => c.card.ref);
+  const order: Proposal[] = [];
+  const visit = (nodes: OutlineNode[]) => {
+    const ranked = nodes
+      .map((node, index) => ({ node, index }))
+      .sort(
+        (a, b) =>
+          strength(b.node.card, contentFor(b.node.card, review.progress)) -
+            strength(a.node.card, contentFor(a.node.card, review.progress)) ||
+          a.index - b.index,
+      );
+    for (const { node } of ranked) {
+      order.push(node.card);
+      visit(node.children);
+    }
+  };
+  // Frames go first among the roots so the career's outline is settled before
+  // anything is placed in it; loose cards follow, strongest first.
+  const roots = outline(review);
+  visit(roots.filter((n) => FRAME_KINDS.has(n.card.kind)));
+  visit(roots.filter((n) => !FRAME_KINDS.has(n.card.kind)));
+  const waiting = order.filter((c) => {
+    const state = stateOf(c.ref, review.progress);
+    return state === "pending" || state === "later";
+  });
+  return [
+    ...waiting.filter((c) => stateOf(c.ref, review.progress) === "pending"),
+    ...waiting.filter((c) => stateOf(c.ref, review.progress) === "later"),
+  ].map((c) => c.ref);
 }
 
 // --- Summaries for the screens ---------------------------------------------
@@ -329,6 +402,7 @@ export type Overview = {
   accomplishments: number;
   withNumbers: number;
   roles: number;
+  employers: number;
   years: [number, number] | null;
   dateQuestions: number;
   figureQuestions: number;
@@ -346,8 +420,11 @@ export function overview(review: Review): Overview {
   const accomplishments = review.cards.filter(
     (c) => c.kind === "accomplishment" && content(c).facts.award === undefined,
   );
-  const roles = review.cards.filter((c) => c.kind === "role");
-  const years = roles
+  const roles = review.cards.filter(
+    (c) => c.kind === "position" || c.kind === "engagement" || c.kind === "role",
+  );
+  const years = review.cards
+    .filter((c) => c.kind === "employment" || c.kind === "role")
     .flatMap((c) => [yearOf(c.content.facts.start), yearOf(c.content.facts.end)])
     .filter((y): y is number => y !== null);
   const open = (rule: (r: string) => boolean) =>
@@ -360,6 +437,7 @@ export function overview(review: Review): Overview {
     accomplishments: accomplishments.length,
     withNumbers: accomplishments.filter((c) => figuresOf(content(c)).length > 0).length,
     roles: roles.length,
+    employers: review.cards.filter((c) => c.kind === "employment").length,
     years: years.length > 0 ? [Math.min(...years), Math.max(...years)] : null,
     dateQuestions: open((r) => r.startsWith("dates.")),
     figureQuestions: open((r) => r === "consistency.figures"),
@@ -414,7 +492,7 @@ export function foundRows(review: Review): FoundRow[] {
 
 // A few cards to show while reading: a role, two results and a skill.
 export function foundSoFar(review: Review): Proposal[] {
-  const role = review.cards.find((c) => c.kind === "role");
+  const role = review.cards.find((c) => c.kind === "position" || c.kind === "role");
   const results = review.cards
     .filter((c) => c.kind === "accomplishment")
     .sort((a, b) => strength(b, b.content) - strength(a, a.content))
@@ -449,12 +527,20 @@ function text(value: FactValue | undefined): string | null {
   return out || null;
 }
 
-// Where a card sits: "Meridian Group · 2021".
-export function cardPlace(content: CardContent): string | null {
-  const facts = content.facts;
+// Where a card sits: "Meridian Group · 2021", or for a result, "Director,
+// Meridian Group · 2021". `above` holds the facts of the cards above it.
+export function cardPlace(
+  content: CardContent,
+  above: Record<string, FactValue> = {},
+): string | null {
+  const facts = { ...above, ...content.facts };
   const where = text(facts.client) ?? text(facts.employer) ?? text(facts.institution);
+  const title = content.facts.title === undefined ? text(above.title) : null;
   const year = yearOf(facts.start ?? facts.date ?? facts.end);
-  const parts = [where, year ? String(year) : null].filter(Boolean);
+  const parts = [
+    [title, where].filter(Boolean).join(", ") || null,
+    year ? String(year) : null,
+  ].filter(Boolean);
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
@@ -464,15 +550,23 @@ export type FactRow = {
   value: string;
   note?: string;
   numbers?: boolean;
+  // Shown from a card above this one; it changes there, not here.
+  above?: boolean;
 };
 
 // The facts the front of a card shows, in the order a reader wants them.
-export function factRows(card: Proposal, content: CardContent): FactRow[] {
+// `above` holds the facts of the cards it sits under.
+export function factRows(
+  card: Proposal,
+  content: CardContent,
+  above: Record<string, FactValue> = {},
+): FactRow[] {
   const f = content.facts;
   const rows: FactRow[] = [];
   const add = (key: string, label: string, value: string | null, extra: Partial<FactRow> = {}) => {
     if (value) rows.push({ key, label, value, ...extra });
   };
+  const inherited = { above: true, note: "From the card above" };
   if (card.kind === "skill") {
     add("category", "Group", text(f.category));
     add("skills", "Skills", text(f.skills));
@@ -488,6 +582,37 @@ export function factRows(card: Proposal, content: CardContent): FactRow[] {
     add("name", "Credential", text(f.name));
     add("date", "Date", formatMonth(f.date));
     return rows;
+  }
+  if (card.kind === "employment") {
+    add("employer", "Employer", text(f.employer));
+    add("dates", "Tenure", dateSpan(f), {
+      note: f.tenure === "from positions" ? "Worked out from your titles" : undefined,
+    });
+    add("location", "Location", text(f.location));
+    add("employment_type", "Type", text(f.employment_type));
+    return rows;
+  }
+  if (card.kind === "position") {
+    add("employer", "At", text(above.employer), inherited);
+    add("title", "Official title", text(f.title), { note: text(f.plain_title) ?? undefined });
+    add("dates", "Dates", dateSpan(f));
+    add("location", "Location", text(f.location));
+    add("employment_type", "Type", text(f.employment_type));
+    return rows;
+  }
+  if (card.kind === "engagement") {
+    add("client", "Client", text(f.client));
+    add("employer", "Through", text(above.employer), inherited);
+    add("title", "Title", text(f.title));
+    add("dates", "Dates", dateSpan(f));
+    return rows;
+  }
+  if (card.kind === "accomplishment" && Object.keys(above).length > 0) {
+    const where = [text(above.title), text(above.client) ?? text(above.employer)]
+      .filter(Boolean)
+      .join(", ");
+    add("under", "Under", where || null, inherited);
+    add("dates", "When", dateSpan(above), inherited);
   }
   if (f.client) {
     add("client", "Client", text(f.client));

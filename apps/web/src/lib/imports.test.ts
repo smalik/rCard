@@ -7,6 +7,7 @@ import {
   contentProblems,
   dateSpan,
   factRows,
+  factsAbove,
   type Finding,
   figureChoices,
   findingsForCard,
@@ -14,7 +15,9 @@ import {
   highlight,
   isFigureQuestion,
   openQuestions,
+  outline,
   overview,
+  pathLabel,
   type Proposal,
   type Review,
   readerName,
@@ -30,6 +33,7 @@ import {
 function card(partial: Partial<Proposal> & Pick<Proposal, "ref" | "kind">): Proposal {
   return {
     content: { facts: {}, framing: { headline: partial.ref, body: "" } },
+    parent_ref: null,
     role_ref: null,
     source_blocks: [],
     source: [],
@@ -234,13 +238,13 @@ describe("questions to settle", () => {
 });
 
 describe("reviewQueue", () => {
-  it("puts results with numbers first and cards set aside for later last", () => {
+  it("puts each job first, then results with numbers, and cards for later last", () => {
     expect(reviewQueue(review())).toEqual([
+      "card-1",
+      "card-6",
       "card-2",
       "card-3",
       "card-4",
-      "card-1",
-      "card-6",
       "card-5",
     ]);
     const r = review({
@@ -250,7 +254,7 @@ describe("reviewQueue", () => {
         "card-5": { state: "dropped", card_id: null },
       },
     });
-    expect(reviewQueue(r)).toEqual(["card-4", "card-1", "card-6", "card-3"]);
+    expect(reviewQueue(r)).toEqual(["card-1", "card-6", "card-4", "card-3"]);
   });
 
   it("reviews a card in the words the person's answers gave it", () => {
@@ -332,5 +336,88 @@ describe("editing", () => {
 
   it("lists findings that need fixing first", () => {
     expect(bySeverity([GAP, LAYOUT, FIGURES]).map((f) => f.index)).toEqual([2, 1, 0]);
+  });
+});
+
+// The same made-up person, read as a career tree.
+const TREE: Proposal[] = [
+  card({
+    ref: "t-1",
+    kind: "employment",
+    content: {
+      facts: { employer: "Fabrikam Inc.", start: "2015-02", end: "present" },
+      framing: { headline: "Fabrikam Inc.", body: "" },
+    },
+  }),
+  card({
+    ref: "t-2",
+    kind: "position",
+    parent_ref: "t-1",
+    content: {
+      facts: { title: "Senior Analyst", start: "2019-07", end: "present" },
+      framing: { headline: "Senior Analyst", body: "" },
+    },
+  }),
+  card({
+    ref: "t-3",
+    kind: "accomplishment",
+    parent_ref: "t-2",
+    content: { facts: {}, framing: { headline: "Led the pricing review.", body: "" } },
+  }),
+  card({
+    ref: "t-4",
+    kind: "accomplishment",
+    parent_ref: "t-2",
+    content: {
+      facts: { figures: ["30%"] },
+      framing: { headline: "Cut claim review time 30%.", body: "" },
+    },
+  }),
+  card({
+    ref: "t-5",
+    kind: "position",
+    parent_ref: "t-1",
+    content: {
+      facts: { title: "Analyst", start: "2015-02", end: "2019-06" },
+      framing: { headline: "Analyst", body: "" },
+    },
+  }),
+  card({ ref: "t-6", kind: "skill" }),
+];
+
+function treeReview(progress: Partial<Review["progress"]> = {}): Review {
+  return { ...review(), cards: TREE, findings: [], toSettle: [], progress: { ...review().progress, ...progress } };
+}
+
+describe("career tree", () => {
+  it("nests titles under their employer and results under their title", () => {
+    const shape = (nodes: ReturnType<typeof outline>): unknown[] =>
+      nodes.map((n) => (n.children.length ? [n.card.ref, shape(n.children)] : n.card.ref));
+    expect(shape(outline(treeReview()))).toEqual([
+      ["t-1", [["t-2", ["t-3", "t-4"]], "t-5"]],
+      "t-6",
+    ]);
+  });
+
+  it("reviews an employer before its titles and a title before its results", () => {
+    expect(reviewQueue(treeReview())).toEqual(["t-1", "t-2", "t-4", "t-3", "t-5", "t-6"]);
+  });
+
+  it("shows a result where it sits, from the cards above it", () => {
+    const r = treeReview();
+    const result = TREE[3]!;
+    expect(pathLabel(result, r)).toBe("Fabrikam Inc. › Senior Analyst");
+    const rows = factRows(result, result.content, factsAbove(result, r));
+    expect(rows.map((row) => [row.label, row.value, row.above ?? false])).toEqual([
+      ["Under", "Senior Analyst, Fabrikam Inc.", true],
+      ["When", "Jul 2019 – Present", true],
+      ["Numbers", "30%", false],
+    ]);
+    const title = TREE[1]!;
+    expect(factRows(title, title.content, factsAbove(title, r)).map((row) => row.label)).toEqual([
+      "At",
+      "Official title",
+      "Dates",
+    ]);
   });
 });
