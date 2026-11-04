@@ -6,7 +6,7 @@ import psycopg
 import pytest
 from psycopg import errors
 
-from plytos_api.agents.model import ProposalBody
+from plytos_api.agents.model import CheckInPlan, ProposalBody
 from plytos_api.agents.store import AgentStore
 from plytos_api.cards.repository import Author, CardNotFoundError
 from plytos_api.db import Database
@@ -131,6 +131,7 @@ def test_deleting_an_account_shreds_the_key_and_every_row(
         store.propose(
             "stitcher", "question", ProposalBody(message="Which site?"), cites=[tidbit.id]
         )
+        store.set_check_in_plan(CheckInPlan(time_zone="UTC"))
 
     with psycopg.connect(test_db.app_url) as app, pytest.raises(errors.InsufficientPrivilege):
         app.execute("select plytos.purge_user(%s)", (user,))
@@ -153,6 +154,7 @@ def test_deleting_an_account_shreds_the_key_and_every_row(
             ("plytos.tidbit", "owner_id"),
             ("plytos.proposal", "owner_id"),
             ("plytos.agent_run", "owner_id"),
+            ("plytos.check_in_plan", "owner_id"),
         ):
             row = owner.execute(
                 f"select count(*) from {table} where {column} = %s",  # noqa: S608

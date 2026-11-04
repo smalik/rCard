@@ -9,7 +9,7 @@ its own person's rows.
 import json
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -17,14 +17,22 @@ import pytest
 from psycopg import errors
 from pydantic import BaseModel
 
+from plytos_api.agents.check_in import (
+    QUESTIONS,
+    CheckIn,
+    CheckInAnswer,
+    plan_confirmation,
+    plan_label,
+)
 from plytos_api.agents.listener import FALLBACK_REPLY, Listener, ListenerAnswer
-from plytos_api.agents.model import NewCard, ProposalBody, Reading
+from plytos_api.agents.model import CheckInPlan, NewCard, ProposalBody, Reading
 from plytos_api.agents.resume import reading
 from plytos_api.agents.runtime import Agent, Context, Worker
 from plytos_api.agents.stitcher import StitchedWin, Stitcher, StitcherAnswer
 from plytos_api.agents.store import (
     AgentRecordNotFoundError,
     AgentStore,
+    CheckInPlanError,
     ProposalConflictError,
 )
 from plytos_api.agents.thinking import Usage
@@ -60,7 +68,11 @@ MakeWorker = Callable[..., Worker]
 def worker(db: Database, vault: Vault) -> MakeWorker:
     """Builds a worker over the given agents, after running out whatever other
     tests left in the queue."""
-    quiet: dict[str, Agent] = {"listener": Listener(None, 0), "stitcher": Stitcher(None)}
+    quiet: dict[str, Agent] = {
+        "listener": Listener(None, 0),
+        "stitcher": Stitcher(None),
+        "check_in": CheckIn(None),
+    }
     Worker(db, vault, quiet, retry_base_seconds=0).run_until_idle()
 
     def _worker(*agents: Agent, retry_base_seconds: int = 0) -> Worker:
@@ -599,3 +611,239 @@ def test_reading_says_what_was_found_and_what_is_left() -> None:
     empty = result.model_copy(update={"cards": [], "findings": []})
     assert reading(empty).startswith("I couldn't find roles or results")
     assert "a quick answer first" in reading(result) or "Go through them" in reading(result)
+
+
+# -- check-ins ----------------------------------------------------------------
+
+LAST_FRIDAY = CheckInPlan(week=-1, weekday=5, time="16:00", time_zone="America/Chicago")
+
+
+def due_now(store: AgentStore, minutes_ago: float = 1) -> None:
+    """Moves the queued check-in so it's due."""
+    at = datetime.now(UTC) - timedelta(minutes=minutes_ago)
+    store.schedule("check_in", "schedule", at, dedupe_key="check_in")
+
+
+def asked(store: AgentStore) -> list[str]:
+    """The check-in questions Plytos asked, oldest first."""
+    return [m.text for m in reversed(store.check_ins_asked(20)[1])]
+
+
+def queued_check_ins(db: Database, user: UUID) -> int:
+    with db.as_user(user) as conn:
+        row = conn.execute(
+            "select count(*) from plytos.agent_run where agent = 'check_in' and state = 'queued'"
+        ).fetchone()
+    return row[0] if row else 0
+
+
+def test_check_in_plans_are_private(make_user, stores: Stores, db: Database) -> None:
+    alice, bob = make_user(), make_user()
+    with stores(alice) as (store, _):
+        store.set_check_in_plan(LAST_FRIDAY)
+        assert store.check_in_plan() == LAST_FRIDAY
+    with stores(bob) as (store, _):
+        assert store.check_in_plan() is None
+        assert store.next_check_in() is None
+    with db.as_user(bob) as conn:
+        assert conn.execute("select count(*) from plytos.check_in_plan").fetchone() == (0,)
+    with pytest.raises(errors.InsufficientPrivilege), db.as_user(bob) as conn:
+        conn.execute(
+            "insert into plytos.check_in_plan"
+            " (owner_id, state, week, weekday, local_time, time_zone)"
+            " values (%s, 'on', 1, 1, '09:00', 'UTC')",
+            (alice,),
+        )
+
+
+def test_a_plan_needs_a_real_time_zone(make_user, stores: Stores) -> None:
+    with stores(make_user()) as (store, _), pytest.raises(CheckInPlanError):
+        store.set_check_in_plan(LAST_FRIDAY.model_copy(update={"time_zone": "Mars/Olympus"}))
+
+
+def test_check_ins_come_once_a_month_at_the_persons_local_time(
+    make_user, stores: Stores, db: Database
+) -> None:
+    user = make_user()
+
+    def utc(text: str) -> datetime:
+        return datetime.fromisoformat(text).replace(tzinfo=UTC)
+
+    with stores(user) as (store, _):
+        # The last Friday of November, 4 PM in Chicago, is 22:00 UTC.
+        assert store.schedule_check_in(LAST_FRIDAY, utc("2026-11-04T12:00")) == utc(
+            "2026-11-27T22:00"
+        )
+        # In October, before the clocks went back, it was 21:00 UTC.
+        assert store.schedule_check_in(LAST_FRIDAY, utc("2026-10-01T12:00")) == utc(
+            "2026-10-30T21:00"
+        )
+        # Once it's asked, the next is a month on, into the new year.
+        assert store.schedule_check_in(LAST_FRIDAY, utc("2026-11-27T22:00")) == utc(
+            "2026-12-25T22:00"
+        )
+        assert store.schedule_check_in(LAST_FRIDAY, utc("2026-12-25T22:00")) == utc(
+            "2027-01-29T22:00"
+        )
+        # The first Monday at 9:30 in Kolkata: November's (the 2nd) has passed.
+        first_monday = CheckInPlan(week=1, weekday=1, time="09:30", time_zone="Asia/Kolkata")
+        assert store.schedule_check_in(first_monday, utc("2026-11-04T12:00")) == utc(
+            "2026-12-07T04:00"
+        )
+        # Each schedule moved the one queued check-in rather than adding one.
+        store.set_check_in_plan(LAST_FRIDAY)
+        next_at = store.next_check_in()
+        assert next_at is not None and next_at > datetime.now(UTC)
+    assert queued_check_ins(db, user) == 1
+
+
+def test_a_check_in_asks_one_question_and_queues_next_month(
+    make_user, stores: Stores, worker: MakeWorker
+) -> None:
+    user = make_user()
+    with stores(user) as (store, _):
+        store.set_check_in_plan(LAST_FRIDAY)
+        due_now(store)
+    worker(CheckIn(None)).run_until_idle()
+    with stores(user) as (store, _):
+        assert asked(store) == [QUESTIONS[0]]
+        [question] = store.conversation()
+        assert question.author == "plytos"
+        [run] = [r for r in store.runs() if r.state == "done"]
+        assert (run.agent, run.trigger_kind) == ("check_in", "schedule")
+        next_at = store.next_check_in()
+        assert next_at is not None and next_at > datetime.now(UTC) + timedelta(days=20)
+
+
+def test_a_check_in_waits_a_day_when_the_person_is_mid_conversation(
+    make_user, stores: Stores, worker: MakeWorker
+) -> None:
+    user = make_user()
+    with stores(user) as (store, _):
+        store.set_check_in_plan(LAST_FRIDAY)
+        store.say("Wrapped the vendor review today")
+        due_now(store)
+    worker(CheckIn(None)).run_until_idle()
+    with stores(user) as (store, _):
+        assert asked(store) == []
+        next_at = store.next_check_in()
+        assert next_at is not None
+        assert timedelta(hours=23) < next_at - datetime.now(UTC) < timedelta(hours=24)
+        due_now(store)
+    worker(CheckIn(None, talking_hours=0)).run_until_idle()
+    with stores(user) as (store, _):
+        assert asked(store) == [QUESTIONS[0]]
+
+
+def test_a_late_check_in_is_skipped_and_the_next_one_queued(
+    make_user, stores: Stores, worker: MakeWorker
+) -> None:
+    user = make_user()
+    with stores(user) as (store, _):
+        store.set_check_in_plan(LAST_FRIDAY)
+        due_now(store, minutes_ago=7 * 60)
+    worker(CheckIn(None)).run_until_idle()
+    with stores(user) as (store, _):
+        assert asked(store) == []
+        next_at = store.next_check_in()
+        assert next_at is not None and next_at > datetime.now(UTC)
+
+
+def test_turning_check_ins_off_stops_them(
+    make_user, stores: Stores, worker: MakeWorker, db: Database
+) -> None:
+    user = make_user()
+    off = LAST_FRIDAY.model_copy(update={"state": "off"})
+    with stores(user) as (store, _):
+        store.set_check_in_plan(LAST_FRIDAY)
+        assert store.set_check_in_plan(off) is None
+        assert store.next_check_in() is None
+        due_now(store)
+    worker(CheckIn(None)).run_until_idle()
+    with stores(user) as (store, _):
+        assert asked(store) == []
+        assert store.check_in_plan() == off
+    assert queued_check_ins(db, user) == 0
+
+
+def test_a_check_in_follows_up_a_draft_missing_its_result_once(
+    make_user, stores: Stores, worker: MakeWorker
+) -> None:
+    user = make_user()
+    with stores(user) as (store, _):
+        store.set_check_in_plan(LAST_FRIDAY)
+        card = proposed_card("Rolled out the new routing tool").model_copy(
+            update={"missing": "Did late shipments drop?"}
+        )
+        body = ProposalBody(message="I think this is a win.", card=card)
+        fresh = store.propose("stitcher", "new_card", body).id
+        due_now(store)
+    # The draft was just offered, and asked already.
+    worker(CheckIn(None)).run_until_idle()
+    with stores(user) as (store, _):
+        assert asked(store) == [QUESTIONS[0]]
+        due_now(store)
+    later = CheckIn(None, late_hours=24 * 30, clock=lambda: datetime.now(UTC) + timedelta(days=4))
+    worker(later).run_until_idle()
+    with stores(user) as (store, _):
+        assert asked(store)[-1] == "Quick follow-up: Did late shipments drop?"
+        assert store.followed_up() == {fresh}
+        due_now(store)
+    worker(later).run_until_idle()
+    with stores(user) as (store, _):
+        assert asked(store)[-1] == QUESTIONS[2]
+
+
+def test_the_model_words_the_question_from_the_persons_own_notes(
+    make_user, stores: Stores, worker: MakeWorker
+) -> None:
+    user = make_user()
+    ten_days_ago = (datetime.now(UTC) - timedelta(days=10)).date().isoformat()
+    with stores(user) as (store, cards):
+        role = career(cards)
+        pilot = note(store, "Started the routing pilot at 3 sites", ten_days_ago, role)
+        store.set_check_in_plan(LAST_FRIDAY)
+        due_now(store)
+    replies = iter(
+        [
+            CheckInAnswer(question="How did the routing pilot at 3 sites go?", follows_up="n1"),
+            CheckInAnswer(question="Did late shipments drop by 40%?", follows_up=""),
+        ]
+    )
+    thinker = FakeThinker(CheckInAnswer=lambda _: next(replies))
+    agent = CheckIn(thinker)
+    worker(agent).run_until_idle()
+    [(_, prompt)] = thinker.asked
+    assert prompt["jobs"] == ["Operations Manager at Northwind Logistics (2021-01 to present)"]
+    assert [n["note"] for n in prompt["notes_without_an_outcome"]] == [
+        "Started the routing pilot at 3 sites"
+    ]
+    with stores(user) as (store, _):
+        assert asked(store) == ["How did the routing pilot at 3 sites go?"]
+        assert store.followed_up() == {pilot}
+        due_now(store)
+    worker(agent).run_until_idle()
+    with stores(user) as (store, _):
+        # 40% is nowhere in the notes, so Plytos asks a plain question instead.
+        assert asked(store)[-1] == QUESTIONS[1]
+        [_, second] = thinker.asked
+        assert second[1]["notes_without_an_outcome"] == []
+        assert second[1]["recent_check_ins"] == ["How did the routing pilot at 3 sites go?"]
+
+
+@pytest.mark.parametrize(
+    ("week", "weekday", "time", "label"),
+    [
+        (-1, 5, "16:00", "The last Friday of the month at 4 PM"),
+        (1, 1, "09:30", "The first Monday of the month at 9:30 AM"),
+        (2, 3, "12:00", "The second Wednesday of the month at 12 PM"),
+        (4, 7, "00:00", "The fourth Sunday of the month at 12 AM"),
+        (3, 6, "21:15", "The third Saturday of the month at 9:15 PM"),
+    ],
+)
+def test_plans_are_said_plainly(week: Any, weekday: int, time: str, label: str) -> None:
+    plan = CheckInPlan(week=week, weekday=weekday, time=time, time_zone="UTC")
+    assert plan_label(plan) == label
+    said = plan_confirmation(plan)
+    assert said.startswith("Got it. I'll check in once a month, on the ")
+    assert "job" not in said.lower()

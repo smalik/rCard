@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   awaitingReply,
+  CHECK_IN_CHOICES,
+  checkInTimes,
   cleanMessage,
+  cleanPlan,
   dayLabel,
   fromNotes,
   groupByDay,
@@ -10,10 +13,13 @@ import {
   type Message,
   merge,
   monthLabel,
+  NO_CHECK_INS,
+  offerCheckIns,
   type Proposal,
   type ProposedCard,
   resumeNext,
   resumeProgress,
+  timeLabel,
   withWording,
 } from "./talk";
 import type { ImportSummary } from "./imports";
@@ -153,5 +159,68 @@ describe("a shared resume", () => {
     expect(resumeProgress({ ...resume, approved: 4, to_settle: 1 })).toBe(
       "26 cards · 4 kept · 1 question",
     );
+  });
+});
+
+describe("check-ins", () => {
+  const plan = {
+    state: "on",
+    week: -1,
+    weekday: 5,
+    time: "16:00",
+    time_zone: "America/Chicago",
+  } as const;
+
+  it("says times the way people do", () => {
+    expect(timeLabel("16:00")).toBe("4 PM");
+    expect(timeLabel("09:30")).toBe("9:30 AM");
+    expect(timeLabel("12:00")).toBe("12 PM");
+    expect(timeLabel("00:00")).toBe("12 AM");
+  });
+
+  it("offers the day's hours, and keeps a plan's own time", () => {
+    const times = checkInTimes();
+    expect(times[0]).toBe("07:00");
+    expect(times.at(-1)).toBe("21:00");
+    expect(times).toHaveLength(15);
+    expect(checkInTimes("06:30")[0]).toBe("06:30");
+    expect(checkInTimes("16:00")).toHaveLength(15);
+  });
+
+  it("passes on only a whole plan", () => {
+    expect(cleanPlan(plan)).toEqual(plan);
+    expect(cleanPlan({ ...plan, state: "off", week: 1, weekday: 1 })).not.toBeNull();
+    for (const bad of [
+      null,
+      "monthly",
+      { ...plan, state: "sometimes" },
+      { ...plan, week: 5 },
+      { ...plan, week: "-1" },
+      { ...plan, weekday: 0 },
+      { ...plan, weekday: 2.5 },
+      { ...plan, time: "25:00" },
+      { ...plan, time: "4 PM" },
+      { ...plan, time_zone: "" },
+      { ...plan, time_zone: "x".repeat(65) },
+    ]) {
+      expect(cleanPlan(bad)).toBeNull();
+    }
+    // Anything extra stays behind.
+    expect(cleanPlan({ ...plan, channel: "text_message" })).toEqual(plan);
+  });
+
+  it("asks once the person has said something and Plytos has answered", () => {
+    const said = message("a", "2026-11-04T10:00:00Z");
+    const answered = [said, message("b", "2026-11-04T10:00:05Z", "plytos")];
+    expect(offerCheckIns([], NO_CHECK_INS, false)).toBe(false);
+    expect(offerCheckIns([said], NO_CHECK_INS, false)).toBe(false);
+    expect(offerCheckIns(answered, NO_CHECK_INS, false)).toBe(true);
+    expect(offerCheckIns(answered, NO_CHECK_INS, true)).toBe(false);
+    const decided = { plan: { ...plan, state: "off" as const }, label: null, next_at: null };
+    expect(offerCheckIns(answered, decided, false)).toBe(false);
+  });
+
+  it("starts with the end of the month", () => {
+    expect(CHECK_IN_CHOICES.map((c) => c.label)).toEqual(["Last Friday, 4 PM", "First Monday, 9 AM"]);
   });
 });

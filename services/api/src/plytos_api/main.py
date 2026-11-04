@@ -12,9 +12,12 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from plytos_api.agents.check_in import plan_confirmation, plan_label
 from plytos_api.agents.crew import crew
 from plytos_api.agents.model import (
     MAX_MESSAGE,
+    CheckInPlan,
+    CheckIns,
     MessageView,
     ProposalState,
     ProposalView,
@@ -23,7 +26,12 @@ from plytos_api.agents.model import (
 )
 from plytos_api.agents.resume import reading
 from plytos_api.agents.runtime import BackgroundWorker, Worker
-from plytos_api.agents.store import AgentRecordNotFoundError, AgentStore, ProposalConflictError
+from plytos_api.agents.store import (
+    AgentRecordNotFoundError,
+    AgentStore,
+    CheckInPlanError,
+    ProposalConflictError,
+)
 from plytos_api.auth import resolve_user
 from plytos_api.cards.model import CardKind, MainContent, TargetKind, VariantContent
 from plytos_api.cards.repository import (
@@ -142,6 +150,12 @@ class Shared(BaseModel):
 class Kept(BaseModel):
     proposal: ProposalView
     card: CardDetail
+
+
+class CheckInsSet(BaseModel):
+    check_ins: CheckIns
+    # What Plytos says about the change, in the conversation.
+    message: MessageView
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -467,6 +481,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def dismiss(proposal_id: UUID, user_id: User) -> ProposalView:
         with db.as_user(user_id) as conn:
             return agents(conn, user_id).dismiss(proposal_id)
+
+    def check_ins(store: AgentStore) -> CheckIns:
+        plan = store.check_in_plan()
+        return CheckIns(
+            plan=plan,
+            label=plan_label(plan) if plan else None,
+            next_at=store.next_check_in(),
+        )
+
+    @app.get("/v1/check-ins")
+    def get_check_ins(user_id: User) -> CheckIns:
+        """When Plytos checks in, and when it's next due. No plan means the
+        person hasn't been asked yet."""
+        with db.as_user(user_id) as conn:
+            return check_ins(agents(conn, user_id))
+
+    @app.put("/v1/check-ins")
+    def set_check_ins(body: CheckInPlan, user_id: User) -> CheckInsSet:
+        """Sets when Plytos checks in, or turns check-ins off. Plytos says what
+        changed in the conversation."""
+        with db.as_user(user_id) as conn:
+            store = agents(conn, user_id)
+            try:
+                store.set_check_in_plan(body)
+            except CheckInPlanError as exc:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+            message = store.notice(plan_confirmation(body), "check_in")
+            return CheckInsSet(check_ins=check_ins(store), message=message)
 
     @app.get("/v1/tidbits")
     def tidbits(user_id: User, card_id: UUID | None = None) -> list[TidbitView]:

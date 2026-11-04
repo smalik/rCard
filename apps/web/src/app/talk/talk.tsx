@@ -34,6 +34,10 @@ import {
 import {
   AGENT_LABELS,
   awaitingReply,
+  CHECK_IN_CHOICES,
+  type CheckIns,
+  type CheckInSlot,
+  checkInTimes,
   cleanMessage,
   fromNotes,
   groupByDay,
@@ -41,10 +45,16 @@ import {
   type Message,
   merge,
   monthLabel,
+  nextCheckInLabel,
+  offerCheckIns,
   type Proposal,
   resumeNext,
   resumeProgress,
   type Thread,
+  timeLabel,
+  USUAL_CHECK_IN,
+  WEEKDAYS,
+  WEEKS,
   withWording,
 } from "../../lib/talk";
 
@@ -80,6 +90,17 @@ function useInBrowser(): boolean {
 
 type Resumes = Record<string, ImportSummary>;
 
+// Saves a check-in plan; returns what went wrong, or null.
+type Plan = (slot: CheckInSlot, state?: "on" | "off") => Promise<string | null>;
+
+function timeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
 function byId(resumes: ImportSummary[]): Resumes {
   return Object.fromEntries(resumes.map((r) => [r.id, r]));
 }
@@ -87,6 +108,9 @@ function byId(resumes: ImportSummary[]): Resumes {
 export function Talk({ initial, failed }: { initial: Thread; failed: boolean }) {
   const [thread, setThread] = useState(initial.messages);
   const [resumes, setResumes] = useState(() => byId(initial.resumes));
+  const [checkIns, setCheckIns] = useState<CheckIns>(initial.check_ins);
+  // Whether the check-in settings are open under the header.
+  const [planning, setPlanning] = useState(false);
   const [clock, setClock] = useState(() => new Date());
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState<string | null>(null);
@@ -114,6 +138,7 @@ export function Talk({ initial, failed }: { initial: Thread; failed: boolean }) 
         if (fresh.ok) {
           setThread((t) => merge(t, fresh.data.messages));
           setResumes(byId(fresh.data.resumes));
+          setCheckIns(fresh.data.check_ins);
         }
         setClock(new Date());
       },
@@ -125,9 +150,10 @@ export function Talk({ initial, failed }: { initial: Thread; failed: boolean }) 
     };
   }, [waiting, clock]);
 
+  // Day labels appear once the page runs in the browser, so it scrolls again then.
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end" });
-  }, [thread.length, pending, sharing, waiting]);
+  }, [thread.length, pending, sharing, waiting, inBrowser]);
 
   async function say(event?: FormEvent) {
     event?.preventDefault();
@@ -189,6 +215,19 @@ export function Talk({ initial, failed }: { initial: Thread; failed: boolean }) 
     picker.current?.click();
   }
 
+  const plan: Plan = async (slot, state = "on") => {
+    const saved = await send<{ check_ins: CheckIns; message: Message }>("/talk/check-ins", {
+      ...slot,
+      state,
+      time_zone: timeZone(),
+    });
+    if (!saved.ok) return saved.error;
+    setCheckIns(saved.data.check_ins);
+    setThread((t) => merge(t, [saved.data.message]));
+    setPlanning(false);
+    return null;
+  };
+
   function onKey(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
@@ -218,10 +257,35 @@ export function Talk({ initial, failed }: { initial: Thread; failed: boolean }) 
               </span>
               {sharing !== null ? "Plytos is reading your resume" : "Plytos is reading your note"}
             </>
+          ) : checkIns.plan ? (
+            <>
+              <span>
+                {checkIns.plan.state === "on"
+                  ? inBrowser && checkIns.next_at
+                    ? `Next check-in ${nextCheckInLabel(checkIns.next_at)}`
+                    : "Monthly check-ins"
+                  : "Check-ins are off"}
+              </span>
+              <button
+                className="talk-status-link"
+                type="button"
+                aria-expanded={planning}
+                onClick={() => setPlanning((open) => !open)}
+              >
+                {checkIns.plan.state === "on" ? "Change" : "Turn on"}
+              </button>
+            </>
           ) : (
             "Tell it as it happens. I'll join your notes into wins."
           )}
         </p>
+        {planning && checkIns.plan && (
+          <CheckInSettings
+            checkIns={checkIns}
+            onPlan={plan}
+            onClose={() => setPlanning(false)}
+          />
+        )}
       </header>
 
       <section className="talk-thread" aria-label="Your conversation with Plytos">
@@ -256,6 +320,7 @@ export function Talk({ initial, failed }: { initial: Thread; failed: boolean }) 
             </p>
           </div>
         )}
+        {!failed && offerCheckIns(thread, checkIns, waiting) && <CheckInOffer onPlan={plan} />}
         {waiting && pending === null && (
           <div className="plytos thinking" aria-hidden="true">
             <span className="plytos-mark">P</span>
@@ -341,6 +406,203 @@ function Welcome({ onResume }: { onResume: () => void }) {
             Start from my resume
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Asked once, after the person's first exchange: whether Plytos should check
+// in once a month, and when.
+function CheckInOffer({ onPlan }: { onPlan: Plan }) {
+  const [picking, setPicking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const usual = USUAL_CHECK_IN;
+
+  async function choose(slot: CheckInSlot, state: "on" | "off" = "on") {
+    setBusy(true);
+    setError(null);
+    const problem = await onPlan(slot, state);
+    setBusy(false);
+    setError(problem);
+  }
+
+  return (
+    <div className="plytos">
+      <span className="plytos-mark" aria-hidden="true">
+        P
+      </span>
+      <div className="plytos-body">
+        <p className="plytos-text">
+          Want me to check in once a month? I&apos;ll ask one quick question about how the month
+          went, so the good parts don&apos;t slip away.
+        </p>
+        {picking ? (
+          <CheckInPicker
+            initial={usual}
+            busy={busy}
+            onSave={(slot) => void choose(slot)}
+            onCancel={() => setPicking(false)}
+          />
+        ) : (
+          <div className="talk-chips">
+            {CHECK_IN_CHOICES.map((choice) => (
+              <button
+                className="talk-chip"
+                type="button"
+                key={choice.label}
+                disabled={busy}
+                onClick={() => void choose(choice.slot)}
+              >
+                {choice.label}
+              </button>
+            ))}
+            <button
+              className="talk-chip"
+              type="button"
+              disabled={busy}
+              onClick={() => setPicking(true)}
+            >
+              Another day
+            </button>
+            <button
+              className="talk-chip talk-chip-quiet"
+              type="button"
+              disabled={busy}
+              onClick={() => void choose(usual, "off")}
+            >
+              Not now
+            </button>
+          </div>
+        )}
+        {error && (
+          <p className="offer-error" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Changing or turning off check-ins, from the line under the header.
+function CheckInSettings({
+  checkIns,
+  onPlan,
+  onClose,
+}: {
+  checkIns: CheckIns;
+  onPlan: Plan;
+  onClose: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const current = checkIns.plan ?? { ...USUAL_CHECK_IN, state: "off" };
+
+  async function save(slot: CheckInSlot, state: "on" | "off") {
+    setBusy(true);
+    setError(null);
+    const problem = await onPlan(slot, state);
+    setBusy(false);
+    setError(problem);
+  }
+
+  return (
+    <section className="check-in-settings" aria-label="Check-ins">
+      <p className="check-in-lead">Once a month, I&apos;ll ask one quick question. When suits you?</p>
+      <CheckInPicker
+        initial={current}
+        busy={busy}
+        onSave={(slot) => void save(slot, "on")}
+        onCancel={onClose}
+        onTurnOff={current.state === "on" ? () => void save(current, "off") : undefined}
+      />
+      {error && (
+        <p className="offer-error" role="alert">
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function CheckInPicker({
+  initial,
+  busy,
+  onSave,
+  onCancel,
+  onTurnOff,
+}: {
+  initial: CheckInSlot;
+  busy: boolean;
+  onSave: (slot: CheckInSlot) => void;
+  onCancel: () => void;
+  onTurnOff?: () => void;
+}) {
+  const [week, setWeek] = useState(initial.week);
+  const [weekday, setWeekday] = useState(initial.weekday);
+  const [time, setTime] = useState(initial.time);
+  const which = WEEKS.find((w) => w.week === week)?.label.toLowerCase() ?? "";
+  const box = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    box.current?.scrollIntoView({ block: "nearest" });
+  }, []);
+
+  return (
+    <div className="check-in-picker" ref={box}>
+      <div className="check-in-fields">
+        <label>
+          <span>Week</span>
+          <select value={week} onChange={(e) => setWeek(Number(e.target.value) as typeof week)}>
+            {WEEKS.map((w) => (
+              <option key={w.week} value={w.week}>
+                {w.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Day</span>
+          <select value={weekday} onChange={(e) => setWeekday(Number(e.target.value))}>
+            {WEEKDAYS.map((name, i) => (
+              <option key={name} value={i + 1}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Time</span>
+          <select value={time} onChange={(e) => setTime(e.target.value)}>
+            {checkInTimes(initial.time).map((t) => (
+              <option key={t} value={t}>
+                {timeLabel(t)}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <p className="check-in-summary">
+        The {which} {WEEKDAYS[weekday - 1]} of each month at {timeLabel(time)}
+      </p>
+      <div className="offer-actions">
+        <button
+          className="keep"
+          type="button"
+          disabled={busy}
+          onClick={() => onSave({ week, weekday, time })}
+        >
+          Check in then
+        </button>
+        {onTurnOff && (
+          <button className="quiet" type="button" disabled={busy} onClick={onTurnOff}>
+            Turn off
+          </button>
+        )}
+        <button className="quiet" type="button" disabled={busy} onClick={onCancel}>
+          Cancel
+        </button>
       </div>
     </div>
   );

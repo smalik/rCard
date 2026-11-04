@@ -122,4 +122,31 @@ class RunView(BaseModel):
     output_tokens: int | None
     error_code: str | None
     created_at: datetime
+    run_after: datetime
     finished_at: datetime | None
+
+
+class CheckInPlan(BaseModel):
+    """When Plytos checks in: once a month, on a weekday of a given week, at a
+    local time in the person's time zone ("the last Friday at 4 PM")."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    state: Literal["on", "off"] = "on"
+    # The first to the fourth week of the month, or -1 for the last.
+    week: Literal[1, 2, 3, 4, -1] = -1
+    # ISO weekday: 1 is Monday, 7 is Sunday.
+    weekday: int = Field(default=5, ge=1, le=7)
+    # 24-hour local time, "16:00".
+    time: str = Field(default="16:00", pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+    # An IANA name such as "America/Chicago".
+    time_zone: str = Field(min_length=1, max_length=64)
+
+
+class CheckIns(BaseModel):
+    """The person's check-in plan, said plainly, and when the next one is due."""
+
+    plan: CheckInPlan | None
+    # "The last Friday of the month at 4 PM"
+    label: str | None
+    next_at: datetime | None

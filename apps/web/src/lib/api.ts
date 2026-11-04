@@ -3,7 +3,7 @@ import "server-only";
 import type { CardContent, CardKind } from "./cards";
 import { type Answer, FILENAME_HEADER, type ImportSummary, type Progress } from "./imports";
 import type { Session } from "./session";
-import type { Message, Proposal, Thread } from "./talk";
+import type { CheckInPlan, CheckIns, Message, Proposal, Thread } from "./talk";
 
 // The API is private: only this server talks to it, never the browser.
 const API_URL = process.env.PLYTOS_API_URL ?? "http://localhost:8000";
@@ -178,13 +178,23 @@ export function getConversation(session: Session, limit = 60): Promise<Message[]
   return apiFetch<Message[]>(`/v1/conversation?limit=${limit}`, session);
 }
 
-// The thread and the resumes it shares, read together.
+// The thread, the resumes it shares and the check-in plan, read together.
 export async function getThread(session: Session): Promise<Thread> {
-  const [messages, resumes] = await Promise.all([
+  const [messages, resumes, check_ins] = await Promise.all([
     getConversation(session),
     listImports(session),
+    apiFetch<CheckIns>("/v1/check-ins", session),
   ]);
-  return { messages, resumes };
+  return { messages, resumes, check_ins };
+}
+
+// Sets when Plytos checks in, or turns check-ins off. Plytos says what
+// changed in the conversation.
+export function setCheckIns(
+  session: Session,
+  plan: CheckInPlan,
+): Promise<{ check_ins: CheckIns; message: Message }> {
+  return apiFetch("/v1/check-ins", session, { ...json(plan), method: "PUT" });
 }
 
 // The person shares a resume in the conversation. It's read and kept like any

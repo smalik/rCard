@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 
 import { ApiError, getThread } from "../../lib/api";
 import { currentSession } from "../../lib/session";
-import type { Thread } from "../../lib/talk";
+import { NO_CHECK_INS, type Thread } from "../../lib/talk";
 import { Talk } from "./talk";
 
 import "./talk.css";
@@ -15,7 +15,7 @@ export default async function TalkPage() {
   const session = await currentSession();
   if (!session) redirect("/sign-in");
 
-  let thread: Thread = { messages: [], resumes: [] };
+  let thread: Thread = { messages: [], resumes: [], check_ins: NO_CHECK_INS };
   let failed = false;
   try {
     thread = await getThread(session);

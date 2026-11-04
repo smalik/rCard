@@ -62,8 +62,110 @@ export type Message = {
   import_id?: string | null;
 };
 
-// What the thread needs to show: the messages and the resumes they share.
-export type Thread = { messages: Message[]; resumes: ImportSummary[] };
+// What the thread needs to show: the messages, the resumes they share, and
+// when Plytos checks in.
+export type Thread = { messages: Message[]; resumes: ImportSummary[]; check_ins: CheckIns };
+
+// -- check-ins ----------------------------------------------------------------
+
+// The first to the fourth week of the month, or -1 for the last.
+export type CheckInWeek = 1 | 2 | 3 | 4 | -1;
+
+// Once a month, on a weekday of a given week, at a local time.
+export type CheckInPlan = {
+  state: "on" | "off";
+  week: CheckInWeek;
+  // ISO weekday: 1 is Monday, 7 is Sunday.
+  weekday: number;
+  // 24-hour local time, "16:00".
+  time: string;
+  time_zone: string;
+};
+
+// No plan means the person hasn't been asked yet.
+export type CheckIns = { plan: CheckInPlan | null; label: string | null; next_at: string | null };
+
+export const NO_CHECK_INS: CheckIns = { plan: null, label: null, next_at: null };
+
+export type CheckInSlot = Pick<CheckInPlan, "week" | "weekday" | "time">;
+
+// What Plytos suggests first: the end of the month, at the end of the week.
+export const USUAL_CHECK_IN: CheckInSlot = { week: -1, weekday: 5, time: "16:00" };
+
+// The two answers most people give, offered as one tap each.
+export const CHECK_IN_CHOICES: { label: string; slot: CheckInSlot }[] = [
+  { label: "Last Friday, 4 PM", slot: USUAL_CHECK_IN },
+  { label: "First Monday, 9 AM", slot: { week: 1, weekday: 1, time: "09:00" } },
+];
+
+export const WEEKS: { week: CheckInWeek; label: string }[] = [
+  { week: 1, label: "First" },
+  { week: 2, label: "Second" },
+  { week: 3, label: "Third" },
+  { week: 4, label: "Fourth" },
+  { week: -1, label: "Last" },
+];
+
+export const WEEKDAYS = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+];
+
+const TIME = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
+
+// "16:00" as "4 PM", "09:30" as "9:30 AM".
+export function timeLabel(value: string): string {
+  const [hour = 0, minute = 0] = value.split(":").map(Number);
+  const shown = hour % 12 || 12;
+  const half = hour < 12 ? "AM" : "PM";
+  return minute === 0 ? `${shown} ${half}` : `${shown}:${String(minute).padStart(2, "0")} ${half}`;
+}
+
+// On the hour, from 7 AM to 9 PM, plus the plan's own time if it's another.
+export function checkInTimes(current?: string): string[] {
+  const times = Array.from({ length: 15 }, (_, i) => `${String(i + 7).padStart(2, "0")}:00`);
+  if (current && TIME.test(current) && !times.includes(current)) {
+    times.push(current);
+    times.sort();
+  }
+  return times;
+}
+
+// A plan the browser sent, checked before it goes to the API; null if it's
+// not one.
+export function cleanPlan(body: unknown): CheckInPlan | null {
+  if (typeof body !== "object" || body === null) return null;
+  const { state, week, weekday, time, time_zone } = body as Record<string, unknown>;
+  if (state !== "on" && state !== "off") return null;
+  if (!WEEKS.some((w) => w.week === week)) return null;
+  if (typeof weekday !== "number" || !Number.isInteger(weekday) || weekday < 1 || weekday > 7) {
+    return null;
+  }
+  if (typeof time !== "string" || !TIME.test(time)) return null;
+  if (typeof time_zone !== "string" || !time_zone || time_zone.length > 64) return null;
+  return { state, week: week as CheckInWeek, weekday, time, time_zone };
+}
+
+// Offers check-ins at the end of the thread once the person has said
+// something and Plytos has answered, until they choose.
+export function offerCheckIns(thread: Message[], checkIns: CheckIns, waiting: boolean): boolean {
+  if (checkIns.plan !== null || waiting) return false;
+  return thread.some((m) => m.author === "person") && thread.at(-1)?.author === "plytos";
+}
+
+// "Fri, Nov 27", for when the next check-in is due.
+export function nextCheckInLabel(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+}
 
 // The text to send, or null when there's nothing to send.
 export function cleanMessage(text: string): string | null {

@@ -1,6 +1,6 @@
 # Agents: one voice, many small helpers
 
-People don't fill in Plytos. They talk to it. Plytos asks now and then what
+People don't fill in Plytos. They talk to it. Plytos asks once a month what
 moved at work, takes a quick note whenever they have one, and over weeks joins
 the notes into accomplishments they can keep with one tap. Behind that one
 voice, small agents each do one job over the person's data.
@@ -18,7 +18,8 @@ person edited it first. Dismissed and replaced proposals stay on record.
 
 ## Records
 
-Schema: [`0004_agents.sql`](../services/api/migrations/0004_agents.sql). Every
+Schema: [`0004_agents.sql`](../services/api/migrations/0004_agents.sql) and
+[`0005_check_ins.sql`](../services/api/migrations/0005_check_ins.sql). Every
 table is owned by one person, under row-level security, and their content is
 encrypted with that person's data key.
 
@@ -28,6 +29,7 @@ encrypted with that person's data key.
 | Tidbit | `plytos.tidbit` | A note about work, kept as the person wrote it, forever. The Listener reads it once and files it under a job |
 | Proposal | `plytos.proposal` | Something an agent offers: a new card, and later a version, variant, resume, question or insight. Decided once |
 | Agent run | `plytos.agent_run` | One piece of agent work: queued, running, done or failed, with what it cost in tokens. Never content |
+| Check-in plan | `plytos.check_in_plan` | When Plytos checks in: once a month, on a week and weekday, at a local time in the person's time zone, or off. Never content |
 
 The database enforces the rules that matter whatever the code does:
 
@@ -50,7 +52,9 @@ row-level security holds for everything the agent reads and writes.
 If an agent fails, its writes roll back with the transaction and the run goes
 back in the queue: after 1 minute, then 2. After the third try it stays failed.
 A run queued with a `dedupe_key` stands in for any other run queued under the
-same key, which is how a burst of notes turns into one Stitcher pass.
+same key, which is how a burst of notes turns into one Stitcher pass. A run can
+also wait for a set time: the next check-in sits in the queue under the key
+`check_in` until it's due, and moving the plan moves that run.
 
 Agents ask the model through `Thinker` (`agents/thinking.py`) for answers that
 match a Pydantic model. The person's words go to the model provider, so nothing
@@ -83,6 +87,21 @@ missing. A draft that gains a new note replaces the old one. A draft that
 claims a number its notes don't contain is dropped: the Stitcher joins and
 words what the person said, never adds to it.
 
+**Check-in** (`agents/check_in.py`) asks one short question once a month, at
+the time the person picked: the last Friday at 4 PM unless they choose another
+week, day or time. Plytos offers check-ins after the person's first exchange,
+and they can change them or turn them off from the top of the conversation.
+When it's due, the Check-in follows up something open if there is one: a draft
+win missing its result, or a note from the last couple of months that didn't
+say how things turned out. Each is followed up once. Otherwise it asks a fresh
+question about the month. A question the model writes may only use figures the
+person wrote; anything else falls back to a plain question, and so does AI
+being off. It doesn't interrupt: if the person wrote in the last two hours, it
+asks at the same time the next day. A check-in more than six hours late (the
+worker was down) is skipped. Either way the next month's is queued. The
+person's answer goes to the Listener like any message, which reads it with the
+question before it.
+
 ## A resume in the conversation
 
 The person can share a resume from the composer (or "Start from my resume"
@@ -105,9 +124,12 @@ uses the import screens for now.
 | `POST /v1/proposals/{id}/dismiss` | Says no to a proposal |
 | `GET /v1/tidbits?card_id=` | The person's notes, oldest first, all or under one job |
 | `GET /v1/agent-runs` | What the agents did lately, for "how I got here". Never content |
+| `GET /v1/check-ins` | The check-in plan, said plainly, and when the next one is due. No plan means the person hasn't been asked yet |
+| `PUT /v1/check-ins` | Sets the plan (`week`, `weekday`, `time`, `time_zone`) or turns it off (`state: "off"`). Plytos confirms in the conversation |
 
 ## Next
 
-Check-ins on a schedule (in the app first, text messages after carrier
-registration), the conversation screen in the web app, and moving the resume
-import into the conversation. Then the Scout and Assembler for applying.
+Check-ins reach people only when they open the app for now. Next come
+notifications (web push, then text messages after carrier registration), moving
+the resume import's card review into the conversation, and then the Scout and
+Assembler for applying.

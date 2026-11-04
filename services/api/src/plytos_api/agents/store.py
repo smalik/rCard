@@ -11,7 +11,7 @@ another row.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, time
 from typing import Any
 from uuid import UUID
 
@@ -21,6 +21,7 @@ from psycopg import sql
 from plytos_api.agents.model import (
     AgentName,
     Channel,
+    CheckInPlan,
     MessageView,
     ProposalBody,
     ProposalKind,
@@ -42,6 +43,10 @@ class AgentRecordNotFoundError(Exception):
     pass
 
 
+class CheckInPlanError(ValueError):
+    """The plan can't be saved as given, such as an unknown time zone."""
+
+
 class ProposalConflictError(Exception):
     """The proposal can't be decided as asked: it was decided already, or it
     isn't the kind that turns into a card."""
@@ -57,8 +62,32 @@ _TIDBIT_COLUMNS = sql.SQL(
 )
 _RUN_COLUMNS = sql.SQL(
     "id, agent, trigger_kind, trigger_id, state, attempts, model, input_tokens, output_tokens,"
-    " error_code, created_at, finished_at"
+    " error_code, created_at, run_after, finished_at"
 )
+
+
+# The plan's day in this month and the next two, as local times in the
+# person's time zone, and the first of them still to come. A week of -1 is the
+# last such weekday of the month.
+_NEXT_CHECK_IN = """
+select min(slot) from (
+  select (
+    case when %(week)s = -1
+      then (g.m + interval '1 month' - interval '1 day')::date
+        - ((extract(isodow from g.m + interval '1 month' - interval '1 day')::int
+            - %(weekday)s + 7) %% 7)
+      else g.m::date + ((%(weekday)s - extract(isodow from g.m)::int + 7) %% 7)
+        + (%(week)s - 1) * 7
+    end + %(time)s::time
+  ) at time zone %(tz)s as slot
+  from generate_series(
+    date_trunc('month', coalesce(%(after)s, clock_timestamp()) at time zone %(tz)s),
+    date_trunc('month', coalesce(%(after)s, clock_timestamp()) at time zone %(tz)s)
+      + interval '2 months',
+    interval '1 month') as g(m)
+) s
+where slot > coalesce(%(after)s, clock_timestamp())
+"""
 
 
 def _aad(record: str, record_id: UUID) -> bytes:
@@ -94,6 +123,13 @@ class AgentStore:
         answer = self._message("plytos", reading, "app", None, import_id)
         self._event("system", "message.sent", "message", answer.id, "import")
         return [shared, answer]
+
+    def notice(self, text: str, ref: str) -> MessageView:
+        """Saves a message from Plytos that no agent wrote, such as confirming a
+        change the person made. `ref` says what wrote it."""
+        message = self._message("plytos", text, "app", None)
+        self._event("system", "message.sent", "message", message.id, ref)
+        return message
 
     def message(self, message_id: UUID) -> MessageView:
         row = self._conn.execute(
@@ -290,6 +326,113 @@ class AgentStore:
         self._decide(proposal_id, "superseded", None)
         self._event("ai", "proposal.superseded", "proposal", proposal_id, agent)
 
+    # -- check-ins -------------------------------------------------------------
+
+    def check_in_plan(self) -> CheckInPlan | None:
+        row = self._conn.execute(
+            "select state, week, weekday, local_time, time_zone from plytos.check_in_plan"
+        ).fetchone()
+        if row is None:
+            return None
+        return CheckInPlan(
+            state=row[0],
+            week=row[1],
+            weekday=row[2],
+            time=row[3].strftime("%H:%M"),
+            time_zone=row[4],
+        )
+
+    def set_check_in_plan(self, plan: CheckInPlan) -> datetime | None:
+        """Saves when the person wants check-ins. When they're on, the next one
+        is queued (or moved) for the next time due, which comes back."""
+        known = self._conn.execute(
+            "select exists (select 1 from pg_timezone_names where name = %s)", (plan.time_zone,)
+        ).fetchone()
+        if not known or not known[0]:
+            raise CheckInPlanError("Plytos doesn't know that time zone.")
+        self._conn.execute(
+            "insert into plytos.check_in_plan"
+            " (owner_id, state, week, weekday, local_time, time_zone)"
+            " values (%(owner)s, %(state)s, %(week)s, %(weekday)s, %(time)s, %(tz)s)"
+            " on conflict (owner_id) do update set state = excluded.state,"
+            " week = excluded.week, weekday = excluded.weekday,"
+            " local_time = excluded.local_time, time_zone = excluded.time_zone,"
+            " updated_at = clock_timestamp()",
+            {
+                "owner": self._user_id,
+                "state": plan.state,
+                "week": plan.week,
+                "weekday": plan.weekday,
+                "time": time.fromisoformat(plan.time),
+                "tz": plan.time_zone,
+            },
+        )
+        self._event("person", f"check_in.turned_{plan.state}", "check_in_plan", self._user_id)
+        if plan.state != "on":
+            return None
+        return self.schedule_check_in(plan)
+
+    def schedule_check_in(self, plan: CheckInPlan, after: datetime | None = None) -> datetime:
+        """Queues the Check-in agent for the plan's next time after `after`
+        (now by default), worked out in the person's time zone. A check-in
+        already queued is moved, not doubled."""
+        row = self._conn.execute(
+            _NEXT_CHECK_IN,
+            {
+                "week": plan.week,
+                "weekday": plan.weekday,
+                "time": time.fromisoformat(plan.time),
+                "tz": plan.time_zone,
+                "after": after,
+            },
+        ).fetchone()
+        assert row is not None and row[0] is not None
+        due: datetime = row[0]
+        self.schedule("check_in", "schedule", due, dedupe_key="check_in")
+        return due
+
+    def next_check_in(self) -> datetime | None:
+        row = self._conn.execute(
+            "select r.run_after from plytos.agent_run r join plytos.check_in_plan p"
+            " on p.owner_id = r.owner_id and p.state = 'on'"
+            " where r.dedupe_key = 'check_in' and r.state = 'queued'"
+        ).fetchone()
+        return row[0] if row else None
+
+    def last_said(self) -> datetime | None:
+        """When the person last wrote anything."""
+        row = self._conn.execute(
+            "select max(created_at) from plytos.message where author = 'person'"
+        ).fetchone()
+        return row[0] if row else None
+
+    def check_ins_asked(self, limit: int = 3) -> tuple[int, list[MessageView]]:
+        """How many check-ins Plytos has asked, and the latest few, newest first."""
+        count = self._conn.execute(
+            "select count(*) from plytos.event where action = 'check_in.asked'"
+        ).fetchone()
+        rows = self._conn.execute(
+            "select m.id, m.author, m.channel, m.body_ciphertext, m.proposal_id, m.created_at,"
+            " m.import_id from plytos.event e join plytos.message m on m.id = e.record_id"
+            " where e.action = 'check_in.asked'"
+            " order by m.created_at desc, m.id desc limit %s",
+            (limit,),
+        ).fetchall()
+        return (count[0] if count else 0), [self._message_view(r) for r in rows]
+
+    def followed_up(self) -> set[UUID]:
+        """Drafts and notes a check-in already asked about."""
+        rows = self._conn.execute(
+            "select record_id from plytos.event where action = 'check_in.followed_up'"
+        ).fetchall()
+        return {r[0] for r in rows}
+
+    def asked(self, message_id: UUID, about: tuple[str, UUID] | None = None) -> None:
+        """Records that a message was a check-in, and what it followed up."""
+        self._event("ai", "check_in.asked", "message", message_id, "check_in")
+        if about is not None:
+            self._event("ai", "check_in.followed_up", about[0], about[1], "check_in")
+
     # -- agent runs ------------------------------------------------------------
 
     def enqueue(
@@ -312,6 +455,19 @@ class AgentStore:
             (uuid7(), self._user_id, agent, trigger_kind, trigger_id, dedupe_key, delay_seconds),
         ).fetchone()
         return row[0] if row else None
+
+    def schedule(
+        self, agent: AgentName, trigger_kind: TriggerKind, at: datetime, *, dedupe_key: str
+    ) -> None:
+        """Queues a run for a set time. A run already queued under the key is
+        moved to that time instead."""
+        self._conn.execute(
+            "insert into plytos.agent_run (id, owner_id, agent, trigger_kind, dedupe_key,"
+            " run_after) values (%s, %s, %s, %s, %s, %s)"
+            " on conflict (owner_id, dedupe_key) where state = 'queued' and dedupe_key is not null"
+            " do update set run_after = excluded.run_after",
+            (uuid7(), self._user_id, agent, trigger_kind, dedupe_key, at),
+        )
 
     def run(self, run_id: UUID) -> RunView:
         row = self._conn.execute(
@@ -465,7 +621,8 @@ class AgentStore:
             output_tokens=row[8],
             error_code=row[9],
             created_at=row[10],
-            finished_at=row[11],
+            run_after=row[11],
+            finished_at=row[12],
         )
 
     def _event(

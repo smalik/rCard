@@ -538,3 +538,89 @@
     opacity: 0.7;
   }
 }
+
+/* Check-ins: the offer in the thread, and the settings under the header */
+
+.talk-status > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.talk-status-link {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  min-height: 44px;
+  margin: -12px 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--orange);
+  cursor: pointer;
+}
+
+.talk-chip-quiet {
+  border-color: var(--ink-20);
+  color: var(--ink-60);
+}
+
+.talk-chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.check-in-settings {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  border-radius: 16px;
+  background: var(--white);
+  border: 1px solid var(--ink-10);
+}
+
+.check-in-lead {
+  margin: 0;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.check-in-picker {
+  display: grid;
+  gap: 10px;
+}
+
+.check-in-fields {
+  display: grid;
+  grid-template-columns: 0.8fr 1.25fr 0.95fr;
+  gap: 8px;
+}
+
+.check-in-fields label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.check-in-fields span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-60);
+}
+
+.check-in-fields select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 8px;
+  border: 1.5px solid var(--ink-20);
+  border-radius: 12px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+}
+
+.check-in-summary {
+  margin: 0;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--ink-60);
+}

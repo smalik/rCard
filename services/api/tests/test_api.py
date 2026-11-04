@@ -333,3 +333,43 @@ def test_sharing_a_resume_in_the_conversation(client: TestClient) -> None:
     assert client.get("/v1/agent-runs", headers=me).json() == []
     empty = client.post("/v1/conversation/resume", content=b"", headers=me)
     assert empty.status_code == 422
+
+
+def test_check_ins_over_http(client: TestClient) -> None:
+    me, other = as_user("api-check-ins"), as_user("api-check-ins-other")
+    assert client.get("/v1/check-ins", headers=me).json() == {
+        "plan": None,
+        "label": None,
+        "next_at": None,
+    }
+    plan = {"week": -1, "weekday": 5, "time": "16:00", "time_zone": "America/Chicago"}
+    saved = client.put("/v1/check-ins", json=plan, headers=me)
+    assert saved.status_code == 200, saved.text
+    check_ins = saved.json()["check_ins"]
+    assert check_ins["plan"] == plan | {"state": "on"}
+    assert check_ins["label"] == "The last Friday of the month at 4 PM"
+    assert check_ins["next_at"] is not None
+    message = saved.json()["message"]
+    assert message["author"] == "plytos"
+    assert message["text"].startswith("Got it. I'll check in once a month, on the last Friday")
+    assert client.get("/v1/conversation", headers=me).json() == [message]
+    assert client.get("/v1/check-ins", headers=me).json() == check_ins
+    assert client.get("/v1/check-ins", headers=other).json()["plan"] is None
+
+    off = client.put("/v1/check-ins", json=plan | {"state": "off"}, headers=me)
+    assert off.status_code == 200, off.text
+    assert off.json()["check_ins"]["next_at"] is None
+    assert off.json()["message"]["text"].startswith("Okay, no check-ins")
+
+    for bad in (
+        plan | {"time_zone": "Mars/Olympus"},
+        plan | {"time": "25:00"},
+        plan | {"week": 5},
+        plan | {"weekday": 0},
+        plan | {"weekdays": [1, 2]},
+        plan | {"channel": "text_message"},
+    ):
+        refused = client.put("/v1/check-ins", json=bad, headers=me)
+        assert refused.status_code == 422, bad
+    unknown = client.put("/v1/check-ins", json=plan | {"time_zone": "Mars/Olympus"}, headers=me)
+    assert unknown.json()["detail"] == "Plytos doesn't know that time zone."

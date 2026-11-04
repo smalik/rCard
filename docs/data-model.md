@@ -17,6 +17,7 @@ across hundreds of tailored variants. These rules make that hold. The schema is
 | Event | `plytos.event` | Append-only history: who did what to which record, never the content |
 | Resume import | `plytos.resume_import` | A resume the person brought in: the original file, what was read from it, and their progress approving its cards. All encrypted; only the format, size and times are clear. Schema in [`0002_resume_import.sql`](../services/api/migrations/0002_resume_import.sql) |
 | Message, tidbit, proposal, agent run | `plytos.message`, `plytos.tidbit`, `plytos.proposal`, `plytos.agent_run` | The conversation with Plytos, the notes it keeps, what agents offer, and the work they did. Content encrypted. See [agents.md](agents.md) |
+| Check-in plan | `plytos.check_in_plan` | When Plytos checks in, once a month: a week of the month, a weekday, a local time and a time zone. No content. See [agents.md](agents.md) |
 
 ## Rules
 
