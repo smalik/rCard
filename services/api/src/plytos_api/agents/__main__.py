@@ -1,13 +1,19 @@
-"""Runs the agent worker until stopped: `python -m plytos_api.agents`."""
+"""Runs the background workers until stopped: `python -m plytos_api.agents`.
+
+One thread works through agent runs, another reads uploaded resumes, so a
+long reading never holds up the conversation.
+"""
 
 import logging
 import signal
 import threading
 
 from plytos_api.agents.crew import crew
-from plytos_api.agents.runtime import Worker
+from plytos_api.agents.runtime import BackgroundWorker, Worker
 from plytos_api.config import get_settings
 from plytos_api.db import Database
+from plytos_api.imports.ai import reader_for
+from plytos_api.imports.worker import ImportWorker
 from plytos_api.keys import Vault, kek_from_setting
 
 log = logging.getLogger(__name__)
@@ -19,20 +25,28 @@ def main() -> None:
     db = Database(settings.database_url)
     db.open()
     vault = Vault(kek_from_setting(settings.kek, allow_local=settings.dev_shortcuts))
-    worker = Worker(db, vault, crew(settings))
+    reader = reader_for(
+        settings.ai_provider,
+        settings.ai_model,
+        settings.ai_effort,
+        settings.ai_vertex_project,
+        settings.ai_vertex_region,
+    )
+    workers = [
+        BackgroundWorker(Worker(db, vault, crew(settings)), name="agents"),
+        BackgroundWorker(ImportWorker(db, vault, reader), every_seconds=1.0, name="imports"),
+    ]
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
-    log.info("Agent worker started")
+    for worker in workers:
+        worker.start()
+    log.info("Workers started")
     try:
-        while not stop.is_set():
-            try:
-                if worker.run_once() == 0:
-                    stop.wait(2.0)
-            except Exception as exc:
-                log.warning("Agent worker round failed: %s", type(exc).__name__)
-                stop.wait(5.0)
+        stop.wait()
     finally:
+        for worker in workers:
+            worker.stop()
         db.close()
 
 

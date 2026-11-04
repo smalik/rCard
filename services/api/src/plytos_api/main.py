@@ -24,7 +24,6 @@ from plytos_api.agents.model import (
     RunView,
     TidbitView,
 )
-from plytos_api.agents.resume import reading
 from plytos_api.agents.runtime import BackgroundWorker, Worker
 from plytos_api.agents.store import (
     AgentRecordNotFoundError,
@@ -51,16 +50,17 @@ from plytos_api.cards.repository import (
 from plytos_api.config import Settings, get_settings
 from plytos_api.db import Database
 from plytos_api.imports.ai import reader_for
-from plytos_api.imports.extract import MAX_BYTES, UnsupportedFileError
-from plytos_api.imports.pipeline import import_resume
+from plytos_api.imports.extract import MAX_BYTES, UnsupportedFileError, detect_format
 from plytos_api.imports.store import (
     ImportConflictError,
     ImportNotFoundError,
     ImportProgress,
+    ImportStatus,
     ImportStore,
     ImportSummary,
     ImportView,
 )
+from plytos_api.imports.worker import ImportWorker
 from plytos_api.keys import KeyShreddedError, Vault, kek_from_setting
 from plytos_api.resumes.as_written import as_written
 from plytos_api.resumes.model import ResumeChange, ResumeContent, keep_wording
@@ -274,20 +274,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.ai_vertex_region,
     )
 
-    background = (
-        BackgroundWorker(Worker(db, vault, crew(settings))) if settings.agents_inline else None
-    )
+    # The API reads uploads itself unless told a separate worker does. The agents
+    # run inside it only in development; in production they run as their own
+    # service (python -m plytos_api.agents), which reads uploads too.
+    background: list[BackgroundWorker] = []
+    if settings.agents_inline:
+        background.append(BackgroundWorker(Worker(db, vault, crew(settings)), name="agents"))
+    if settings.imports_inline or settings.agents_inline:
+        background.append(
+            BackgroundWorker(ImportWorker(db, vault, reader), every_seconds=1.0, name="imports")
+        )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         db.open()
-        if background:
-            background.start()
+        for worker in background:
+            worker.start()
         try:
             yield
         finally:
-            if background:
-                background.stop()
+            for worker in background:
+                worker.stop()
             db.close()
 
     docs = settings.dev_shortcuts
@@ -483,22 +490,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def imports(conn: psycopg.Connection, user_id: UUID) -> ImportStore:
         return ImportStore(conn, user_id, vault.cipher_for(conn, user_id))
 
-    @app.post("/v1/imports", status_code=status.HTTP_201_CREATED)
-    async def create_import(request: Request, user_id: User) -> ImportView:
-        """Reads a resume, keeps the original encrypted, and returns proposed cards
-        and an audit. No card is saved until the person approves it.
+    @app.post("/v1/imports", status_code=status.HTTP_202_ACCEPTED)
+    async def create_import(request: Request, user_id: User) -> ImportStatus:
+        """Keeps a resume, encrypted, to be read in the background, and says where
+        the reading is. The proposed cards and the audit come with the import once
+        it's read. No card is saved until the person approves it.
 
         The body is the file itself. The file name comes in a header, not the
         URL, because URLs land in request logs and resume file names carry names.
+        A file that isn't Word, PDF or text is turned away here, before it's kept.
         """
         data, filename = await read_upload(request)
-        result = await run_in_threadpool(import_resume, data, filename, reader=reader)
+        fmt = detect_format(data, filename)
 
-        def store() -> ImportView:
+        def keep() -> ImportStatus:
             with db.as_user(user_id) as conn:
-                return imports(conn, user_id).create(data, filename, result)
+                return imports(conn, user_id).keep(data, filename, fmt)
 
-        return await run_in_threadpool(store)
+        return await run_in_threadpool(keep)
 
     @app.get("/v1/imports")
     def list_imports(user_id: User) -> list[ImportSummary]:
@@ -509,6 +518,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def get_import(import_id: UUID, user_id: User) -> ImportView:
         with db.as_user(user_id) as conn:
             return imports(conn, user_id).get(import_id)
+
+    @app.get("/v1/imports/{import_id}/status")
+    def import_status(import_id: UUID, user_id: User) -> ImportStatus:
+        """Where the reading is, cheap enough to ask every second or two."""
+        with db.as_user(user_id) as conn:
+            return imports(conn, user_id).status(import_id)
+
+    @app.post("/v1/imports/{import_id}/read-again")
+    def read_again(import_id: UUID, user_id: User) -> ImportStatus:
+        """Tries a reading that failed once more."""
+        with db.as_user(user_id) as conn:
+            return imports(conn, user_id).read_again(import_id)
 
     @app.get("/v1/imports/{import_id}/original")
     def get_original(import_id: UUID, user_id: User) -> Response:
@@ -573,18 +594,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/v1/conversation/resume", status_code=status.HTTP_201_CREATED)
     async def share_resume(request: Request, user_id: User) -> Shared:
-        """The person shares a resume in the conversation. It's read and kept like
-        any import, and Plytos answers with what it found. The file name comes in
-        a header, never the URL."""
+        """The person shares a resume in the conversation. It's kept and read in
+        the background like any import, and Plytos answers with what it found
+        once it's read. The file name comes in a header, never the URL."""
         data, filename = await read_upload(request)
-        result = await run_in_threadpool(import_resume, data, filename, reader=reader)
+        fmt = detect_format(data, filename)
 
         def store() -> Shared:
             with db.as_user(user_id) as conn:
                 store = imports(conn, user_id)
-                kept = store.create(data, filename, result)
-                messages = agents(conn, user_id).share_resume(kept.id, reading(result))
-                return Shared(messages=messages, resume=store.summary(kept.id))
+                kept = store.keep(data, filename, fmt)
+                message = agents(conn, user_id).share_resume(kept.id)
+                return Shared(messages=[message], resume=store.summary(kept.id))
 
         return await run_in_threadpool(store)
 
@@ -636,6 +657,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 made = next(r for r in store.summaries() if r.import_id == body.import_id)
                 return page(store.detail(made.id), cards)
             view = imports(conn, user_id).get(body.import_id)
+            if view.result is None:
+                raise ImportConflictError("This resume is still being read.")
             content = as_written(view.result, view.progress, cards.main_contents())
             if not content.entries and not content.context:
                 raise HTTPException(

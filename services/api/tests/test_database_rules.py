@@ -209,10 +209,17 @@ def test_an_import_keeps_the_original_encrypted_and_unchanged(
         info, data = store.original(import_id)
         assert data == messy_text().encode()
         assert info.name == "Jordan Rivera.txt"
-    for column in ("file_ciphertext", "name_ciphertext", "result_ciphertext", "file_format"):
+    for column in ("file_ciphertext", "name_ciphertext", "file_format"):
         with pytest.raises(errors.InsufficientPrivilege), db.as_user(user) as conn:
             conn.execute(
                 f"update plytos.resume_import set {column} = {column} where id = %s",  # noqa: S608
+                (import_id,),
+            )
+    # What was read is written once, and a read import stays read.
+    for change in ("result_ciphertext = '\\x00'", "state = 'reading', result_ciphertext = null"):
+        with pytest.raises(errors.CheckViolation), db.as_user(user) as conn:
+            conn.execute(
+                f"update plytos.resume_import set {change} where id = %s",  # noqa: S608
                 (import_id,),
             )
 

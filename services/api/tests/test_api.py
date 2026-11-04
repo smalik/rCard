@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from typing import Any
 from urllib.parse import quote, unquote
 from uuid import UUID
 
@@ -12,6 +13,7 @@ from plytos_api.cards.model import Framing
 from plytos_api.cards.repository import Author
 from plytos_api.config import Settings
 from plytos_api.db import Database
+from plytos_api.imports.worker import ImportWorker
 from plytos_api.keys import Vault
 from plytos_api.main import create_app
 from plytos_api.resumes.model import ResumeContent
@@ -23,13 +25,33 @@ from .resume_samples import promotions_text
 
 @pytest.fixture(scope="module")
 def client(test_db: DbUrls, kek_setting: str) -> Iterator[TestClient]:
-    app = create_app(Settings(env="test", database_url=test_db.app_url, kek=kek_setting))
+    app = create_app(
+        Settings(env="test", database_url=test_db.app_url, kek=kek_setting, imports_inline=False)
+    )
     with TestClient(app) as c:
         yield c
 
 
+@pytest.fixture(scope="module")
+def reads(db: Database, vault: Vault) -> ImportWorker:
+    """Reads uploads the way the background worker does, when a test asks."""
+    return ImportWorker(db, vault, None, retry_base_seconds=0)
+
+
 def as_user(name: str) -> dict[str, str]:
     return {"X-Plytos-Dev-User": name}
+
+
+def upload(
+    client: TestClient, reads: ImportWorker, data: bytes, name: str, me: dict[str, str]
+) -> dict[str, Any]:
+    """Uploads a resume, lets the worker read it, and returns the import."""
+    kept = client.post("/v1/imports", content=data, headers=me | {"X-Plytos-Filename": quote(name)})
+    assert kept.status_code == 202, kept.text
+    reads.run_until_idle()
+    view: dict[str, Any] = client.get(f"/v1/imports/{kept.json()['id']}", headers=me).json()
+    assert view["state"] == "read"
+    return view
 
 
 def test_every_response_forbids_indexing_and_caching(client: TestClient) -> None:
@@ -49,6 +71,7 @@ def test_prod_refuses_until_sign_in_exists(test_db: DbUrls) -> None:
         env="prod",
         database_url=test_db.app_url,
         kek="gcp-kms:projects/p/locations/us/keyRings/r/cryptoKeys/k",
+        imports_inline=False,
     )
     with TestClient(create_app(settings)) as prod:
         assert prod.get("/v1/cards", headers=as_user("someone")).status_code == 501
@@ -135,7 +158,7 @@ def test_unknown_parent_target_is_not_found(client: TestClient) -> None:
 
 
 def test_resume_import_keeps_the_original_and_saves_only_approved_cards(
-    client: TestClient,
+    client: TestClient, reads: ImportWorker
 ) -> None:
     from .resume_samples import consultant_docx
 
@@ -147,11 +170,28 @@ def test_resume_import_keeps_the_original_and_saves_only_approved_cards(
         content=data,
         headers={**me, "X-Plytos-Filename": "Casey%20Morgan%20Resume.docx"},
     )
-    assert response.status_code == 201, response.text
+    # Kept at once and read in the background.
+    assert response.status_code == 202, response.text
     assert response.headers["cache-control"] == "no-store"
-    view = response.json()
-    import_id = view["id"]
-    assert view["file"] == {"format": "docx", "size": len(data), "name": "Casey Morgan Resume.docx"}
+    kept = response.json()
+    import_id = kept["id"]
+    assert (kept["state"], kept["stage"], kept["error_code"]) == ("reading", None, None)
+    assert kept["file"] == {"format": "docx", "size": len(data), "name": "Casey Morgan Resume.docx"}
+    waiting = client.get(f"/v1/imports/{import_id}", headers=me).json()
+    assert waiting["state"] == "reading" and waiting["result"] is None
+    assert waiting["to_settle"] == []
+    [listed] = [s for s in client.get("/v1/imports", headers=me).json() if s["id"] == import_id]
+    assert (listed["state"], listed["cards"]) == ("reading", 0)
+    unread = client.post(
+        f"/v1/imports/{import_id}/cards/card-1/decision", json={"state": "later"}, headers=me
+    )
+    assert unread.status_code == 409 and "still being read" in unread.json()["detail"]
+
+    reads.run_until_idle()
+    status_now = client.get(f"/v1/imports/{import_id}/status", headers=me).json()
+    assert (status_now["state"], status_now["stage"]) == ("read", None)
+    view = client.get(f"/v1/imports/{import_id}", headers=me).json()
+    assert view["state"] == "read"
     assert view["progress"] == {"settled": {}, "cards": {}, "edits": {}, "moves": {}}
     assert len(view["result"]["roles"]) == 4
     assert client.get("/v1/cards", headers=me).json() == before
@@ -251,6 +291,8 @@ def test_resume_import_keeps_the_original_and_saves_only_approved_cards(
 
     someone = as_user("someone-else")
     assert client.get(f"/v1/imports/{import_id}", headers=someone).status_code == 404
+    assert client.get(f"/v1/imports/{import_id}/status", headers=someone).status_code == 404
+    assert client.post(f"/v1/imports/{import_id}/read-again", headers=someone).status_code == 404
     assert client.get(f"/v1/imports/{import_id}/original", headers=someone).status_code == 404
     assert client.delete(f"/v1/imports/{import_id}", headers=someone).status_code == 404
     assert client.get("/v1/imports", headers=someone).json() == []
@@ -315,7 +357,7 @@ def test_conversation_over_http(client: TestClient, db: Database, vault: Vault) 
         assert [p["id"] for p in listed] == [str(proposal_id)]
 
 
-def test_sharing_a_resume_in_the_conversation(client: TestClient) -> None:
+def test_sharing_a_resume_in_the_conversation(client: TestClient, reads: ImportWorker) -> None:
     me, other = as_user("api-resume"), as_user("api-resume-other")
     shared = client.post(
         "/v1/conversation/resume",
@@ -324,20 +366,62 @@ def test_sharing_a_resume_in_the_conversation(client: TestClient) -> None:
     )
     assert shared.status_code == 201, shared.text
     body = shared.json()
-    person, plytos = body["messages"]
-    assert person["author"] == "person" and plytos["author"] == "plytos"
-    assert plytos["text"].startswith("I read it:")
+    [person] = body["messages"]
+    assert person["author"] == "person" and person["import_id"] == body["resume"]["id"]
     assert body["resume"]["file"]["name"] == "Avery Quinn.txt"
-    assert body["resume"]["cards"] > 0 and body["resume"]["approved"] == 0
-    assert person["import_id"] == plytos["import_id"] == body["resume"]["id"]
-    assert [m["id"] for m in client.get("/v1/conversation", headers=me).json()] == [
-        person["id"],
-        plytos["id"],
-    ]
+    assert (body["resume"]["state"], body["resume"]["cards"]) == ("reading", 0)
+
+    # Plytos answers once the worker has read it, and only once.
+    reads.run_until_idle()
+    reads.run_until_idle()
+    person_again, plytos = client.get("/v1/conversation", headers=me).json()
+    assert person_again["id"] == person["id"]
+    assert plytos["author"] == "plytos" and plytos["text"].startswith("I read it:")
+    assert plytos["import_id"] == body["resume"]["id"]
+    [resume] = client.get("/v1/imports", headers=me).json()
+    assert resume["state"] == "read" and resume["cards"] > 0 and resume["approved"] == 0
     assert client.get("/v1/conversation", headers=other).json() == []
     assert client.get("/v1/agent-runs", headers=me).json() == []
     empty = client.post("/v1/conversation/resume", content=b"", headers=me)
     assert empty.status_code == 422
+    old_doc = client.post(
+        "/v1/conversation/resume", content=b"\xd0\xcf\x11\xe0" + b"\0" * 64, headers=me
+    )
+    assert old_doc.status_code == 422
+
+
+def test_a_reading_that_fails_says_so_and_can_be_tried_again(
+    client: TestClient, reads: ImportWorker
+) -> None:
+    me = as_user("api-read-fails")
+    broken = b"%PDF-1.7\n" + b"this is not really a PDF\n" * 10
+    shared = client.post(
+        "/v1/conversation/resume",
+        content=broken,
+        headers=me | {"X-Plytos-Filename": quote("Resume.pdf")},
+    ).json()
+    import_id = shared["resume"]["id"]
+    reads.run_until_idle()
+    failed = client.get(f"/v1/imports/{import_id}/status", headers=me).json()
+    assert (failed["state"], failed["error_code"]) == ("failed", "unreadable")
+    said = client.get("/v1/conversation", headers=me).json()
+    assert [m["author"] for m in said] == ["person", "plytos"]
+    assert said[-1]["text"].startswith("I couldn't read that file.")
+
+    again = client.post(f"/v1/imports/{import_id}/read-again", headers=me)
+    assert again.status_code == 200
+    assert (again.json()["state"], again.json()["error_code"]) == ("reading", None)
+    reads.run_until_idle()
+    assert client.get(f"/v1/imports/{import_id}/status", headers=me).json()["state"] == "failed"
+    # Plytos says how each reading went, once.
+    said = client.get("/v1/conversation", headers=me).json()
+    assert [m["author"] for m in said] == ["person", "plytos", "plytos"]
+    reads.run_until_idle()
+    assert len(client.get("/v1/conversation", headers=me).json()) == 3
+
+    read = upload(client, reads, promotions_text().encode(), "Avery Quinn.txt", me)
+    refused = client.post(f"/v1/imports/{read['id']}/read-again", headers=me)
+    assert refused.status_code == 409
 
 
 def test_check_ins_over_http(client: TestClient) -> None:
@@ -380,13 +464,9 @@ def test_check_ins_over_http(client: TestClient) -> None:
     assert unknown.json()["detail"] == "Plytos doesn't know that time zone."
 
 
-def test_resume_flow_over_http(client: TestClient) -> None:
+def test_resume_flow_over_http(client: TestClient, reads: ImportWorker) -> None:
     me, other = as_user("api-resumes"), as_user("api-resumes-other")
-    imported = client.post(
-        "/v1/imports",
-        content=promotions_text().encode(),
-        headers=me | {"X-Plytos-Filename": quote("Avery Quinn.txt")},
-    ).json()
+    imported = upload(client, reads, promotions_text().encode(), "Avery Quinn.txt", me)
     import_id = imported["id"]
     assert client.get("/v1/resumes", headers=me).json() == {"resumes": [], "ready": []}
     nothing = client.post("/v1/resumes/as-written", json={"import_id": import_id}, headers=me)

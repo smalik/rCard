@@ -135,14 +135,20 @@ def _snake(exc: Exception) -> str:
     return "".join(c for c in out if c.isalnum() or c == "_")[:50] or "unknown"
 
 
-class BackgroundWorker:
-    """Runs a Worker on a thread until stopped. For development."""
+class Runs(Protocol):
+    def run_once(self) -> int: ...
 
-    def __init__(self, worker: Worker, every_seconds: float = 2.0) -> None:
+
+class BackgroundWorker:
+    """Runs a worker (agent runs, or reading imports) on a thread until stopped,
+    looking again straight away while there's work and every few seconds when
+    there isn't."""
+
+    def __init__(self, worker: Runs, every_seconds: float = 2.0, name: str = "agents") -> None:
         self._worker = worker
         self._every = every_seconds
         self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._loop, name="plytos-agents", daemon=True)
+        self._thread = threading.Thread(target=self._loop, name=f"plytos-{name}", daemon=True)
 
     def start(self) -> None:
         self._thread.start()
@@ -154,7 +160,9 @@ class BackgroundWorker:
     def _loop(self) -> None:
         while not self._stop.is_set():
             try:
-                self._worker.run_once()
+                busy = self._worker.run_once() > 0
             except Exception as exc:
-                log.warning("Agent worker round failed: %s", type(exc).__name__)
-            self._stop.wait(self._every)
+                log.warning("Worker round failed: %s", type(exc).__name__)
+                busy = False
+            if not busy:
+                self._stop.wait(self._every)

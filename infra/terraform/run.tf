@@ -42,7 +42,9 @@ resource "google_cloud_run_v2_service" "api" {
           cpu    = "1"
           memory = "512Mi"
         }
-        cpu_idle = true
+        # The API reads uploaded resumes on a background thread, which needs CPU
+        # between requests. Instances still scale to zero when idle.
+        cpu_idle = false
       }
     }
 

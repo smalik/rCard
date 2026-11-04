@@ -64,10 +64,16 @@ logs them: failures are logged by error class only.
 | --- | --- | --- |
 | `PLYTOS_AI_PROVIDER` | `off` | `anthropic` or `vertex` turns the agents' thinking on |
 | `PLYTOS_AGENTS_INLINE` | `false` | Runs a worker on a thread inside the API. For development |
+| `PLYTOS_IMPORTS_INLINE` | `true` | Reads uploaded resumes on a thread inside the API. Turn it off once the worker service reads them |
 | `PLYTOS_STITCH_DELAY_SECONDS` | `30` | How long the Stitcher waits after a note, so a burst is read together |
 
 In production the worker runs as its own service: `python -m plytos_api.agents`.
-It isn't deployed yet.
+The same service reads uploaded resumes (`imports/worker.py`, see
+[resume-import.md](resume-import.md#reading-in-the-background)). It isn't
+deployed yet, so the API reads uploads itself on a thread
+(`PLYTOS_IMPORTS_INLINE`, on by default; the Cloud Run service keeps CPU
+between requests for it). Both can run at once: readings are claimed with
+`skip locked`.
 
 ## The agents built so far
 
@@ -121,12 +127,15 @@ the person's. With AI off, it says so and points to making a copy by hand.
 ## A resume in the conversation
 
 The person can share a resume from the composer (or "Start from my resume"
-on an empty thread). It's read and kept like any import (see
-[resume-import.md](resume-import.md)), and Plytos answers in the thread with
+on an empty thread). It's kept at once and read in the background like any
+import (see [resume-import.md](resume-import.md)). The thread shows Plytos
+reading until it's done, however long that takes, and then Plytos answers with
 what it found: employers, titles, results, and how many questions need an
-answer first. The resume card in the thread leads to the next step: the
-questions, then the cards, then what was read. Going through the cards still
-uses the import screens for now.
+answer first. If the reading fails, Plytos says so and suggests a Word copy or
+pasting the text. Plytos answers once for each time the resume is read, so a
+reading tried again after it failed gets its own answer. The resume card in
+the thread leads to the next step: the questions, then the cards, then what
+was read. Going through the cards still uses the import screens for now.
 
 ## API
 
@@ -134,7 +143,7 @@ uses the import screens for now.
 | --- | --- |
 | `GET /v1/conversation?before=&limit=` | The latest messages, oldest first. `before` pages back |
 | `POST /v1/conversation` | The person says something. The Listener answers shortly after |
-| `POST /v1/conversation/resume` | The person shares a resume (the file is the body, its name in `X-Plytos-Filename`). Returns both messages and the import's summary |
+| `POST /v1/conversation/resume` | The person shares a resume (the file is the body, its name in `X-Plytos-Filename`). Returns the person's message and the import's summary, still reading; Plytos answers once it's read |
 | `GET /v1/proposals?state=open` | Proposals, by state |
 | `POST /v1/proposals/{id}/keep` | Keeps a proposed card, as proposed or with the person's edits (`content`) |
 | `GET /v1/proposals/{id}/resume` | A proposed resume as it would read, with the wording drafted for it |

@@ -95,9 +95,9 @@ export function listCards(session: Session): Promise<CardSummary[]> {
   return apiFetch<CardSummary[]>("/v1/cards", session);
 }
 
-// Reads a resume, keeps the original encrypted with the person's key, and
-// returns proposed cards and an audit. The file name goes in a header,
-// already URL-encoded, never in a URL.
+// Keeps a resume, encrypted with the person's key, to be read in the
+// background. Returns its status at once; the reading follows. The file name
+// goes in a header, already URL-encoded, never in a URL.
 export function createImport(
   session: Session,
   file: ArrayBuffer,
@@ -119,6 +119,18 @@ export function listImports(session: Session): Promise<ImportSummary[]> {
 
 export function getImport(session: Session, id: string): Promise<unknown> {
   return apiFetch<unknown>(`/v1/imports/${encodeURIComponent(id)}`, session);
+}
+
+// Where a reading is, without what was read. Cheap enough to ask often.
+export function getImportStatus(session: Session, id: string): Promise<unknown> {
+  return apiFetch<unknown>(`/v1/imports/${encodeURIComponent(id)}/status`, session);
+}
+
+// Tries a reading that failed once more.
+export function readAgain(session: Session, id: string): Promise<unknown> {
+  return apiFetch<unknown>(`/v1/imports/${encodeURIComponent(id)}/read-again`, session, {
+    method: "POST",
+  });
 }
 
 // The person's original file, exactly as they gave it.
@@ -220,8 +232,9 @@ export function setCheckIns(
   return apiFetch("/v1/check-ins", session, { ...json(plan), method: "PUT" });
 }
 
-// The person shares a resume in the conversation. It's read and kept like any
-// import, and Plytos answers with what it found. The name goes in a header.
+// The person shares a resume in the conversation. It's kept like any import and
+// read in the background; Plytos answers with what it found once it's read.
+// The name goes in a header.
 export function shareResume(
   session: Session,
   file: ArrayBuffer,

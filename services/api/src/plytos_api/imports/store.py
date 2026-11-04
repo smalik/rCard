@@ -89,10 +89,29 @@ class ImportFile(BaseModel):
     name: str
 
 
+# reading: kept and waiting for, or in, the worker; read: what was read is
+# here; failed: it couldn't be read, and error_code says why in a word or two.
+ImportState = Literal["reading", "read", "failed"]
+# Where a reading is: opening the file, reading its pictures, sorting its lines
+# into jobs, then checking where each line goes and pulling out facts.
+ReadingStage = Literal["file", "pictures", "structure", "checks"]
+MAX_READS = 3
+
+
+class ImportStatus(BaseModel):
+    id: UUID
+    state: ImportState
+    stage: ReadingStage | None = None
+    error_code: str | None = None
+    file: ImportFile
+
+
 class ImportSummary(BaseModel):
     id: UUID
     created_at: datetime
     updated_at: datetime
+    state: ImportState = "read"
+    stage: ReadingStage | None = None
     file: ImportFile
     cards: int
     approved: int
@@ -105,15 +124,21 @@ class ImportView(BaseModel):
     id: UUID
     created_at: datetime
     updated_at: datetime
+    state: ImportState = "read"
+    stage: ReadingStage | None = None
+    error_code: str | None = None
     file: ImportFile
-    result: ImportResult
+    # None until the reading finishes.
+    result: ImportResult | None
     progress: ImportProgress
     # Positions in result.findings of the things to settle before approving.
     to_settle: list[int]
 
 
-def to_settle(result: ImportResult) -> list[int]:
+def to_settle(result: ImportResult | None) -> list[int]:
     """Positions of the findings the person settles before approving cards."""
+    if result is None:
+        return []
     return [
         i
         for i, f in enumerate(result.findings)
@@ -162,6 +187,110 @@ class ImportStore:
             progress=progress,
             to_settle=to_settle(result),
         )
+
+    def keep(self, data: bytes, filename: str, fmt: DocFormat) -> ImportStatus:
+        """Keeps an upload to be read in the background. The worker reads it."""
+        import_id = uuid7()
+        self._conn.execute(
+            "insert into plytos.resume_import (id, owner_id, state, file_format, file_size,"
+            " file_ciphertext, name_ciphertext, progress_ciphertext)"
+            " values (%s, %s, 'reading', %s, %s, %s, %s, %s)",
+            (
+                import_id,
+                self._user_id,
+                fmt,
+                len(data),
+                self._seal("file", import_id, data),
+                self._seal("name", import_id, filename.encode()),
+                self._seal("progress", import_id, ImportProgress().model_dump_json().encode()),
+            ),
+        )
+        self._event("import.created", import_id)
+        return ImportStatus(
+            id=import_id,
+            state="reading",
+            file=ImportFile(format=fmt, size=len(data), name=filename),
+        )
+
+    # The worker's writes name the attempt it claimed (see claim_resume_imports),
+    # so a worker whose lease ran out can't touch a reading another has taken over.
+
+    def to_read(self, import_id: UUID, attempt: int) -> tuple[bytes, str] | None:
+        """The file and its name, for the worker, while the import is being read on
+        this attempt. None once it's read, failed, deleted or claimed again."""
+        row = self._conn.execute(
+            "select name_ciphertext, file_ciphertext from plytos.resume_import"
+            " where id = %s and state = 'reading' and attempts = %s",
+            (import_id, attempt),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._open("file", import_id, row[1]), self._open("name", import_id, row[0]).decode()
+
+    def at_stage(
+        self, import_id: UUID, attempt: int, stage: ReadingStage, lease_seconds: int
+    ) -> bool:
+        """Says which stage the reading is at, and renews its lease. False if the
+        reading is no longer this attempt's."""
+        return bool(
+            self._conn.execute(
+                "update plytos.resume_import set stage = %s,"
+                " locked_until = now() + make_interval(secs => %s)"
+                " where id = %s and state = 'reading' and attempts = %s",
+                (stage, lease_seconds, import_id, attempt),
+            ).rowcount
+        )
+
+    def finish(self, import_id: UUID, attempt: int, result: ImportResult) -> bool:
+        """Keeps what was read. False if the import was deleted, or the reading is no
+        longer this attempt's."""
+        done = self._conn.execute(
+            "update plytos.resume_import set state = 'read', stage = null, locked_until = null,"
+            " error_code = null, result_ciphertext = %s, updated_at = now()"
+            " where id = %s and state = 'reading' and attempts = %s",
+            (
+                self._seal("result", import_id, result.model_dump_json().encode()),
+                import_id,
+                attempt,
+            ),
+        ).rowcount
+        if done:
+            self._event("import.read", import_id)
+        return bool(done)
+
+    def failed(
+        self, import_id: UUID, attempt: int, code: str, retry_in_seconds: int | None
+    ) -> bool:
+        """Records a reading that went wrong: tried again later, or given up on.
+        False if the reading is no longer this attempt's."""
+        if retry_in_seconds is None:
+            done = self._conn.execute(
+                "update plytos.resume_import set state = 'failed', stage = null,"
+                " locked_until = null, error_code = %s, updated_at = now()"
+                " where id = %s and state = 'reading' and attempts = %s",
+                (code[:64], import_id, attempt),
+            ).rowcount
+        else:
+            done = self._conn.execute(
+                "update plytos.resume_import set stage = null, locked_until = null,"
+                " error_code = %s, run_after = now() + make_interval(secs => %s)"
+                " where id = %s and state = 'reading' and attempts = %s",
+                (code[:64], retry_in_seconds, import_id, attempt),
+            ).rowcount
+        return bool(done)
+
+    def read_again(self, import_id: UUID) -> ImportStatus:
+        """Puts a failed reading back in the queue, with its tries counted afresh."""
+        updated = self._conn.execute(
+            "update plytos.resume_import set state = 'reading', stage = null, attempts = 0,"
+            " error_code = null, run_after = now(), locked_until = null, updated_at = now()"
+            " where id = %s and state = 'failed'",
+            (import_id,),
+        ).rowcount
+        status = self.status(import_id)
+        if not updated and status.state != "reading":
+            raise ImportConflictError("Only a reading that failed can be tried again.")
+        return status
 
     def delete(self, import_id: UUID) -> None:
         """Deletes the import: the original file, what was read, and progress.
@@ -254,27 +383,47 @@ class ImportStore:
 
     # -- reading -------------------------------------------------------------
 
+    _SUMMARY = (
+        "select id, created_at, updated_at, file_format, file_size, name_ciphertext,"
+        " result_ciphertext, progress_ciphertext, state, stage from plytos.resume_import"
+    )
+
     def summaries(self) -> list[ImportSummary]:
-        rows = self._conn.execute(
-            "select id, created_at, updated_at, file_format, file_size, name_ciphertext,"
-            " result_ciphertext, progress_ciphertext from plytos.resume_import"
-            " order by created_at desc"
-        ).fetchall()
+        rows = self._conn.execute(self._SUMMARY + " order by created_at desc").fetchall()
         return [self._summary(r) for r in rows]
 
     def summary(self, import_id: UUID) -> ImportSummary:
-        row = self._conn.execute(
-            "select id, created_at, updated_at, file_format, file_size, name_ciphertext,"
-            " result_ciphertext, progress_ciphertext from plytos.resume_import where id = %s",
-            (import_id,),
-        ).fetchone()
+        row = self._conn.execute(self._SUMMARY + " where id = %s", (import_id,)).fetchone()
         if row is None:
             raise ImportNotFoundError(str(import_id))
         return self._summary(row)
 
+    def status(self, import_id: UUID) -> ImportStatus:
+        """Where a reading is, without opening what was read."""
+        row = self._conn.execute(
+            "select state, stage, error_code, file_format, file_size, name_ciphertext"
+            " from plytos.resume_import where id = %s",
+            (import_id,),
+        ).fetchone()
+        if row is None:
+            raise ImportNotFoundError(str(import_id))
+        return ImportStatus(
+            id=import_id,
+            state=row[0],
+            stage=row[1],
+            error_code=row[2],
+            file=ImportFile(
+                format=row[3], size=row[4], name=self._open("name", import_id, row[5]).decode()
+            ),
+        )
+
     def _summary(self, r: Sequence[Any]) -> ImportSummary:
         import_id: UUID = r[0]
-        result = ImportResult.model_validate_json(self._open("result", import_id, r[6]))
+        result = (
+            ImportResult.model_validate_json(self._open("result", import_id, r[6]))
+            if r[6] is not None
+            else None
+        )
         progress = ImportProgress.model_validate_json(self._open("progress", import_id, r[7]))
         states = [d.state for d in progress.cards.values()]
         unsettled = [
@@ -286,10 +435,12 @@ class ImportStore:
             id=import_id,
             created_at=r[1],
             updated_at=r[2],
+            state=r[8],
+            stage=r[9],
             file=ImportFile(
                 format=r[3], size=r[4], name=self._open("name", import_id, r[5]).decode()
             ),
-            cards=len(result.cards),
+            cards=len(result.cards) if result is not None else 0,
             approved=states.count("approved"),
             later=states.count("later"),
             dropped=states.count("dropped"),
@@ -299,16 +450,24 @@ class ImportStore:
     def get(self, import_id: UUID) -> ImportView:
         row = self._conn.execute(
             "select created_at, updated_at, file_format, file_size, name_ciphertext,"
-            " result_ciphertext, progress_ciphertext from plytos.resume_import where id = %s",
+            " result_ciphertext, progress_ciphertext, state, stage, error_code"
+            " from plytos.resume_import where id = %s",
             (import_id,),
         ).fetchone()
         if row is None:
             raise ImportNotFoundError(str(import_id))
-        result = ImportResult.model_validate_json(self._open("result", import_id, row[5]))
+        result = (
+            ImportResult.model_validate_json(self._open("result", import_id, row[5]))
+            if row[5] is not None
+            else None
+        )
         return ImportView(
             id=import_id,
             created_at=row[0],
             updated_at=row[1],
+            state=row[7],
+            stage=row[8],
+            error_code=row[9],
             file=ImportFile(
                 format=row[2], size=row[3], name=self._open("name", import_id, row[4]).decode()
             ),
@@ -342,6 +501,8 @@ class ImportStore:
         ).fetchone()
         if row is None:
             raise ImportNotFoundError(str(import_id))
+        if row[0] is None:
+            raise ImportConflictError("This resume is still being read.")
         return (
             ImportResult.model_validate_json(self._open("result", import_id, row[0])),
             ImportProgress.model_validate_json(self._open("progress", import_id, row[1])),

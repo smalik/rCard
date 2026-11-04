@@ -119,10 +119,17 @@ export type Review = {
   readBy: string | null;
 };
 
+// An upload is kept at once and read in the background. While it's read, the
+// stage says which part is under way.
+export type ImportState = "reading" | "read" | "failed";
+export type ReadingStage = "file" | "pictures" | "structure" | "checks";
+
 export type ImportSummary = {
   id: string;
   created_at: string;
   updated_at: string;
+  state: ImportState;
+  stage: ReadingStage | null;
   file: { format: string; size: number; name: string };
   cards: number;
   approved: number;
@@ -130,6 +137,77 @@ export type ImportSummary = {
   dropped: number;
   to_settle: number;
 };
+
+// Where a reading is, as the API says it. error_code is a short word such as
+// "unreadable", never anything from the file.
+export type ImportStatus = {
+  id: string;
+  state: ImportState;
+  stage: ReadingStage | null;
+  error_code: string | null;
+  file: { format: string; size: number; name: string };
+};
+
+// What the Reading screen polls for: the status, and once it's read, the review.
+export type ReadingStatus = ImportStatus & { review: Review | null };
+
+// The stages of a reading, in order, as the person sees them.
+export const READING_STAGES: { stage: ReadingStage; label: string }[] = [
+  { stage: "file", label: "Opening your file" },
+  { stage: "pictures", label: "Reading any pictures and scans" },
+  { stage: "structure", label: "Sorting lines into jobs and titles" },
+  { stage: "checks", label: "Checking where each line belongs" },
+];
+
+// How far a reading has got, from 0 to 1, by the stage it's at. Sorting the
+// lines takes longest, so it gets the widest stretch.
+const STAGE_SPAN: Record<ReadingStage, [number, number]> = {
+  file: [0.04, 0.1],
+  pictures: [0.1, 0.22],
+  structure: [0.22, 0.48],
+  checks: [0.48, 0.6],
+};
+
+export function stageSpan(stage: ReadingStage | null): [number, number] {
+  return STAGE_SPAN[stage ?? "file"];
+}
+
+// Which stages are done, under way, or still to come. A file without pictures
+// skips that stage; it shows as done once the reading is past it.
+export function stageStates(
+  stage: ReadingStage | null,
+  read: boolean,
+): ("done" | "working" | "pending")[] {
+  const at = read ? READING_STAGES.length : READING_STAGES.findIndex((s) => s.stage === (stage ?? "file"));
+  return READING_STAGES.map((_, i) => (i < at ? "done" : i === at ? "working" : "pending"));
+}
+
+// Why a reading failed, in words for the person.
+export function failureText(code: string | null): string {
+  if (code === "unreadable") {
+    return "Plytos couldn't open that file. If it's a scan or a PDF that won't open, try a Word copy, or paste the text instead.";
+  }
+  return "Plytos couldn't finish reading it. That's on our side, not your file. Try again in a moment.";
+}
+
+export function toStatus(raw: unknown): ImportStatus {
+  const status = (raw ?? {}) as Partial<ImportStatus>;
+  const state = status.state === "read" || status.state === "failed" ? status.state : "reading";
+  const stage = READING_STAGES.some((s) => s.stage === status.stage)
+    ? (status.stage as ReadingStage)
+    : null;
+  return {
+    id: String(status.id ?? ""),
+    state,
+    stage,
+    error_code: typeof status.error_code === "string" ? status.error_code : null,
+    file: {
+      format: status.file?.format ?? "text",
+      size: status.file?.size ?? 0,
+      name: status.file?.name ?? "resume",
+    },
+  };
+}
 
 // --- Shaping the API's import for the browser ------------------------------
 

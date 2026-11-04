@@ -8,6 +8,7 @@ import {
   dateSpan,
   factRows,
   factsAbove,
+  failureText,
   type Finding,
   figureChoices,
   findingsForCard,
@@ -26,8 +27,11 @@ import {
   reviewQueue,
   settledCount,
   settleState,
+  stageSpan,
+  stageStates,
   textToFact,
   toReview,
+  toStatus,
   wordingTips,
 } from "./imports";
 
@@ -469,5 +473,45 @@ describe("career tree", () => {
     expect(parentRef(asked, after.progress)).toBe("t-5");
     expect(pathLabel(asked, after)).toBe("Fabrikam Inc. › Analyst");
     expect(placementOpen(TREE[3]!, after.progress)).toBe(false);
+  });
+});
+
+describe("a reading in the background", () => {
+  it("shows which stages are done and which is under way", () => {
+    expect(stageStates("file", false)).toEqual(["working", "pending", "pending", "pending"]);
+    expect(stageStates(null, false)).toEqual(["working", "pending", "pending", "pending"]);
+    // A file without pictures goes straight to sorting; the pictures stage counts as done.
+    expect(stageStates("structure", false)).toEqual(["done", "done", "working", "pending"]);
+    expect(stageStates("checks", true)).toEqual(["done", "done", "done", "done"]);
+  });
+
+  it("moves the bar forward stage by stage, up to where the found rows take over", () => {
+    const spans = (["file", "pictures", "structure", "checks"] as const).map(stageSpan);
+    for (let i = 1; i < spans.length; i++) expect(spans[i]![0]).toBe(spans[i - 1]![1]);
+    expect(spans.at(-1)![1]).toBe(0.6);
+  });
+
+  it("says why a reading failed without anything from the file", () => {
+    expect(failureText("unreadable")).toMatch(/couldn't open that file/);
+    expect(failureText("gave_up")).toMatch(/on our side/);
+    expect(failureText(null)).toMatch(/Try again/);
+  });
+
+  it("takes only known states and stages from the API", () => {
+    const status = toStatus({
+      id: "i1",
+      state: "failed",
+      stage: "sideways",
+      error_code: "unreadable",
+      file: { format: "pdf", size: 10, name: "Resume.pdf" },
+    });
+    expect(status).toEqual({
+      id: "i1",
+      state: "failed",
+      stage: null,
+      error_code: "unreadable",
+      file: { format: "pdf", size: 10, name: "Resume.pdf" },
+    });
+    expect(toStatus({ id: "i2", state: "odd" }).state).toBe("reading");
   });
 });

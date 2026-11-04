@@ -18,6 +18,7 @@ import {
   type IconDefinition,
 } from "@fortawesome/free-solid-svg-icons";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { type ChangeEvent, type ReactNode, useRef, useState } from "react";
 
 import { PageHead, SketchCard } from "../../components/hybrid";
@@ -26,33 +27,29 @@ import {
   ACCEPT_RESUME,
   FILENAME_HEADER,
   fileProblem,
+  type ImportStatus,
   MAX_PASTE_CHARS,
   plural,
-  type Review,
 } from "../../lib/imports";
-import { Reading } from "./reading";
+import { Reading, type Sending } from "./reading";
 
-export type Unfinished = { id: string; name: string; left: number };
-
-type Sending = {
-  name: string;
-  size: number;
-  review: Review | null;
-  error: string | null;
-};
+// The newest import still being read, or with cards still waiting.
+export type Unfinished = { id: string; name: string; left: number; reading: boolean };
 
 export function Start({ unfinished }: { unfinished: Unfinished | null }) {
+  const router = useRouter();
   const [mode, setMode] = useState<"start" | "paste">("start");
   const [sending, setSending] = useState<Sending | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [pasted, setPasted] = useState("");
   const input = useRef<HTMLInputElement>(null);
 
+  // Sends the file. The server keeps it and answers at once; the reading goes
+  // on in the background, and the import's own page follows it.
   async function send(data: Blob, name: string) {
     setProblem(null);
-    setSending({ name, size: data.size, review: null, error: null });
+    setSending({ name, size: data.size, error: null });
     window.scrollTo({ top: 0 });
-    let review: Review | null = null;
     let error: string | null = null;
     try {
       const response = await fetch("/import/upload", {
@@ -64,14 +61,17 @@ export function Start({ unfinished }: { unfinished: Unfinished | null }) {
         },
       });
       const body = (await response.json().catch(() => null)) as
-        | (Review & { error?: string })
+        | (ImportStatus & { error?: string })
         | null;
-      if (response.ok && body) review = body;
-      else error = body?.error ?? "Plytos couldn't read that just now. Try again in a moment.";
+      if (response.ok && body?.id) {
+        router.replace(`/import/${body.id}`);
+        return;
+      }
+      error = body?.error ?? "Plytos couldn't take that just now. Try again in a moment.";
     } catch {
       error = "The connection dropped. Check you're online and try again.";
     }
-    setSending({ name, size: data.size, review, error });
+    setSending({ name, size: data.size, error });
   }
 
   function onFile(event: ChangeEvent<HTMLInputElement>) {
@@ -89,10 +89,8 @@ export function Start({ unfinished }: { unfinished: Unfinished | null }) {
   if (sending) {
     return (
       <Reading
-        name={sending.name}
-        size={sending.size}
-        review={sending.review}
-        error={sending.error}
+        status={null}
+        sending={sending}
         onRetry={() => {
           setSending(null);
           setMode("start");
@@ -162,9 +160,13 @@ export function Start({ unfinished }: { unfinished: Unfinished | null }) {
       {unfinished && (
         <Link className="surface top-bar resume-banner" href={`/import/${unfinished.id}`}>
           <span className="resume-banner-text">
-            <span className="label">Pick up where you left off</span>
+            <span className="label">
+              {unfinished.reading ? "Still reading" : "Pick up where you left off"}
+            </span>
             <span className="resume-banner-title">
-              {plural(unfinished.left, "card")} waiting from {unfinished.name}
+              {unfinished.reading
+                ? unfinished.name
+                : `${plural(unfinished.left, "card")} waiting from ${unfinished.name}`}
             </span>
           </span>
           <Icon icon={faArrowRight} size={16} className="teal" />

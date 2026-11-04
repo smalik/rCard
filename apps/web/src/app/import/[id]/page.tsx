@@ -35,7 +35,8 @@ import {
   settledCount,
 } from "../../../lib/imports";
 import { DeleteImport } from "./delete-import";
-import { loadReview } from "./load";
+import { Reading } from "../reading";
+import { loadImport } from "./load";
 
 export const metadata: Metadata = { title: "What we found" };
 export const dynamic = "force-dynamic";
@@ -89,7 +90,10 @@ function CheckItem({
 
 export default async function ImportOverview({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const review = await loadReview(id);
+  const { review, status } = await loadImport(id);
+  // Still being read, or the reading failed: show where it is. It's safe to
+  // leave and come back.
+  if (review === null) return <Reading key={status.id} status={status} />;
   const o = overview(review);
   const base = `/import/${id}`;
   const without = o.accomplishments - o.withNumbers;

@@ -123,14 +123,31 @@ class AgentStore:
         self._event("ai", "message.sent", "message", message.id, agent)
         return message
 
-    def share_resume(self, import_id: UUID, reading: str) -> list[MessageView]:
-        """The person shares a resume in the conversation, and Plytos says what
-        it read. The import itself is kept by ImportStore."""
+    def share_resume(self, import_id: UUID) -> MessageView:
+        """The person shares a resume in the conversation. The import itself is
+        kept by ImportStore and read in the background; Plytos answers with what
+        it read once it's done (answer_shared_resume)."""
         shared = self._message("person", "Here's my resume.", "app", None, import_id)
         self._event("person", "message.sent", "message", shared.id)
-        answer = self._message("plytos", reading, "app", None, import_id)
+        return shared
+
+    def answer_shared_resume(self, import_id: UUID, text: str) -> MessageView | None:
+        """Plytos says how the reading of a resume shared in the conversation went,
+        once for each time it's read: a reading tried again after it failed gets its
+        own answer. Nothing is said about an upload the person didn't share here."""
+        # The reading starts no earlier than run_after; read-again moves it to then.
+        row = self._conn.execute(
+            "select bool_or(m.author = 'person'),"
+            " bool_or(m.author = 'plytos' and m.created_at >= i.run_after)"
+            " from plytos.message m join plytos.resume_import i on i.id = m.import_id"
+            " where m.import_id = %s",
+            (import_id,),
+        ).fetchone()
+        if row is None or not row[0] or row[1]:
+            return None
+        answer = self._message("plytos", text, "app", None, import_id)
         self._event("system", "message.sent", "message", answer.id, "import")
-        return [shared, answer]
+        return answer
 
     def ask_for_resume(self, text: str, resume_id: UUID) -> MessageView:
         """The person asks for a version of one of their resumes. The Assembler

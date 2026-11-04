@@ -1,8 +1,10 @@
 """Runs an import end to end: read the file, split it, audit it, propose cards."""
 
 import logging
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date
+from typing import Literal
 
 from plytos_api.imports.accounting import account
 from plytos_api.imports.ai import (
@@ -30,14 +32,24 @@ from plytos_api.imports.usage import AiCall, AiUsage
 
 log = logging.getLogger(__name__)
 
+# Where a reading is, for whoever is waiting on it: reading the pictures, sorting
+# the lines into jobs, then checking where each line goes and pulling out facts.
+Stage = Literal["pictures", "structure", "checks"]
+
 
 def import_resume(
-    data: bytes, filename: str, *, today: date | None = None, reader: ResumeReader | None = None
+    data: bytes,
+    filename: str,
+    *,
+    today: date | None = None,
+    reader: ResumeReader | None = None,
+    on_stage: Callable[[Stage], None] | None = None,
 ) -> ImportResult:
     """Reads a resume. With a reader, Claude reads the words in its pictures, decides
     which line is which, checks where each line was filed, pulls facts out of each
     accomplishment and proofreads it; without one, or when it can't, the rule-based
-    parser does the reading and the rest is left out."""
+    parser does the reading and the rest is left out. ``on_stage`` hears as each
+    stage starts."""
     doc = extract(data, filename)
     calls: list[AiCall] | None = None
     if isinstance(reader, Metered):
@@ -45,7 +57,7 @@ def import_resume(
         reader = reader.metered()
         calls = reader.calls
     try:
-        return _read(doc, reader, calls, today)
+        return _read(doc, reader, calls, today, on_stage or _quiet)
     except Exception as exc:
         # The calls made before it failed were billed: keep them with the error, for
         # whoever counts the spend.
@@ -58,12 +70,15 @@ def _read(
     reader: ResumeReader | None,
     calls: list[AiCall] | None,
     today: date | None,
+    on_stage: Callable[[Stage], None],
 ) -> ImportResult:
     if isinstance(reader, PictureReader) and doc.images:
+        on_stage("pictures")
         seen = reader.read_pictures(doc.images)
         if seen is not None:
             doc = add_picture_lines(doc, seen)
 
+    on_stage("structure")
     with ThreadPoolExecutor(max_workers=2) as pool:
         # Proofreading needs only the lines, so it runs while the structure is read.
         proofing: Future[AiProofread | None] | None = None
@@ -88,6 +103,7 @@ def _read(
         cards = propose_cards(parsed, findings, texts)
 
         # Facts come out of each accomplishment while the placements are checked.
+        on_stage("checks")
         asked = to_ask(cards)
         facts: Future[AiFacts | None] | None = None
         if isinstance(reader, FactReader) and read_by is not None and asked:
@@ -118,6 +134,10 @@ def _read(
         lines=lines,
         usage=AiUsage(calls=list(calls)) if calls is not None else None,
     )
+
+
+def _quiet(stage: Stage) -> None:
+    pass
 
 
 def _result[T](future: Future[T | None] | None) -> T | None:
