@@ -345,6 +345,23 @@ def test_the_schema_has_no_optional_or_nullable_fields() -> None:
     assert "anyOf" not in schema and "null" not in schema
 
 
+def test_a_step_left_out_makes_no_call() -> None:
+    sent: list[str] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        sent.append(json.loads(request.content)["system"])
+        return httpx2.Response(200, json=_message(json.dumps(good_reading())))
+
+    reader = ClaudeReader(_client(handler), "claude-haiku-5-5", "medium")
+    reader.skip_steps = frozenset({"proofread"})
+    metered = reader.metered()
+    doc = extract(promotions_text().encode(), "avery.txt")
+    assert metered.proofread(doc) is None
+    assert metered.read(doc) is not None
+    assert sent == [INSTRUCTIONS]
+    assert [c.step for c in metered.calls] == ["structure"]
+
+
 def test_claude_reader_asks_haiku_at_medium_effort_for_json() -> None:
     sent: list[dict[str, Any]] = []
 
@@ -386,6 +403,26 @@ def test_claude_reader_asks_for_plain_json_when_the_schema_is_refused() -> None:
     assert len(sent) == 2
     assert sent[1]["output_config"] == {"effort": "medium"}
     assert "Reply with only a JSON object" in sent[1]["system"]
+
+
+def test_a_plain_answer_cut_off_for_length_is_asked_again_at_low_effort() -> None:
+    sent: list[dict[str, Any]] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        body = json.loads(request.content)
+        sent.append(body["output_config"])
+        if "format" in body["output_config"]:
+            error = {"type": "invalid_request_error", "message": "grammar is too large"}
+            return httpx2.Response(400, json={"type": "error", "error": error})
+        if len(sent) == 2:
+            return httpx2.Response(200, json=_message('{"name": "Av', stop_reason="max_tokens"))
+        return httpx2.Response(200, json=_message(json.dumps(good_reading())))
+
+    reader = ClaudeReader(_client(handler), "claude-haiku-5-5", "medium")
+    reading = reader.read(extract(promotions_text().encode(), "avery.txt"))
+    assert reading is not None
+    assert [c.get("effort") for c in sent] == ["medium", "medium", "low"]
+    assert [c.error for c in reader.calls] == ["BadRequestError", "max_tokens", None]
 
 
 def test_claude_reader_gives_up_quietly_on_errors_refusals_and_bad_json() -> None:

@@ -446,11 +446,14 @@ class ClaudeReader:
         self.calls: list[AiCall] = []
         # Effort for a named step in place of its usual one, for measuring the trade.
         self.step_efforts: dict[str, Effort] = {}
+        # Steps left out of an import, such as proofreading when it's done on demand.
+        self.skip_steps: frozenset[str] = frozenset()
 
     def metered(self) -> ClaudeReader:
         """A reader on the same client that records only its own calls."""
         reader = ClaudeReader(self._client, self._model, self._effort)
         reader.step_efforts = self.step_efforts
+        reader.skip_steps = self.skip_steps
         return reader
 
     def read(self, doc: ExtractedDocument) -> AiResume | None:
@@ -472,6 +475,8 @@ class ClaudeReader:
         ``step`` names what it's for in the usage record. An answer that doesn't match
         is asked for once more, and one cut off for length is asked for at low effort,
         which leaves more room for the answer after the thinking."""
+        if step in self.skip_steps:
+            return None
         override = self.step_efforts.get(step) if _attempt == 1 else None
         effort = override or effort or self._effort
         images = 0 if isinstance(content, str) else sum(_is_image(b) for b in content)
@@ -540,7 +545,11 @@ class ClaudeReader:
         effort: Effort,
         step: str,
         images: int,
+        _attempt: int = 1,
     ) -> T | None:
+        """The same JSON without the schema enforced, checked here. Like an enforced
+        answer, one that doesn't match is asked for once more, and one cut off for
+        length is asked for at low effort."""
         wanted = json.dumps(schema.model_json_schema())
         started = time.monotonic()
         try:
@@ -555,27 +564,37 @@ class ClaudeReader:
             log.warning("Reading the resume with Claude failed: %s", type(exc).__name__)
             self._failed(step, effort, type(exc).__name__, started)
             return None
-        self.calls.append(
-            record(
-                step,
-                self._model,
-                effort,
-                response.usage,
-                seconds=time.monotonic() - started,
-                stop_reason=response.stop_reason,
-                images=images,
-            )
+        call = record(
+            step,
+            self._model,
+            effort,
+            response.usage,
+            seconds=time.monotonic() - started,
+            stop_reason=response.stop_reason,
+            images=images,
         )
-        if response.stop_reason != "end_turn":
-            log.warning("Claude stopped without a reading: %s", response.stop_reason)
-            return None
-        text = "".join(b.text for b in response.content if b.type == "text").strip()
-        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
-        try:
-            return schema.model_validate_json(text)
-        except ValidationError as exc:
-            log.warning("Claude's reading didn't match the schema: %s", type(exc).__name__)
-            return None
+        self.calls.append(call)
+        stop = response.stop_reason
+        if stop == "end_turn":
+            text = "".join(b.text for b in response.content if b.type == "text").strip()
+            text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
+            try:
+                return schema.model_validate_json(text)
+            except ValidationError as exc:
+                call.ok, call.error = False, "ValidationError"
+                log.warning(
+                    "Claude's plain %s answer didn't match the schema (attempt %d): %s",
+                    step,
+                    _attempt,
+                    _schema_errors(exc),
+                )
+        else:
+            call.error = str(stop)
+            log.warning("Claude stopped without a reading (attempt %d): %s", _attempt, stop)
+        if _attempt == 1 and stop in ("end_turn", "max_tokens"):
+            retry: Effort = "low" if stop == "max_tokens" else effort
+            return self._ask_plain(system, content, schema, retry, step, images, _attempt=2)
+        return None
 
     def check_placements(self, doc: ExtractedDocument, tree: str) -> AiPlacementCheck | None:
         content = f"Resume lines:\n{resume_lines(doc)}\n\nHow the lines were filed:\n{tree}"

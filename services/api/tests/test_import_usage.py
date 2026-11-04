@@ -215,6 +215,9 @@ def test_a_run_can_be_read_again_and_compared(tmp_path: Path) -> None:
     assert "Employers (mean overlap): 100.0%" in report
     assert "Accomplishments under the same job: 100.0%" in report
     assert "| Mean cost (USD) | 0.0010 | 0.0020 |" in report
+    assert "| Mean cost without proofreading | 0.0010 | 0.0020 |" in report
+    assert "| Mean cost of facts | 0.0000 | 0.0000 |" in report
+    assert "## Facts on the same accomplishments" in report
     assert "Avery" not in report and "Casey" not in report
 
 
