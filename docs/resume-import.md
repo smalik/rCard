@@ -137,19 +137,22 @@ as that card, so a new upload adds versions instead of duplicates
   by the same name: the employer (or its former name) for an employment, the
   title for a position, the client and title for an engagement, the headline
   for anything else.
-- Names are compared loosely: case, punctuation, a leading "The", company
-  suffixes such as "Inc." or "LLC", "Sr." for "Senior". Dates written on both
-  sides must overlap, so a second stint at the same employer stays its own
+- Names are compared loosely: case, accents, punctuation, a leading "The",
+  company suffixes such as "Inc." or "LLC", "Sr." for "Senior". Letters in
+  any script count. Dates written on both sides must overlap, to the month
+  where both give one, so a second stint at the same employer stays its own
   card. An employment without an employer, or a position without a title,
   matches nothing.
 - Each of the person's cards is matched at most once per import, the oldest
-  first when two would fit.
+  first when two would fit. A proposed card the person left out takes none.
 - Matching only proposes. On the Approve screen a matched card says which of
   theirs it is, and the person picks:
   - **Save as next version** (the default): the import's facts and wording
     become the card's next main version, and the card's own facts that the
     import doesn't mention stay. Nothing is saved when the import adds
-    nothing new.
+    nothing new. Wording the person edits while approving goes into the same
+    card. If the card changed in another tab meanwhile, approving is refused
+    and nothing is lost.
   - **Keep mine as it is**: the import links to their card without changing it.
   - **Make a separate card**: as if nothing matched. The cards under it then
     match nothing of theirs either.

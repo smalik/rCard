@@ -148,12 +148,10 @@ def find_matches(
     result: ImportResult,
     progress: ImportProgress,
     cards: dict[UUID, CardText],
-    wording: dict[str, MainContent] | None = None,
 ) -> dict[str, CardMatch]:
     """The person's card each proposed card stands for, by ref, as things stand:
-    the person's decisions, moves and edits count. `wording` overrides a card's."""
+    the person's decisions, moves and edits count."""
     contents = {p.ref: progress.edits.get(p.ref) or p.content for p in result.cards}
-    contents.update(wording or {})
     decided = {ref: Decided(state=d.state, card_id=d.card_id) for ref, d in progress.cards.items()}
     return match_cards(result, decided, progress.moves, contents, cards)
 
@@ -407,10 +405,10 @@ class ImportStore:
         chosen = chosen.model_copy(update={"parent": _saved_parent(result, progress, proposal)})
 
         match: CardMatch | None = None
-        texts: dict[UUID, CardText] = {}
         if choice != "separate":
-            texts = cards.main_contents()
-            match = find_matches(result, progress, texts, {ref: chosen}).get(ref)
+            # The card it matched as the person saw it: wording they edit on the
+            # way to approving goes into that card, and doesn't change which it is.
+            match = find_matches(result, progress, cards.main_contents()).get(ref)
         if match is None and choice in ("update", "keep"):
             raise ImportConflictError(
                 "That card doesn't match one of yours any more. Approve it as a new card."
@@ -419,11 +417,16 @@ class ImportStore:
         if match is None:
             card = cards.create_card(proposal.kind, chosen, author, status="approved")
         else:
-            existing = texts[match.card_id].content
-            if choice != "keep" and not unchanged(existing, chosen):
-                head = cards.card_detail(match.card_id).main.head.id
-                cards.save_main_version(match.card_id, head, merged(existing, chosen), author)
             card = cards.card_detail(match.card_id)
+            # Merged onto the version it saves after, so a change made since in
+            # another tab is a conflict, not lost.
+            existing = card.main.content
+            if not isinstance(existing, MainContent):
+                raise ImportConflictError("That card of yours changed. Try again.")
+            if choice != "keep" and not unchanged(existing, chosen):
+                head = card.main.head.id
+                cards.save_main_version(match.card_id, head, merged(existing, chosen), author)
+                card = cards.card_detail(match.card_id)
         progress.cards[ref] = CardDecision(state="approved", card_id=card.id)
         self._save_progress(import_id, progress)
         return card, progress

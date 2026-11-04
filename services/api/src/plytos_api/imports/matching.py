@@ -9,9 +9,9 @@ place (under the card its parent became, or would become) and goes by the same
 name: the employer for an employment (or its former name), the title for a
 position, the client and title for an engagement, the headline for anything
 else. Names are compared
-loosely (case, punctuation, "Inc." and the like, "Sr." for "Senior"). Dates
-that are written on both sides must overlap, so a second stint at the same
-employer stays its own card.
+loosely (case, accents, punctuation, "Inc." and the like, "Sr." for
+"Senior"). Dates that are written on both sides must overlap, to the month
+where they give one, so a second stint at the same employer stays its own card.
 
 Matching only proposes. The person decides on each card: save it as the next
 version of theirs, keep theirs as it is, or make a separate card.
@@ -20,6 +20,7 @@ version of theirs, keep theirs as it is, or make a separate card.
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Mapping
 from uuid import UUID
 
@@ -67,8 +68,11 @@ _SPELLED = {"sr": "senior", "jr": "junior", "mgr": "manager", "asst": "assistant
 
 
 def _words(text: str) -> list[str]:
-    text = text.lower().replace("&", " and ")
-    return [w for w in re.split(r"[^a-z0-9]+", text) if w]
+    """Lowercase words, accents folded so "Nestlé" is "Nestle". Letters in any
+    script are kept: "北京 Inc." and "上海 Inc." stay apart."""
+    text = unicodedata.normalize("NFKD", text.casefold().replace("&", " and "))
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    return [w for w in re.split(r"[\W_]+", text) if w]
 
 
 def name_key(text: str) -> str:
@@ -103,21 +107,30 @@ def names(kind: str, content: MainContent) -> set[str]:
     return {k for k in (name_key(n) for n in found) if k}
 
 
-def _year(value: object, *, end: bool) -> int | None:
+def _month(value: object, *, end: bool) -> int | None:
+    """A date as a count of months. A year alone runs from its first month at
+    the start of a span to its last at the end."""
     if not isinstance(value, str):
         return None
     if value.strip().lower() in ("present", "current", "now"):
-        return 9999 if end else None
-    m = re.match(r"^\s*(\d{4})", value)
-    return int(m.group(1)) if m else None
+        return 9999 * 12 if end else None
+    m = re.match(r"^\s*(\d{4})(?:-(\d{1,2}))?", value)
+    if m is None:
+        return None
+    month = int(m.group(2)) if m.group(2) else (12 if end else 1)
+    return int(m.group(1)) * 12 + min(max(month, 1), 12) - 1
 
 
 def _span(content: MainContent) -> tuple[int, int] | None:
-    start = _year(content.facts.get("start"), end=False)
-    if start is None:
+    start = content.facts.get("start")
+    first = _month(start, end=False)
+    if first is None:
         return None
-    end = _year(content.facts.get("end"), end=True)
-    return start, end if end is not None else start
+    last = _month(content.facts.get("end"), end=True)
+    if last is None:
+        # No end: just the start's own year, or month.
+        last = _month(start, end=True)
+    return first, last if last is not None else first
 
 
 def overlaps(a: MainContent, b: MainContent) -> bool:
@@ -202,8 +215,8 @@ def match_cards(
         visited.add(p.ref)
 
         d = decided.get(p.ref)
-        if d is not None and d.state == "approved":
-            return
+        if d is not None and d.state in ("approved", "dropped"):
+            return  # Already linked, or left out: it takes none of the person's cards.
         known, above = under(p)
         if not known:
             return  # Its parent becomes a new card, so nothing of the person's sits there.

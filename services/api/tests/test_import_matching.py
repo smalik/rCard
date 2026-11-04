@@ -12,7 +12,7 @@ from uuid import UUID
 import pytest
 
 from plytos_api.cards.model import Framing, MainContent
-from plytos_api.cards.repository import Author, CardRepository
+from plytos_api.cards.repository import Author, CardRepository, CardText
 from plytos_api.db import Database
 from plytos_api.imports.matching import name_key, overlaps
 from plytos_api.imports.model import ImportResult
@@ -82,6 +82,10 @@ def test_names_are_compared_loosely() -> None:
     assert name_key("R&D Lead") == name_key("R and D lead")
     # A suffix on its own is a name.
     assert name_key("Co.") == "co"
+    # Accents fold; letters in any script are kept.
+    assert name_key("Nestlé") == name_key("Nestle")
+    assert name_key("Müller GmbH") == "muller" != name_key("Møller")
+    assert name_key("北京 Inc.") == "北京" != name_key("上海 Inc.")
 
 
 def test_dates_must_overlap_when_both_sides_have_them() -> None:
@@ -92,6 +96,11 @@ def test_dates_must_overlap_when_both_sides_have_them() -> None:
     assert overlaps(card(start="2002", end="2005"), card(start="2005-06", end="2007-01"))
     assert not overlaps(card(start="2002", end="2004"), card(start="2010", end="present"))
     assert overlaps(card(), card(start="2010", end="present"))
+    # To the month where both give one: two stints in one year stay apart.
+    assert not overlaps(card(start="2024-01", end="2024-03"), card(start="2024-09", end="2024-12"))
+    assert overlaps(card(start="2024", end="2024"), card(start="2024-09", end="2024-12"))
+    assert overlaps(card(start="2024-03"), card(start="2024"))
+    assert not overlaps(card(start="2024-03"), card(start="2024-05"))
 
 
 def test_the_same_resume_again_adds_nothing(make_user, open_: Open) -> None:
@@ -189,3 +198,75 @@ def test_a_choice_that_no_longer_fits_is_refused(make_user, open_: Open) -> None
         card, _ = s.imports.approve(import_id, "card-1", None, s.cards, ME, "separate")
         assert result.cards[0].content.framing.headline == "Contoso Bank"
         assert s.cards.card_detail(card.id).kind == "employment"
+
+
+def test_a_card_left_out_leaves_the_persons_card_to_the_next(make_user, open_: Open) -> None:
+    user = make_user()
+    with open_(user) as s:
+        first_id, first = bring_in(s, title_first_text())
+        kept = approve_all(s, first_id, first)
+        # The same result written twice: one card of theirs, two proposals.
+        line = "• Cut load time by 40%."
+        again_id, _ = bring_in(s, title_first_text().replace(line, f"{line}\n{line}"))
+        matches = s.imports.matches(again_id, s.cards)
+        assert matches["card-4"].card_id == kept["card-4"] and "card-5" not in matches
+
+        s.imports.decide(again_id, "card-4", "dropped")
+        assert s.imports.matches(again_id, s.cards)["card-5"].card_id == kept["card-4"]
+
+
+def test_wording_edited_while_approving_goes_into_the_same_card(make_user, open_: Open) -> None:
+    user = make_user()
+    with open_(user) as s:
+        first_id, first = bring_in(s, title_first_text())
+        kept = approve_all(s, first_id, first)
+        again_id, again = bring_in(s, title_first_text())
+        for proposed in again.cards[:3]:
+            s.imports.approve(again_id, proposed.ref, None, s.cards, ME)
+
+        # The line matched one of theirs by its headline, then they reworded it.
+        line = again.cards[3]
+        framing = line.content.framing.model_copy(update={"headline": "Cut nightly loads by 40%."})
+        edited = line.content.model_copy(update={"framing": framing})
+        card, _ = s.imports.approve(again_id, line.ref, edited, s.cards, ME, "update")
+
+        assert card.id == kept["card-4"] and versions(s, card.id) == 2
+        head = s.cards.card_detail(card.id).main.content
+        assert isinstance(head, MainContent) and head.framing.headline == framing.headline
+
+
+def test_a_change_made_in_another_tab_meanwhile_is_kept(
+    make_user, db: Database, vault: Vault
+) -> None:
+    user = make_user()
+    with db.as_user(user) as conn:
+        cipher = vault.cipher_for(conn, user)
+        s = Stores(ImportStore(conn, user, cipher), CardRepository(conn, user, cipher))
+        first_id, first = bring_in(s, title_first_text())
+        kept = approve_all(s, first_id, first)
+        again_id, _ = bring_in(s, updated_text())
+
+        class Racing(CardRepository):
+            """Another tab saves the employment just after approving reads it."""
+
+            def main_contents(self) -> dict[UUID, CardText]:
+                read = super().main_contents()
+                detail = self.card_detail(kept["card-1"])
+                mine = detail.main.content
+                assert isinstance(mine, MainContent)
+                added = {**mine.facts, "employment_type": "full-time"}
+                self.save_main_version(
+                    kept["card-1"],
+                    detail.main.head.id,
+                    mine.model_copy(update={"facts": added}),
+                    ME,
+                )
+                return read
+
+        racing = Racing(conn, user, cipher)
+        s.imports.approve(again_id, "card-1", None, racing, ME, "update")
+
+        head = s.cards.card_detail(kept["card-1"]).main.content
+        assert isinstance(head, MainContent)
+        assert head.facts["employment_type"] == "full-time" and head.facts["end"] == "2007-03"
+        assert versions(s, kept["card-1"]) == 3
