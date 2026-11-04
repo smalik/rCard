@@ -190,8 +190,11 @@ uv run python -m plytos_api.imports.bench --rerun RUN --effort structure=low --b
 uv run python -m plytos_api.imports.bench --compare RUN NEW_RUN
 ```
 
-A reply that doesn't fit the schema is asked for once more before the import
-falls back to the rules; only the error's field and type are logged. A call
+Every answered call is recorded with the tokens it used, even when its answer
+can't be used. A reply that doesn't fit the schema is asked for once more, and
+one cut off at the length limit is asked for again at low effort, which leaves
+more room for the answer after the thinking. After that the import falls back
+to the rules. Only the error's field and type are logged. A call
 made with a model missing from the price table is counted at the dearest priced
 call of its step, so the spend cap is never undercounted.
 

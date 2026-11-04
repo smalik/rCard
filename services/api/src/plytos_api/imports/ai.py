@@ -33,11 +33,12 @@ import anthropic
 from anthropic.types import (
     Base64ImageSourceParam,
     ImageBlockParam,
+    JSONOutputFormatParam,
     TextBlockParam,
     UserMessageParam,
 )
 from anthropic.types.message_content_param import MessageContentParam
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from plytos_api.imports.dates import find_range, strip_range
 from plytos_api.imports.model import (
@@ -467,19 +468,20 @@ class ClaudeReader:
     ) -> T | None:
         """One request whose answer must match ``schema``, or None when it can't be had.
         ``step`` names what it's for in the usage record. An answer that doesn't match
-        is asked for once more."""
-        effort = self.step_efforts.get(step) or effort or self._effort
+        is asked for once more, and one cut off for length is asked for at low effort,
+        which leaves more room for the answer after the thinking."""
+        override = self.step_efforts.get(step) if _attempt == 1 else None
+        effort = override or effort or self._effort
         images = 0 if isinstance(content, str) else sum(_is_image(b) for b in content)
         started = time.monotonic()
         try:
-            response = self._client.messages.parse(
+            response = self._client.messages.create(
                 model=self._model,
                 # Room for thinking plus the JSON; larger needs streaming.
                 max_tokens=16000,
                 system=system,
                 messages=[UserMessageParam(role="user", content=content)],
-                output_format=schema,
-                output_config={"effort": effort},
+                output_config={"effort": effort, "format": _json_format(schema)},
             )
         except anthropic.BadRequestError as exc:
             # The API turned the request down, for example because the schema is more
@@ -491,41 +493,42 @@ class ClaudeReader:
             log.warning("Reading the resume with Claude failed: %s", type(exc).__name__)
             self._failed(step, effort, type(exc).__name__, started)
             return None
-        except ValidationError as exc:
-            log.warning(
-                "Claude's %s answer didn't match the schema (attempt %d): %s",
-                step,
-                _attempt,
-                _schema_errors(exc),
-            )
-            # Answered, so billed, but the answer and its usage are lost with the error.
-            self._failed(step, effort, type(exc).__name__, started, billed=True)
-            if _attempt == 1:
-                return self.ask(system, content, schema, step=step, effort=effort, _attempt=2)
-            return None
-        self.calls.append(
-            record(
-                step,
-                self._model,
-                effort,
-                response.usage,
-                seconds=time.monotonic() - started,
-                stop_reason=response.stop_reason,
-                images=images,
-            )
+        # Recorded before the answer is checked, so an unusable answer is still counted.
+        call = record(
+            step,
+            self._model,
+            effort,
+            response.usage,
+            seconds=time.monotonic() - started,
+            stop_reason=response.stop_reason,
+            images=images,
         )
-        if response.stop_reason != "end_turn" or response.parsed_output is None:
-            log.warning("Claude stopped without a reading: %s", response.stop_reason)
-            return None
-        return response.parsed_output
-
-    def _failed(
-        self, step: str, effort: Effort, error: str, started: float, *, billed: bool = False
-    ) -> None:
-        call = failed(step, self._model, effort, error, seconds=time.monotonic() - started)
-        if billed:
-            call.cost_usd = None
         self.calls.append(call)
+        stop = response.stop_reason
+        if stop == "end_turn":
+            text = "".join(b.text for b in response.content if b.type == "text")
+            try:
+                return schema.model_validate_json(text)
+            except ValidationError as exc:
+                call.ok, call.error = False, "ValidationError"
+                log.warning(
+                    "Claude's %s answer didn't match the schema (attempt %d): %s",
+                    step,
+                    _attempt,
+                    _schema_errors(exc),
+                )
+        else:
+            call.error = str(stop)
+            log.warning("Claude stopped without a reading (attempt %d): %s", _attempt, stop)
+        if _attempt == 1 and stop in ("end_turn", "max_tokens"):
+            retry: Effort = "low" if stop == "max_tokens" else effort
+            return self.ask(system, content, schema, step=step, effort=retry, _attempt=2)
+        return None
+
+    def _failed(self, step: str, effort: Effort, error: str, started: float) -> None:
+        self.calls.append(
+            failed(step, self._model, effort, error, seconds=time.monotonic() - started)
+        )
 
     def _ask_plain[T: BaseModel](
         self,
@@ -607,6 +610,14 @@ class ClaudeReader:
             content.append(ImageBlockParam(type="image", source=source))
         # Copying words out needs little thought.
         return self.ask(PICTURE_INSTRUCTIONS, content, AiPictures, step="pictures", effort="low")
+
+
+def _json_format(schema: type[BaseModel]) -> JSONOutputFormatParam:
+    """The JSON schema the API enforces on the answer, built as the SDK's parse() does."""
+    return {
+        "type": "json_schema",
+        "schema": anthropic.transform_schema(TypeAdapter(schema).json_schema()),
+    }
 
 
 def _schema_errors(exc: ValidationError) -> str:

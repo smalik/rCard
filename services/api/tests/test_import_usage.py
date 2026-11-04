@@ -9,7 +9,7 @@ from typing import Any
 import anthropic
 import httpx2
 
-from plytos_api.imports.ai import ClaudeReader
+from plytos_api.imports.ai import AiProofread, ClaudeReader
 from plytos_api.imports.bench import find_resumes, measured_ids, pick, run
 from plytos_api.imports.extract import extract
 from plytos_api.imports.model import ExtractedDocument
@@ -188,7 +188,9 @@ def test_an_answer_that_breaks_the_schema_is_asked_for_once_more(caplog: Any) ->
     found = reader.proofread(extract(promotions_text().encode(), "avery.txt"))
     assert found is not None and found.typos == []
     first, second = reader.calls
-    assert (first.ok, first.error, first.cost_usd) == (False, "ValidationError", None)
+    # The unusable answer was billed, and is counted with its tokens.
+    assert (first.ok, first.error, first.output_tokens) == (False, "ValidationError", 5)
+    assert first.cost_usd is not None and first.cost_usd > 0
     assert second.ok and second.cost_usd is not None
     # The log says where the answer broke, never what it said.
     assert "typos: list_type" in caplog.text and "not a list" not in caplog.text
@@ -229,3 +231,22 @@ def test_a_step_can_run_at_another_effort() -> None:
     metered.proofread(extract(promotions_text().encode(), "avery.txt"))
     assert seen == ["high"]
     assert metered.calls[0].effort == "high"
+
+
+def test_an_answer_cut_off_for_length_is_asked_again_at_low_effort() -> None:
+    sent: list[str] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        sent.append(json.loads(request.content)["output_config"]["effort"])
+        reply = _reply('{"typos": [' if len(sent) == 1 else '{"typos": []}', {"output_tokens": 9})
+        if len(sent) == 1:
+            reply["stop_reason"] = "max_tokens"
+        return httpx2.Response(200, json=reply)
+
+    reader = ClaudeReader(_client(handler), "claude-haiku-5-5", "medium").metered()
+    found = reader.ask("Proofread.", "Lines", AiProofread, step="proofread", effort="medium")
+    assert found is not None
+    assert sent == ["medium", "low"]
+    first, second = reader.calls
+    assert (first.ok, first.error, first.stop_reason) == (False, "max_tokens", "max_tokens")
+    assert first.cost_usd is not None and second.ok
