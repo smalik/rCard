@@ -1,6 +1,6 @@
 # Resume import
 
-Importing a resume does three things, and stores nothing:
+Importing a resume does three things:
 
 1. **Reads** the file into lines in reading order (`imports/extract.py`).
 2. **Splits** the lines into contact details, sections, roles, bullets,
@@ -9,8 +9,10 @@ Importing a resume does three things, and stores nothing:
    (ATS) would trip on (`imports/audit.py`), and **proposes cards** in the
    resume's own words (`imports/cards.py`).
 
-The person reviews the proposals and the audit. Only the cards they keep
-become card versions, through `POST /v1/imports/accept`.
+The import is kept, encrypted with the person's own key, so they can work
+through it over several sittings: the original file, exactly as uploaded;
+what was read from it; and their progress. Nothing becomes a card until the
+person approves it, one card at a time.
 
 ## Formats
 
@@ -58,29 +60,50 @@ Each finding also says what it's `about`:
 
 The list of card rules is `CARD_RULES` in `imports/audit.py`.
 
-## Review screen
+## Screens
 
-`/import` in the web app (`apps/web/src/app/import`) is where a person imports
-a resume, on a phone first:
+`/import` in the web app (`apps/web/src/app/import`) follows the four steps
+of the Hybrid designs in Figma: Bring in, Check, Approve, and See strengths
+(still to come). Phone first; on a laptop the Check and Approve screens put
+the card and its source side by side.
 
-1. They choose a file. The browser posts it to `/import/preview` on the web
-   server, which passes it to the private API and returns only what the
-   screen needs: the proposed cards and the findings. The resume's full text
-   and contact details stay on the server.
-2. **Audit** lists findings by severity in two groups, "In your words"
-   (`about: cards`) and "In the file" (`about: document`). A card finding
-   links to the cards it's about.
-3. **Cards** groups proposals the way a resume reads: summary, highlights,
-   each role with its accomplishments, then skills, education and the rest.
-   Each card shows its facts, the findings on its lines, and any questions
-   the import couldn't answer. The person can edit a card's headline,
-   description and facts, drop it, or drop a whole role.
-4. **Save** sends the kept cards to `/import/accept`, which saves them all or
-   none through `POST /v1/imports/accept`.
+1. **Start** (`/import`): upload a Word, PDF or text file, or paste text.
+   Photo and voice are shown as coming soon. If an import still has cards
+   waiting, the screen offers to pick up where the person left off.
+2. **Reading**: the browser posts the file to `/import/upload`, which passes
+   it to `POST /v1/imports`. While the API reads, the screen shows progress,
+   then ticks off what was found with the real counts.
+3. **Check** (`/import/{id}`): the starting proof (accomplishments with and
+   without numbers), an audit checklist (jobs and dates, numbers, repeats,
+   skills, wording tips, what was left out), the person's file with "View
+   original" and a delete button, and the full audit at `/import/{id}/audit`.
+4. **Settle** (`/import/{id}/settle`): the questions of fact, one open at a
+   time, each with the lines it came from. When a result has two numbers,
+   the person picks the right one, and every proposed card that used the
+   other is rewritten to match. Other questions take "it's right", "I'll fix
+   it on the card" or "later". Answers can change until a card is approved.
+5. **Approve** (`/import/{id}/approve`): ten cards at a sitting, strongest
+   first (results with numbers, then other results, awards and projects,
+   roles, the rest). Each card shows its facts, open questions, the lines it
+   came from, and wording tips. The person approves it, edits it first,
+   leaves it out, or says "Not now", which keeps it as a draft for later.
 
-On a laptop the audit and the cards sit side by side. The review lives only
-in the page: nothing goes to browser storage, and leaving asks first. Both
-route handlers refuse requests from other sites.
+Every route handler checks the request came from Plytos's own pages. The
+screens get only the lines each card came from; the rest of the text and the
+contact details stay on the server. Nothing goes to browser storage.
+
+## API
+
+| Endpoint | What it does |
+| --- | --- |
+| `POST /v1/imports` | Reads the file in the request body and keeps the import. The file name comes in `X-Plytos-Filename` |
+| `GET /v1/imports` | The person's imports, with counts of cards approved, for later, left out and questions open |
+| `GET /v1/imports/{id}` | One import: what was read, and the person's progress |
+| `GET /v1/imports/{id}/original` | The original file, byte for byte |
+| `POST /v1/imports/{id}/settle` | Answers one question. A chosen number rewrites the proposed cards that use the other |
+| `POST /v1/imports/{id}/cards/{ref}/decision` | Sets a proposed card aside for later, leaves it out, or undoes that |
+| `POST /v1/imports/{id}/cards/{ref}/approve` | Makes the card, as proposed or in the person's edited words, as an approved card written by the person |
+| `DELETE /v1/imports/{id}` | Deletes the original file and everything read from it. Approved cards stay |
 
 ## Proposed cards
 
@@ -115,14 +138,19 @@ numbers" rule only lets a variant use numbers its main version has.
 - Facts are compared only where a figure repeats between the summary or
   highlights and a role. Checking names and titles against each other needs
   language understanding and comes with the AI critics in M1.
-- Findings come from the uploaded file. Editing a card on the review screen
-  doesn't re-run them yet; the card marks them as found before the edit.
+- Findings come from the uploaded file. Editing a card doesn't re-run them.
 - Findings don't come with proposed rewrites yet.
 
 ## Privacy
 
-- Preview (`POST /v1/imports/preview`) takes the file as the request body and
-  returns the result. Nothing is written to the database, disk or logs.
+- The original file, its name, what was read and the person's progress are
+  each encrypted with the person's own data key, bound to the import's id.
+  The app role can't change the file or what was read; only progress
+  updates. Deleting an import, or the person, deletes all of it.
+- Nothing about the file is written to disk or logs. Events record that an
+  import was created or deleted, never what was in it.
+- "View original" serves the file with its own content security policy: no
+  scripts, no framing. Word files download; PDFs and text open in the browser.
 - The file name comes in the `X-Plytos-Filename` header, never the URL,
   because URLs reach request logs and resume file names carry names.
 - `.docx`, `.pdf` and other document types are git-ignored, and tests build

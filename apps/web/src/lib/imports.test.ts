@@ -1,0 +1,326 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  bySeverity,
+  cardsForFinding,
+  contentFor,
+  contentProblems,
+  dateSpan,
+  factRows,
+  type Finding,
+  figureChoices,
+  findingsForCard,
+  foundRows,
+  highlight,
+  isFigureQuestion,
+  openQuestions,
+  overview,
+  type Proposal,
+  type Review,
+  reviewQueue,
+  settledCount,
+  settleState,
+  textToFact,
+  toReview,
+  wordingTips,
+} from "./imports";
+
+// A made-up person, as in the API's import tests.
+function card(partial: Partial<Proposal> & Pick<Proposal, "ref" | "kind">): Proposal {
+  return {
+    content: { facts: {}, framing: { headline: partial.ref, body: "" } },
+    role_ref: null,
+    source_blocks: [],
+    source: [],
+    needs_check: [],
+    ...partial,
+  };
+}
+
+const ROLE = {
+  employer: "Fabrikam Inc.",
+  title: "Senior Analyst",
+  start: "2019-07",
+  end: "present",
+};
+
+const CARDS: Proposal[] = [
+  card({
+    ref: "card-1",
+    kind: "role",
+    role_ref: "role-1",
+    content: { facts: ROLE, framing: { headline: "Senior Analyst, Fabrikam Inc.", body: "" } },
+    source_blocks: [10],
+  }),
+  card({
+    ref: "card-2",
+    kind: "accomplishment",
+    role_ref: "role-1",
+    content: {
+      facts: { ...ROLE, figures: ["30%"] },
+      framing: { headline: "Cut claim review time 30% by rebuilding triage.", body: "" },
+    },
+    source_blocks: [12],
+  }),
+  card({
+    ref: "card-3",
+    kind: "accomplishment",
+    role_ref: "role-1",
+    content: {
+      facts: ROLE,
+      framing: { headline: "Led the pricing review with finance.", body: "" },
+    },
+    source_blocks: [13],
+  }),
+  card({
+    ref: "card-4",
+    kind: "accomplishment",
+    content: {
+      facts: { award: "Analyst of the Year", date: "2022-12" },
+      framing: { headline: "Analyst of the Year", body: "" },
+    },
+    source_blocks: [20],
+  }),
+  card({
+    ref: "card-5",
+    kind: "skill",
+    content: {
+      facts: { category: "Tools", skills: ["SQL", "Python", "Tableau"] },
+      framing: { headline: "Tools", body: "SQL, Python, Tableau" },
+    },
+    source_blocks: [22],
+  }),
+  card({
+    ref: "card-6",
+    kind: "role",
+    role_ref: "role-2",
+    content: {
+      facts: {
+        employer: "Contoso Staffing",
+        client: "Northwind Health",
+        title: "Consultant II",
+        plain_title: "Consultant",
+        start: "2016-01",
+        end: "2019-06",
+      },
+      framing: { headline: "Consultant, Northwind Health", body: "" },
+    },
+    source_blocks: [16],
+  }),
+];
+
+function finding(partial: Partial<Finding> & Pick<Finding, "rule">): Finding {
+  return {
+    severity: "note",
+    category: partial.rule.split(".")[0]!,
+    about: "cards",
+    title: partial.rule,
+    detail: "",
+    locations: [],
+    ...partial,
+  };
+}
+
+const FIGURES = finding({
+  rule: "consistency.figures",
+  severity: "fix",
+  locations: [
+    { block: 12, excerpt: "Cut claim review time 30% by rebuilding triage.", figure: "30%" },
+    { block: 30, excerpt: "Cut review time 25% across claims.", figure: "25%" },
+  ],
+});
+const TENSE = finding({
+  rule: "consistency.tense",
+  locations: [{ block: 13, excerpt: "Led the pricing review", figure: null }],
+});
+const GAP = finding({
+  rule: "dates.gap",
+  locations: [{ block: 16, excerpt: "Consultant, Northwind Health", figure: null }],
+});
+const LAYOUT = finding({ rule: "ats.tables", severity: "improve", about: "document" });
+
+function review(progress: Partial<Review["progress"]> = {}): Review {
+  return {
+    id: "0190a7a2-0000-7000-8000-000000000000",
+    file: { format: "docx", size: 20_000, name: "Riley Park resume.docx", pages: 1, words: 300 },
+    cards: CARDS,
+    findings: [FIGURES, TENSE, GAP, LAYOUT],
+    toSettle: [0, 2],
+    progress: { settled: {}, cards: {}, edits: {}, ...progress },
+    contactKept: true,
+  };
+}
+
+describe("toReview", () => {
+  it("keeps the lines cards came from and leaves the rest of the resume behind", () => {
+    const shaped = toReview({
+      id: "0190a7a2-0000-7000-8000-000000000000",
+      file: { format: "docx", size: 20_000, name: "Riley Park resume.docx" },
+      result: {
+        facts: { pages: 1, word_count: 300 },
+        contact: { emails: ["riley.park@example.com"], phones: ["555-0100"] },
+        blocks: [
+          { index: 0, text: "Riley Park · riley.park@example.com · 555-0100" },
+          { index: 12, text: "Cut claim review time 30% by rebuilding triage.", page: 1 },
+        ],
+        cards: [{ ...CARDS[1], source: undefined }],
+        findings: [FIGURES],
+      },
+      progress: { settled: {}, cards: {}, edits: {} },
+      to_settle: [0],
+    });
+    expect(shaped.file).toEqual({
+      format: "docx",
+      size: 20_000,
+      name: "Riley Park resume.docx",
+      pages: 1,
+      words: 300,
+    });
+    expect(shaped.cards[0]?.source).toEqual([
+      { block: 12, page: 1, text: "Cut claim review time 30% by rebuilding triage." },
+    ]);
+    expect(shaped.contactKept).toBe(true);
+    expect(shaped.toSettle).toEqual([0]);
+    const text = JSON.stringify(shaped);
+    expect(text).not.toContain("riley.park@example.com");
+    expect(text).not.toContain("555-0100");
+  });
+
+  it("copes with an empty answer", () => {
+    const shaped = toReview(null);
+    expect(shaped.cards).toEqual([]);
+    expect(shaped.progress).toEqual({ settled: {}, cards: {}, edits: {} });
+  });
+});
+
+describe("questions to settle", () => {
+  it("offers the two numbers a result was given", () => {
+    expect(figureChoices(FIGURES)).toEqual(["30%", "25%"]);
+    expect(isFigureQuestion(FIGURES)).toBe(true);
+    expect(isFigureQuestion(GAP)).toBe(false);
+  });
+
+  it("counts a question settled only when it has an answer other than later", () => {
+    const r = review({
+      settled: {
+        "0": { answer: "chosen", value: "25%", changed: ["card-2"] },
+        "2": { answer: "later", value: null, changed: [] },
+      },
+    });
+    expect(settleState(0, r.progress)).toBe("settled");
+    expect(settleState(2, r.progress)).toBe("later");
+    expect(settleState(1, r.progress)).toBe("open");
+    expect(settledCount(r)).toBe(1);
+  });
+
+  it("ties findings to the cards they're about", () => {
+    const r = review();
+    expect(cardsForFinding(FIGURES, CARDS)).toEqual(["card-2"]);
+    expect(findingsForCard(CARDS[1]!, r)).toEqual([0]);
+    expect(openQuestions(CARDS[1]!, r)).toEqual([0]);
+    expect(wordingTips(CARDS[2]!, r)).toEqual([1]);
+    expect(findingsForCard(CARDS[5]!, r)).toEqual([2]);
+  });
+});
+
+describe("reviewQueue", () => {
+  it("puts results with numbers first and cards set aside for later last", () => {
+    expect(reviewQueue(review())).toEqual([
+      "card-2",
+      "card-3",
+      "card-4",
+      "card-1",
+      "card-6",
+      "card-5",
+    ]);
+    const r = review({
+      cards: {
+        "card-2": { state: "approved", card_id: "c1" },
+        "card-3": { state: "later", card_id: null },
+        "card-5": { state: "dropped", card_id: null },
+      },
+    });
+    expect(reviewQueue(r)).toEqual(["card-4", "card-1", "card-6", "card-3"]);
+  });
+
+  it("reviews a card in the words the person's answers gave it", () => {
+    const edited = {
+      facts: { ...ROLE, figures: ["25%"] },
+      framing: { headline: "Cut claim review time 25% by rebuilding triage.", body: "" },
+    };
+    const r = review({ edits: { "card-2": edited } });
+    expect(contentFor(CARDS[1]!, r.progress)).toBe(edited);
+    expect(contentFor(CARDS[2]!, r.progress)).toBe(CARDS[2]!.content);
+  });
+});
+
+describe("overview", () => {
+  it("counts what the screens show", () => {
+    const o = overview(review({ cards: { "card-2": { state: "approved", card_id: "c1" } } }));
+    expect(o).toMatchObject({
+      things: 6,
+      accomplishments: 2,
+      withNumbers: 1,
+      roles: 2,
+      dateQuestions: 1,
+      figureQuestions: 1,
+      repeatQuestions: 0,
+      skills: 3,
+      wordingTips: 1,
+      documentNotes: 1,
+      open: 2,
+      pending: 5,
+      approved: 1,
+    });
+    expect(o.years?.[0]).toBe(2016);
+  });
+
+  it("lists what was found while reading", () => {
+    const rows = foundRows(review());
+    expect(rows.map((r) => r.count)).toEqual([2, null, 2, 3, 0, null]);
+  });
+});
+
+describe("card faces", () => {
+  it("names a client engagement's agency and plain title", () => {
+    const rows = factRows(CARDS[5]!, CARDS[5]!.content);
+    expect(rows.map((r) => [r.label, r.value])).toEqual([
+      ["Client", "Northwind Health"],
+      ["Through", "Contoso Staffing"],
+      ["Official title", "Consultant II"],
+      ["Dates", "Jan 2016 – Jun 2019"],
+    ]);
+    expect(rows[2]?.note).toBe("Consultant");
+    expect(dateSpan(ROLE)).toBe("Jul 2019 – Present");
+  });
+
+  it("highlights the figure inside a quoted line", () => {
+    expect(highlight("Cut review time 25% across claims.", "25%")).toEqual([
+      "Cut review time ",
+      "25%",
+      " across claims.",
+    ]);
+    expect(highlight("No figure here.", "25%")).toEqual(["No figure here.", "", ""]);
+  });
+});
+
+describe("editing", () => {
+  it("reads edited facts back as the kind of value they were", () => {
+    expect(textToFact("SQL, Python ,", ["SQL"])).toEqual(["SQL", "Python"]);
+    expect(textToFact("  ", "2021-03")).toBeUndefined();
+    expect(textToFact("12", 4)).toBe(12);
+  });
+
+  it("explains what would stop a card saving", () => {
+    expect(
+      contentProblems({ facts: { start: "March 2021" }, framing: { headline: " ", body: "" } }),
+    ).toEqual(["Add a headline.", "Write the start date as a year and month, like 2021-03."]);
+    expect(
+      contentProblems({ facts: { end: "present" }, framing: { headline: "Fine", body: "" } }),
+    ).toEqual([]);
+  });
+
+  it("lists findings that need fixing first", () => {
+    expect(bySeverity([GAP, LAYOUT, FIGURES]).map((f) => f.index)).toEqual([2, 1, 0]);
+  });
+});

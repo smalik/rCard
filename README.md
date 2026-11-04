@@ -72,8 +72,10 @@ This is milestone M0, Foundations. Built so far:
 - Resume import: reads Word, PDF and text resumes, splits them into proposed
   cards, and audits them for problems a recruiter or an applicant tracking
   system would trip on ([docs/resume-import.md](docs/resume-import.md)).
-- The import review screen at `/import`: the audit beside the proposed cards,
-  where a person edits, drops and saves cards.
+- Bringing a resume in at `/import`, built from the Hybrid designs: start,
+  reading, checking what was found, settling what doesn't line up, and
+  approving cards one at a time. The original file is kept encrypted with the
+  person's own key until they delete it.
 
 Still to come in M0: starting US carrier registration for check-in texts. Sign-in is deferred until much
 later; until then the app runs as a dev user.

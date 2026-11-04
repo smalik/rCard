@@ -1,7 +1,7 @@
 import "server-only";
 
-import type { CardKind } from "./cards";
-import { type AcceptBody, FILENAME_HEADER } from "./import-review";
+import type { CardContent, CardKind } from "./cards";
+import { type Answer, FILENAME_HEADER, type ImportSummary, type Progress } from "./imports";
 import type { Session } from "./session";
 
 // The API is private: only this server talks to it, never the browser.
@@ -50,9 +50,9 @@ async function serviceIdentityToken(): Promise<string | null> {
   return response.text();
 }
 
-async function apiFetch<T>(path: string, session: Session, init: RequestInit = {}): Promise<T> {
+async function apiRequest(path: string, session: Session, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
-  headers.set("Accept", "application/json");
+  if (!headers.has("Accept")) headers.set("Accept", "application/json");
   const token = await serviceIdentityToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
   if (process.env.PLYTOS_ENV === "dev") headers.set("X-Plytos-Dev-User", session.subject);
@@ -65,21 +65,34 @@ async function apiFetch<T>(path: string, session: Session, init: RequestInit = {
       await errorDetail(response),
     );
   }
-  return (await response.json()) as T;
+  return response;
+}
+
+async function apiFetch<T>(path: string, session: Session, init: RequestInit = {}): Promise<T> {
+  return (await (await apiRequest(path, session, init)).json()) as T;
+}
+
+function json(body: unknown): RequestInit {
+  return {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json" },
+  };
 }
 
 export function listCards(session: Session): Promise<CardSummary[]> {
   return apiFetch<CardSummary[]>("/v1/cards", session);
 }
 
-// Reads a resume and returns proposed cards and an audit. The API stores
-// nothing. The file name goes in a header, already URL-encoded, never in a URL.
-export function previewImport(
+// Reads a resume, keeps the original encrypted with the person's key, and
+// returns proposed cards and an audit. The file name goes in a header,
+// already URL-encoded, never in a URL.
+export function createImport(
   session: Session,
   file: ArrayBuffer,
   encodedFilename: string,
 ): Promise<unknown> {
-  return apiFetch<unknown>("/v1/imports/preview", session, {
+  return apiFetch<unknown>("/v1/imports", session, {
     method: "POST",
     body: file,
     headers: {
@@ -89,11 +102,71 @@ export function previewImport(
   });
 }
 
-// Saves the cards the person kept, all or none.
-export function acceptImport(session: Session, body: AcceptBody): Promise<{ id: string }[]> {
-  return apiFetch<{ id: string }[]>("/v1/imports/accept", session, {
-    method: "POST",
-    body: JSON.stringify(body),
-    headers: { "Content-Type": "application/json" },
+export function listImports(session: Session): Promise<ImportSummary[]> {
+  return apiFetch<ImportSummary[]>("/v1/imports", session);
+}
+
+export function getImport(session: Session, id: string): Promise<unknown> {
+  return apiFetch<unknown>(`/v1/imports/${encodeURIComponent(id)}`, session);
+}
+
+// The person's original file, exactly as they gave it.
+export async function getOriginal(
+  session: Session,
+  id: string,
+): Promise<{ data: ArrayBuffer; type: string; name: string }> {
+  const response = await apiRequest(`/v1/imports/${encodeURIComponent(id)}/original`, session, {
+    headers: { Accept: "*/*" },
   });
+  let name = "resume";
+  try {
+    name = decodeURIComponent(response.headers.get(FILENAME_HEADER) ?? "") || name;
+  } catch {
+    // A name that doesn't decode falls back to "resume".
+  }
+  return {
+    data: await response.arrayBuffer(),
+    type: response.headers.get("content-type") ?? "application/octet-stream",
+    name,
+  };
+}
+
+export async function deleteImport(session: Session, id: string): Promise<void> {
+  await apiRequest(`/v1/imports/${encodeURIComponent(id)}`, session, {
+    method: "DELETE",
+  });
+}
+
+export function settleQuestion(
+  session: Session,
+  id: string,
+  body: { finding: number; answer: Answer; value: string | null },
+): Promise<Progress> {
+  return apiFetch<Progress>(`/v1/imports/${encodeURIComponent(id)}/settle`, session, json(body));
+}
+
+export function decideCard(
+  session: Session,
+  id: string,
+  ref: string,
+  state: "later" | "dropped" | "pending",
+): Promise<Progress> {
+  return apiFetch<Progress>(
+    `/v1/imports/${encodeURIComponent(id)}/cards/${encodeURIComponent(ref)}/decision`,
+    session,
+    json({ state }),
+  );
+}
+
+export function approveCard(
+  session: Session,
+  id: string,
+  ref: string,
+  content: CardContent | null,
+): Promise<{ card: { id: string }; progress: Progress }> {
+  return apiFetch(
+    `/v1/imports/${encodeURIComponent(id)}/cards/${encodeURIComponent(ref)}/approve`,
+    session,
+    json({ content }),
+  );
 }
