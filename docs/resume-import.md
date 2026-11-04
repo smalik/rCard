@@ -125,18 +125,21 @@ contact details stay on the server. Nothing goes to browser storage.
 ## Reading in the background
 
 An upload is kept as soon as it arrives (state `reading`) and read by the
-import worker, which runs beside the agents' worker (see
+import worker. The API runs one on a thread (`PLYTOS_IMPORTS_INLINE`, on by
+default), and the agents' worker service runs one too (see
 [agents.md](agents.md#the-runtime)). Migration
 [`0009_import_reading.sql`](../services/api/migrations/0009_import_reading.sql)
 adds the state, the stage, the tries and the lease.
 
 - `plytos.claim_resume_imports` (security definer, `for update skip locked`)
-  hands the worker readings that are due and leases them for five minutes. It
-  returns only ids; the worker then reads each one as its owner, so row-level
-  security holds.
+  hands the worker one due reading at a time and leases it for five minutes.
+  It returns only ids and the attempt number; the worker then reads it as its
+  owner, so row-level security holds.
 - Each stage is written in a short transaction of its own, so the person
-  waiting sees it. Nothing is held open while Claude reads. Stage names are
-  fixed words, never content.
+  waiting sees it, and renews the lease. Nothing is held open while Claude
+  reads. Stage names are fixed words, never content.
+- Every write the worker makes names the attempt it claimed. A worker that
+  ran past its lease, after another took the reading over, writes nothing.
 - A reading that breaks is tried again after 30 seconds, then 60, up to three
   tries; the error is a short code such as `error_runtime_error`. A file that
   can't be opened at all fails at once as `unreadable`.

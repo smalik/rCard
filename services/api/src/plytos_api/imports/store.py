@@ -212,52 +212,72 @@ class ImportStore:
             file=ImportFile(format=fmt, size=len(data), name=filename),
         )
 
-    def to_read(self, import_id: UUID) -> tuple[bytes, str] | None:
-        """The file and its name, for the worker, while the import is waiting to be
-        read. None once it's read, failed or deleted."""
+    # The worker's writes name the attempt it claimed (see claim_resume_imports),
+    # so a worker whose lease ran out can't touch a reading another has taken over.
+
+    def to_read(self, import_id: UUID, attempt: int) -> tuple[bytes, str] | None:
+        """The file and its name, for the worker, while the import is being read on
+        this attempt. None once it's read, failed, deleted or claimed again."""
         row = self._conn.execute(
             "select name_ciphertext, file_ciphertext from plytos.resume_import"
-            " where id = %s and state = 'reading'",
-            (import_id,),
+            " where id = %s and state = 'reading' and attempts = %s",
+            (import_id, attempt),
         ).fetchone()
         if row is None:
             return None
         return self._open("file", import_id, row[1]), self._open("name", import_id, row[0]).decode()
 
-    def at_stage(self, import_id: UUID, stage: ReadingStage) -> None:
-        self._conn.execute(
-            "update plytos.resume_import set stage = %s where id = %s and state = 'reading'",
-            (stage, import_id),
+    def at_stage(
+        self, import_id: UUID, attempt: int, stage: ReadingStage, lease_seconds: int
+    ) -> bool:
+        """Says which stage the reading is at, and renews its lease. False if the
+        reading is no longer this attempt's."""
+        return bool(
+            self._conn.execute(
+                "update plytos.resume_import set stage = %s,"
+                " locked_until = now() + make_interval(secs => %s)"
+                " where id = %s and state = 'reading' and attempts = %s",
+                (stage, lease_seconds, import_id, attempt),
+            ).rowcount
         )
 
-    def finish(self, import_id: UUID, result: ImportResult) -> bool:
-        """Keeps what was read. False if the import was deleted or settled meanwhile."""
+    def finish(self, import_id: UUID, attempt: int, result: ImportResult) -> bool:
+        """Keeps what was read. False if the import was deleted, or the reading is no
+        longer this attempt's."""
         done = self._conn.execute(
             "update plytos.resume_import set state = 'read', stage = null, locked_until = null,"
             " error_code = null, result_ciphertext = %s, updated_at = now()"
-            " where id = %s and state = 'reading'",
-            (self._seal("result", import_id, result.model_dump_json().encode()), import_id),
+            " where id = %s and state = 'reading' and attempts = %s",
+            (
+                self._seal("result", import_id, result.model_dump_json().encode()),
+                import_id,
+                attempt,
+            ),
         ).rowcount
         if done:
             self._event("import.read", import_id)
         return bool(done)
 
-    def failed(self, import_id: UUID, code: str, retry_in_seconds: int | None) -> None:
-        """Records a reading that went wrong: tried again later, or given up on."""
+    def failed(
+        self, import_id: UUID, attempt: int, code: str, retry_in_seconds: int | None
+    ) -> bool:
+        """Records a reading that went wrong: tried again later, or given up on.
+        False if the reading is no longer this attempt's."""
         if retry_in_seconds is None:
-            self._conn.execute(
+            done = self._conn.execute(
                 "update plytos.resume_import set state = 'failed', stage = null,"
                 " locked_until = null, error_code = %s, updated_at = now()"
-                " where id = %s and state = 'reading'",
-                (code[:64], import_id),
-            )
+                " where id = %s and state = 'reading' and attempts = %s",
+                (code[:64], import_id, attempt),
+            ).rowcount
         else:
-            self._conn.execute(
+            done = self._conn.execute(
                 "update plytos.resume_import set stage = null, locked_until = null,"
                 " error_code = %s, run_after = now() + make_interval(secs => %s)"
-                " where id = %s and state = 'reading'",
-                (code[:64], retry_in_seconds, import_id),
-            )
+                " where id = %s and state = 'reading' and attempts = %s",
+                (code[:64], retry_in_seconds, import_id, attempt),
+            ).rowcount
+        return bool(done)
 
     def read_again(self, import_id: UUID) -> ImportStatus:
         """Puts a failed reading back in the queue, with its tries counted afresh."""

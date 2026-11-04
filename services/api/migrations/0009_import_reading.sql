@@ -10,7 +10,10 @@
 -- only IDs), then reads each one as its owner, so row-level security holds.
 -- A read whose lease runs out is claimed again, up to three tries. One that
 -- runs out on its last try is given up on and returned with gave_up set, so
--- the worker can tell the person.
+-- the worker can tell the person. Each claim returns its attempt number; the
+-- worker writes only while the import is still on that attempt, so a worker
+-- whose lease ran out can't touch a reading another worker has taken over.
+-- The worker renews the lease at each stage.
 
 alter table plytos.resume_import
   add column state text not null default 'read'
@@ -53,7 +56,7 @@ grant update (result_ciphertext, state, stage, attempts, run_after, locked_until
   on plytos.resume_import to plytos_app;
 
 create or replace function plytos.claim_resume_imports(max_reads integer, lease_seconds integer)
-returns table (id uuid, owner_id uuid, gave_up boolean)
+returns table (id uuid, owner_id uuid, attempt smallint, gave_up boolean)
 language plpgsql security definer
 set search_path = pg_catalog, plytos
 as $$
@@ -64,7 +67,7 @@ begin
      set state = 'failed', stage = null, locked_until = null, error_code = 'gave_up',
          updated_at = now()
    where i.state = 'reading' and i.attempts >= 3 and i.locked_until < now()
-  returning i.id, i.owner_id, true;
+  returning i.id, i.owner_id, i.attempts, true;
 
   return query
   update plytos.resume_import i
@@ -77,7 +80,7 @@ begin
       order by q.run_after
       limit greatest(max_reads, 0)
       for update skip locked)
-  returning i.id, i.owner_id, false;
+  returning i.id, i.owner_id, i.attempts, false;
 end
 $$;
 

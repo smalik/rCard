@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     # Agents (agents/). Inline runs a worker on a thread inside the API, for
     # development; production runs `python -m plytos_api.agents` as its own service.
     agents_inline: bool = False
+    # Reads uploaded resumes on a thread inside the API, so an upload is read
+    # wherever the API runs. Turn it off once a separate worker reads them.
+    imports_inline: bool = True
     # How long the Stitcher waits after a note, so a burst of notes is read together.
     stitch_delay_seconds: int = 30
 

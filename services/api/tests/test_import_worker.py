@@ -221,3 +221,76 @@ def test_an_upload_not_shared_in_the_conversation_gets_no_answer_there(
 
     assert status(stores, user, import_id).state == "failed"
     assert answers(stores, user) == []
+
+
+def take_over(db: Database, user: UUID, import_id: UUID) -> None:
+    """As if this worker's lease ran out and another worker claimed the reading."""
+    with db.as_user(user) as conn:
+        conn.execute(
+            "update plytos.resume_import set attempts = attempts + 1,"
+            " locked_until = now() + interval '5 minutes' where id = %s",
+            (import_id,),
+        )
+
+
+def lease(db: Database, user: UUID, import_id: UUID) -> tuple[int, bool, str | None]:
+    with db.as_user(user) as conn:
+        row = conn.execute(
+            "select attempts, locked_until > now() + interval '4 minutes', error_code"
+            " from plytos.resume_import where id = %s",
+            (import_id,),
+        ).fetchone()
+    assert row is not None
+    return row[0], row[1], row[2]
+
+
+@pytest.mark.parametrize("ends", ["read", "broken"])
+def test_a_worker_that_ran_past_its_lease_leaves_the_reading_to_the_one_that_took_over(
+    db: Database,
+    vault: Vault,
+    make_user: Callable[[], UUID],
+    stores: Stores,
+    drained: None,
+    ends: str,
+) -> None:
+    user = make_user()
+    import_id = keep(stores, user)
+
+    class Overtaken:
+        name = "overtaken"
+
+        def read(self, doc: ExtractedDocument) -> AiResume | None:
+            take_over(db, user, import_id)
+            if ends == "broken":
+                raise RuntimeError("the model is away")
+            return None
+
+    ImportWorker(db, vault, Overtaken(), retry_base_seconds=0).run_once()
+
+    # Neither its result nor its failure lands; the new claim's lease stands.
+    assert status(stores, user, import_id).state == "reading"
+    assert lease(db, user, import_id) == (2, True, None)
+    assert answers(stores, user) == []
+
+
+def test_each_stage_renews_the_lease_of_its_own_attempt_only(
+    db: Database, make_user: Callable[[], UUID], stores: Stores
+) -> None:
+    user = make_user()
+    import_id = keep(stores, user, shared=False)
+    with db.as_user(user) as conn:
+        conn.execute(
+            "update plytos.resume_import set attempts = 1,"
+            " locked_until = now() + interval '1 second' where id = %s",
+            (import_id,),
+        )
+    with stores(user) as (imports, _):
+        assert not imports.at_stage(import_id, 2, "structure", 300)
+    assert lease(db, user, import_id)[1] is False
+    with stores(user) as (imports, _):
+        assert imports.at_stage(import_id, 1, "structure", 300)
+    assert lease(db, user, import_id)[1] is True
+    assert status(stores, user, import_id).stage == "structure"
+    # Leave nothing in the queue for other tests.
+    with stores(user) as (imports, _):
+        imports.delete(import_id)

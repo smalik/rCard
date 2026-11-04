@@ -274,16 +274,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.ai_vertex_region,
     )
 
-    # In development the API also does the background work. In production the
-    # workers run as their own service (python -m plytos_api.agents).
-    background = (
-        [
-            BackgroundWorker(Worker(db, vault, crew(settings)), name="agents"),
-            BackgroundWorker(ImportWorker(db, vault, reader), every_seconds=1.0, name="imports"),
-        ]
-        if settings.agents_inline
-        else []
-    )
+    # The API reads uploads itself unless told a separate worker does. The agents
+    # run inside it only in development; in production they run as their own
+    # service (python -m plytos_api.agents), which reads uploads too.
+    background: list[BackgroundWorker] = []
+    if settings.agents_inline:
+        background.append(BackgroundWorker(Worker(db, vault, crew(settings)), name="agents"))
+    if settings.imports_inline or settings.agents_inline:
+        background.append(
+            BackgroundWorker(ImportWorker(db, vault, reader), every_seconds=1.0, name="imports")
+        )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

@@ -25,7 +25,9 @@ from .resume_samples import promotions_text
 
 @pytest.fixture(scope="module")
 def client(test_db: DbUrls, kek_setting: str) -> Iterator[TestClient]:
-    app = create_app(Settings(env="test", database_url=test_db.app_url, kek=kek_setting))
+    app = create_app(
+        Settings(env="test", database_url=test_db.app_url, kek=kek_setting, imports_inline=False)
+    )
     with TestClient(app) as c:
         yield c
 
@@ -69,6 +71,7 @@ def test_prod_refuses_until_sign_in_exists(test_db: DbUrls) -> None:
         env="prod",
         database_url=test_db.app_url,
         kek="gcp-kms:projects/p/locations/us/keyRings/r/cryptoKeys/k",
+        imports_inline=False,
     )
     with TestClient(create_app(settings)) as prod:
         assert prod.get("/v1/cards", headers=as_user("someone")).status_code == 501

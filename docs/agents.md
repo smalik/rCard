@@ -64,13 +64,16 @@ logs them: failures are logged by error class only.
 | --- | --- | --- |
 | `PLYTOS_AI_PROVIDER` | `off` | `anthropic` or `vertex` turns the agents' thinking on |
 | `PLYTOS_AGENTS_INLINE` | `false` | Runs a worker on a thread inside the API. For development |
+| `PLYTOS_IMPORTS_INLINE` | `true` | Reads uploaded resumes on a thread inside the API. Turn it off once the worker service reads them |
 | `PLYTOS_STITCH_DELAY_SECONDS` | `30` | How long the Stitcher waits after a note, so a burst is read together |
 
 In production the worker runs as its own service: `python -m plytos_api.agents`.
 The same service reads uploaded resumes (`imports/worker.py`, see
-[resume-import.md](resume-import.md#reading-in-the-background)). With
-`PLYTOS_AGENTS_INLINE` set, the API runs both workers on threads instead. It
-isn't deployed yet.
+[resume-import.md](resume-import.md#reading-in-the-background)). It isn't
+deployed yet, so the API reads uploads itself on a thread
+(`PLYTOS_IMPORTS_INLINE`, on by default; the Cloud Run service keeps CPU
+between requests for it). Both can run at once: readings are claimed with
+`skip locked`.
 
 ## The agents built so far
 
