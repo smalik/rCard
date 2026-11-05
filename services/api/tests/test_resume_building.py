@@ -216,6 +216,28 @@ def lines(content: ResumeContent) -> list[UUID]:
 # -- what the database guarantees ----------------------------------------------
 
 
+def test_the_newest_resume_heads_the_contact_card(make_user, open_: Open) -> None:
+    alice, bob = make_user(), make_user()
+    with open_(alice) as s:
+        assert s.resumes.latest_head() is None
+        c = career(s.cards)
+        older = s.resumes.create("Older", whole(c), ME)
+        newer = s.resumes.create("Newer", whole(c), ME)
+        head = s.resumes.latest_head()
+        assert head is not None
+        assert (head.resume_id, head.name, head.version_id) == (newer.id, "Newer", newer.head.id)
+        # Changing the older one makes it the newest.
+        content = whole(c)
+        content.header.name = "Robin Diaz"
+        saved = s.resumes.save(older.id, content, older.head.id, ME)
+        head = s.resumes.latest_head()
+        assert head is not None
+        assert (head.resume_id, head.version_id) == (older.id, saved.head.id)
+        assert head.content.header.name == "Robin Diaz"
+    with open_(bob) as s:
+        assert s.resumes.latest_head() is None
+
+
 def test_links_to_resumes_stay_with_their_owner(make_user, open_: Open, db: Database) -> None:
     alice, bob = make_user(), make_user()
     with open_(alice) as s:

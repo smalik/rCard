@@ -121,6 +121,16 @@ class DeletionPlan(BaseModel):
     branches: list[DeletionBranch]
 
 
+class ResumeHead(BaseModel):
+    """A resume's newest version, without its history."""
+
+    resume_id: UUID
+    name: str
+    version_id: UUID
+    target_id: UUID | None
+    content: ResumeContent
+
+
 class ResumeDetail(ResumeSummary):
     parent_name: str | None
     head: ResumeVersionView
@@ -468,6 +478,27 @@ class ResumeStore:
             " and archived_at is null"
         ).fetchall()
         return {r[0] for r in rows}
+
+    def latest_head(self) -> ResumeHead | None:
+        """The resume changed most recently and its head's content, in one
+        query. None when the person has no resume yet."""
+        row = self._conn.execute(
+            "select r.id, r.name_ciphertext, v.id, r.target_id, v.content_ciphertext"
+            " from plytos.resume r join plytos.resume_version v on v.id = r.head_version_id"
+            " where r.archived_at is null order by v.created_at desc limit 1"
+        ).fetchone()
+        if row is None:
+            return None
+        resume_id, version_id = row[0], row[2]
+        return ResumeHead(
+            resume_id=resume_id,
+            name=self._cipher.decrypt(bytes(row[1]), _name_aad(resume_id)).decode(),
+            version_id=version_id,
+            target_id=row[3],
+            content=(
+                ResumeContent() if row[4] is None else self._decrypt_content(version_id, row[4])
+            ),
+        )
 
     def verify(self, resume_id: UUID) -> list[str]:
         """Recomputes every version's hashes. Returns the problems found."""

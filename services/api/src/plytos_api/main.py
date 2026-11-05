@@ -75,8 +75,8 @@ from plytos_api.imports.store import (
 from plytos_api.imports.worker import ImportWorker
 from plytos_api.keys import KeyShreddedError, Vault, kek_from_setting
 from plytos_api.resumes.as_written import as_written
-from plytos_api.resumes.model import ResumeChange, ResumeContent, keep_wording
-from plytos_api.resumes.render import RenderedResume, describe, render
+from plytos_api.resumes.model import ResumeChange, ResumeContent, ResumeHeader, keep_wording
+from plytos_api.resumes.render import RenderedHighlights, RenderedResume, describe, render
 from plytos_api.resumes.store import (
     DeletionPlan,
     ResumeDetail,
@@ -276,6 +276,17 @@ class Resumes(BaseModel):
     resumes: list[ResumeSummary]
     # Files with kept cards that no resume was made from yet.
     ready: list[ImportSummary]
+
+
+class LatestContact(BaseModel):
+    """The top of the resume changed most recently, for the contact and
+    highlights cards on Cards."""
+
+    resume_id: UUID
+    resume_name: str
+    base_version_id: UUID
+    header: ResumeHeader
+    highlights: RenderedHighlights | None
 
 
 class ResumePage(BaseModel):
@@ -848,6 +859,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         with db.as_user(user_id) as conn:
             store, cards = resumes(conn, user_id)
             return page(store.detail(resume_id), cards)
+
+    @app.get("/v1/resumes/latest/contact")
+    def latest_contact(user_id: User) -> LatestContact | None:
+        """The contact details and highlights of the resume changed most
+        recently, in one request. Null when there's no resume yet."""
+        with db.as_user(user_id) as conn:
+            store, cards = resumes(conn, user_id)
+            head = store.latest_head()
+            if head is None:
+                return None
+            return LatestContact(
+                resume_id=head.resume_id,
+                resume_name=head.name,
+                base_version_id=head.version_id,
+                header=head.content.header,
+                highlights=render(head.content, cards, head.target_id).highlights,
+            )
 
     @app.patch("/v1/resumes/{resume_id}")
     def rename_resume(resume_id: UUID, body: RenameResume, user_id: User) -> ResumeDetail:

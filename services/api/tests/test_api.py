@@ -588,6 +588,7 @@ def test_resume_flow_over_http(client: TestClient, reads: ImportWorker) -> None:
     imported = upload(client, reads, promotions_text().encode(), "Avery Quinn.txt", me)
     import_id = imported["id"]
     assert client.get("/v1/resumes", headers=me).json() == {"resumes": [], "ready": []}
+    assert client.get("/v1/resumes/latest/contact", headers=me).json() is None
     nothing = client.post("/v1/resumes/as-written", json={"import_id": import_id}, headers=me)
     assert nothing.status_code == 422
     for card in imported["result"]["cards"]:
@@ -607,6 +608,15 @@ def test_resume_flow_over_http(client: TestClient, reads: ImportWorker) -> None:
     assert page["entries"][0]["employer"] == "Northwind Logistics"
     again = client.post("/v1/resumes/as-written", json={"import_id": import_id}, headers=me)
     assert again.json()["resume"]["id"] == resume_id
+    contact = client.get("/v1/resumes/latest/contact", headers=me).json()
+    assert contact == {
+        "resume_id": resume_id,
+        "resume_name": resume["name"],
+        "base_version_id": v1,
+        "header": resume["content"]["header"],
+        "highlights": page.get("highlights"),
+    }
+    assert client.get("/v1/resumes/latest/contact", headers=other).json() is None
     listed = client.get("/v1/resumes", headers=me).json()
     assert [r["id"] for r in listed["resumes"]] == [resume_id] and listed["ready"] == []
 

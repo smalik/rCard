@@ -14,9 +14,11 @@ import type {
   DeletionPlan,
   ParentChanges,
   ProposedResume,
+  RenderedHighlights,
   RenderedResume,
   ResumeContent,
   ResumeDetail,
+  ResumeHeader,
   ResumePage,
   Resumes,
   ResumeVersionPage,
@@ -378,6 +380,35 @@ export function makeAsWritten(session: Session, importId: string): Promise<Resum
 
 export function getResume(session: Session, id: string): Promise<ResumePage> {
   return apiFetch<ResumePage>(resumePath(id), session);
+}
+
+export type LatestContact = {
+  resumeId: string;
+  resumeName: string;
+  baseVersionId: string;
+  header: ResumeHeader;
+  highlights: RenderedHighlights | null;
+};
+
+// The contact details and highlights of the resume changed most recently, in
+// one request. Null when there's no resume yet.
+export async function getLatestContact(session: Session): Promise<LatestContact | null> {
+  type Sent = {
+    resume_id: string;
+    resume_name: string;
+    base_version_id: string;
+    header: ResumeHeader;
+    highlights: RenderedHighlights | null;
+  };
+  const sent = await apiFetch<Sent | null>("/v1/resumes/latest/contact", session);
+  if (!sent) return null;
+  return {
+    resumeId: sent.resume_id,
+    resumeName: sent.resume_name,
+    baseVersionId: sent.base_version_id,
+    header: sent.header,
+    highlights: sent.highlights,
+  };
 }
 
 export function getResumeVersion(
