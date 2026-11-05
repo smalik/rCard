@@ -14,6 +14,7 @@ import io
 import itertools
 import math
 import re
+import threading
 import zipfile
 from collections import Counter
 from collections.abc import Iterable, Iterator
@@ -839,6 +840,18 @@ def _pdf_picture(
 _TALLEST = 1.6
 
 
+# PDFium, which draws a PDF's pages, can't be used from two threads at once, and
+# requests (and the bench's workers) run in threads: pages are drawn one at a time.
+_DRAWING = threading.Lock()
+
+
+def draw(page: Any, resolution: float) -> Image.Image:
+    """A PDF page, or a part of one, drawn as a picture."""
+    with _DRAWING:
+        image: Image.Image = page.to_image(resolution=resolution).original
+        return image
+
+
 def _tiles(page: Any) -> list[tuple[float, float, float, float] | None]:
     """The parts of a scanned page to read one at a time: the whole page, or slices of
     about a page each, cut where a row is blank so no line is cut in two."""
@@ -847,7 +860,7 @@ def _tiles(page: Any) -> list[tuple[float, float, float, float] | None]:
         return [None]
     count = math.ceil(height / (width * 1.3))
     try:
-        shade = page.to_image(resolution=36).original.convert("L")
+        shade = draw(page, 36).convert("L")
     except Exception:  # a page that won't render is cut evenly
         shade = None
     cuts = [0.0]
@@ -884,7 +897,7 @@ def _render(
     """A page, or part of one, as a picture."""
     try:
         area = page.crop(box) if box is not None else page
-        return _prepared(area.to_image(resolution=dpi).original)
+        return _prepared(draw(area, dpi))
     except Exception:  # a picture that won't render is left unread
         return None
 

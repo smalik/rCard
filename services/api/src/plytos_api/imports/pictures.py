@@ -16,7 +16,7 @@ import logging
 import pdfplumber
 
 from plytos_api.imports.ai import AiPictureLine, AiPictures
-from plytos_api.imports.extract import _is_caps, _words, clean, split_bullet
+from plytos_api.imports.extract import _is_caps, _words, clean, draw, split_bullet
 from plytos_api.imports.model import Block, ExtractedDocument
 
 log = logging.getLogger(__name__)
@@ -99,7 +99,7 @@ def page_picture(data: bytes, page: int) -> bytes | None:
             drawn = pdf.pages[page - 1]
             width, height = float(drawn.width), float(drawn.height)
             scale = min(PAGE_WIDTH / width, (PAGE_PIXELS / (width * height)) ** 0.5)
-            image = drawn.to_image(resolution=72 * scale).original.convert("RGB")
+            image = draw(drawn, 72 * scale).convert("RGB")
     except Exception as exc:  # a file that read once but won't draw
         log.warning("Couldn't draw a page of a resume: %s", type(exc).__name__)
         return None

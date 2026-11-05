@@ -248,3 +248,13 @@ def test_a_scan_whose_pictures_hold_no_words_is_unreadable() -> None:
 
     with pytest.raises(UnsupportedFileError):
         import_resume(scanned_pdf(), "scan.pdf", today=TODAY, reader=Blind())  # type: ignore[arg-type]
+
+
+def test_pages_drawn_from_many_threads_at_once_all_come_back() -> None:
+    # PDFium can't draw from two threads at once; requests come in on many.
+    from concurrent.futures import ThreadPoolExecutor
+
+    data = scanned_pdf()
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        drawn = list(pool.map(lambda _: page_picture(data, 1), range(18)))
+    assert all(d is not None and d.startswith(b"\xff\xd8") for d in drawn)

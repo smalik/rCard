@@ -483,10 +483,12 @@ def scan(pdf: bytes, resolution: int = 150) -> bytes:
     them: no text layer at all."""
     import pdfplumber
 
+    from plytos_api.imports.extract import draw
+
     pages = []
     with pdfplumber.open(io.BytesIO(pdf)) as doc:
         for page in doc.pages:
-            pages.append(page.to_image(resolution=resolution).original.convert("L"))
+            pages.append(draw(page, resolution).convert("L"))
     out = io.BytesIO()
     pages[0].save(out, "PDF", resolution=resolution, save_all=True, append_images=pages[1:])
     return out.getvalue()
