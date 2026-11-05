@@ -372,7 +372,7 @@ export function ReviewScreen({ initial, file }: { initial: Review; file: ResumeF
       setDeleting(false);
       return;
     }
-    router.replace("/talk");
+    router.replace("/import");
     router.refresh();
   }
 
@@ -489,10 +489,10 @@ export function ReviewScreen({ initial, file }: { initial: Review; file: ResumeF
       <header className="flex shrink-0 items-start gap-3 pt-3 pb-3 md:pt-5">
         <div className="min-w-0 flex-1">
           <Link
-            href="/talk"
+            href="/import"
             className="-ml-1 inline-flex items-center gap-1 rounded-full px-1 text-[14px] font-medium text-primary"
           >
-            <ArrowLeft className="size-4" /> Talk
+            <ArrowLeft className="size-4" /> Your files
           </Link>
           <h1 className="mt-1 text-[24px] leading-tight font-semibold tracking-[-0.02em] md:text-[28px]">
             Your resume, rebuilt

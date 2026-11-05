@@ -20,7 +20,7 @@ export default async function ImportPage({ params }: { params: Promise<{ id: str
   // leave and come back.
   if (loaded.review === null) return <Reading key={loaded.status.id} status={loaded.status} />;
   return (
-    <AppShell current="/talk">
+    <AppShell current="/resumes">
       <ReviewScreen key={loaded.review.id} initial={loaded.review} file={loaded.file} />
     </AppShell>
   );

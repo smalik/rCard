@@ -1,37 +1,31 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
-import { ApiError, listImports } from "../../lib/api";
-import { currentSession } from "../../lib/session";
-import { Start, type Unfinished } from "./start";
+import { AppShell } from "@/components/app-shell";
+import { BringIn } from "@/components/import-review/bring-in";
+import { ApiError, listImports } from "@/lib/api";
+import type { ImportSummary } from "@/lib/imports";
+import { currentSession } from "@/lib/session";
 
-export const metadata: Metadata = { title: "Bring in your resume" };
+export const metadata: Metadata = { title: "Bring in a resume" };
 export const dynamic = "force-dynamic";
 
+// Bringing a resume in, and every file brought in so far with its check and
+// its audit.
 export default async function ImportPage() {
   const session = await currentSession();
   if (!session) redirect("/sign-in");
 
-  // The newest import still being read, or with cards still waiting, so the
-  // person can pick up where they left off.
-  let unfinished: Unfinished | null = null;
+  let files: ImportSummary[] = [];
   try {
-    const imports = await listImports(session);
-    const open = imports
-      .map((i) => ({ ...i, left: i.cards - i.approved - i.dropped }))
-      .filter((i) => i.state === "reading" || i.left > 0)
-      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
-    if (open) {
-      unfinished = {
-        id: open.id,
-        name: open.file.name,
-        left: open.left,
-        reading: open.state === "reading",
-      };
-    }
+    files = await listImports(session);
   } catch (error) {
     if (!(error instanceof ApiError)) throw error;
   }
 
-  return <Start unfinished={unfinished} />;
+  return (
+    <AppShell current="/resumes">
+      <BringIn files={files} />
+    </AppShell>
+  );
 }
