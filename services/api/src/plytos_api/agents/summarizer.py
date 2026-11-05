@@ -139,13 +139,21 @@ def gather(library: list[LibraryCard], employment_id: UUID) -> Job:
     def under(card_id: UUID, kinds: set[str]) -> list[LibraryCard]:
         return [c for c in by_parent.get(card_id, []) if c.kind in kinds and c.content]
 
-    things = {"accomplishment", "project"}
+    def done_under(card_id: UUID) -> list[LibraryCard]:
+        """Accomplishments and projects, with the accomplishments under each project."""
+        out: list[LibraryCard] = []
+        for c in under(card_id, {"accomplishment", "project"}):
+            out.append(c)
+            if c.kind == "project":
+                out += under(c.id, {"accomplishment"})
+        return out
+
     titles: list[Title] = []
     for t in under(employment_id, {"position", "engagement"}):
-        titles.append(Title(t, under(t.id, things)))
+        titles.append(Title(t, done_under(t.id)))
         for e in under(t.id, {"engagement"}):
-            titles.append(Title(e, under(e.id, things)))
-    return Job(employment, titles, under(employment_id, things))
+            titles.append(Title(e, done_under(e.id)))
+    return Job(employment, titles, done_under(employment_id))
 
 
 def needs_first_summary(library: list[LibraryCard]) -> list[UUID]:
@@ -225,6 +233,24 @@ def summarize(
     person's own words too."""
     job = gather(cards.library(), employment_id)
     employment = _content(job.employment)
+    # When work last moved out from under the job, a title or a project.
+    holders = [job.employment, *(t.card for t in job.titles)]
+    holders += [i for i in job.items() if i.kind == "project"]
+    left = cards.last_moved_out([c.id for c in holders])
+
+    def lost_since(under: list[LibraryCard], since: datetime) -> bool:
+        # In the same moment as the summary counts as after it.
+        return any(c.id in left and left[c.id] >= since for c in under)
+
+    written = Written()
+    # What Plytos wrote about work that has all moved away goes back to empty.
+    if not job.items() and "headline" in employment.framing.plytos_wrote:
+        written.headline = _save(cards, job.employment, headline=employer_name(employment))
+    for t in job.titles:
+        framing = _content(t.card).framing
+        emptied = not t.items and "body" in framing.plytos_wrote and bool(framing.body)
+        if emptied and _save(cards, t.card, body=""):
+            written.stories += 1
 
     # The headline sums up the whole job; each story, one title.
     write_headline = bool(job.items()) and headline_open(employment, replace_own)
@@ -233,8 +259,10 @@ def summarize(
         made = max((t.card.created_at for t in job.titles), default=None)
         since = job.employment.updated_at
         # Changed in the same moment as the headline counts as changed after it.
-        write_headline = (newest is not None and newest >= since) or (
-            made is not None and made >= since
+        write_headline = (
+            (newest is not None and newest >= since)
+            or (made is not None and made >= since)
+            or lost_since(holders, since)
         )
     stories: dict[str, Title] = {}
     for i, t in enumerate(job.titles):
@@ -242,12 +270,15 @@ def summarize(
         if not t.items or not story_open(content, replace_own):
             continue
         newest = _newest(t.items)
-        changed = newest is not None and newest >= t.card.updated_at
+        projects = [p for p in t.items if p.kind == "project"]
+        changed = (newest is not None and newest >= t.card.updated_at) or lost_since(
+            [t.card, *projects], t.card.updated_at
+        )
         stale = not content.framing.body.strip() or changed
         if force or stale:
             stories[f"t{i + 1}"] = t
     if not write_headline and not stories:
-        return Written()
+        return written
 
     refs = {f"t{i + 1}": t for i, t in enumerate(job.titles)}
     about = employment.framing.body[:_DETAIL] if employment.framing.body.strip() else ""
@@ -265,7 +296,6 @@ def summarize(
     if answer is None:
         raise SummaryUnavailableError("model_no_answer")
 
-    written = Written()
     shared = _said({k: data[k] for k in ("employer", "start", "end", "about_the_employer")})
     headline = " ".join(answer.headline.split()).rstrip(".")
     if write_headline and headline:
@@ -306,10 +336,17 @@ def _save(
             # The headline stood in for the name until now: keep the name as a fact.
             facts["employer"] = framing.headline
         update["headline"] = headline
-        marks.add("headline")
+        # Back to the employer's name, it stands in again rather than being Plytos's words.
+        if headline.casefold() == employer_name(content).casefold():
+            marks.discard("headline")
+        else:
+            marks.add("headline")
     if body is not None and body != framing.body:
         update["body"] = body
-        marks.add("body")
+        if body:
+            marks.add("body")
+        else:
+            marks.discard("body")
     if not update:
         return False
     update["plytos_wrote"] = [p for p in ("headline", "body") if p in marks]

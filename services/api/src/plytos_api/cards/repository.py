@@ -36,6 +36,7 @@ from plytos_api.cards.model import (
 from plytos_api.cards.rules import (
     SUMMARIZER_REF,
     facts_changed,
+    has_headline,
     honest_marks,
     unsupported_claims,
 )
@@ -48,6 +49,16 @@ CardStatus = Literal["draft", "approved"]
 # what was done, whenever it changes, and the job and its titles when made.
 _SUMMED_UP = frozenset({"accomplishment", "project"})
 _HOLDERS = frozenset({"employment", "position", "engagement"})
+
+
+def _handed_back(kind: str, before: MainContent | None, after: MainContent) -> bool:
+    """Whether a save emptied the part Plytos writes on this card: a job's
+    headline, or a title's story."""
+    if before is None:
+        return False
+    if kind == "employment":
+        return has_headline(before) and not has_headline(after)
+    return bool(before.framing.body.strip()) and not after.framing.body.strip()
 
 
 class CardNotFoundError(Exception):
@@ -274,6 +285,9 @@ class CardRepository:
                 "update plytos.card set parent_id = %s where id = %s", (content.parent, card_id)
             )
             self._event(author, "card.moved", "card", card_id)
+            if sits_under is not None:
+                # What it sat under lost it, so a summary written there may be out of date.
+                self._event(author, "card.moved_out", "card", sits_under)
 
         behind: list[UUID] = []
         if facts_changed(before, content):
@@ -286,11 +300,26 @@ class CardRepository:
             behind = [r[0] for r in rows]
             for line_id in behind:
                 self._event(author, "variant.marked_behind", "card_line", line_id)
-        if kind in _SUMMED_UP and not by_summarizer:
+        if not by_summarizer and kind in _SUMMED_UP:
             self._job_changed(card_id)
             if moved and sits_under is not None:
                 self._job_changed(sits_under)
+        elif not by_summarizer and kind in _HOLDERS and _handed_back(kind, before, content):
+            # The person emptied a headline or story: Plytos writes it again.
+            self._job_changed(card_id)
         return SaveResult(version=version, variants_marked_behind=behind)
+
+    def last_moved_out(self, card_ids: list[UUID]) -> dict[UUID, datetime]:
+        """When each of these cards last lost something that sat under it."""
+        if not card_ids:
+            return {}
+        rows = self._conn.execute(
+            "select record_id, max(occurred_at) from plytos.event"
+            " where action = 'card.moved_out' and record_type = 'card' and record_id = any(%s)"
+            " group by record_id",
+            (card_ids,),
+        ).fetchall()
+        return {r[0]: r[1] for r in rows}
 
     def employment_of(self, card_id: UUID) -> UUID | None:
         """The employment a card sits under, or is, if any."""

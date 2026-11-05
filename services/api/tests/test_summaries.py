@@ -299,6 +299,87 @@ def test_a_job_whose_headline_was_its_name_keeps_the_name(make_user, cards: Card
         assert written.framing.headline == "Brought 3 suppliers onto one contract"
 
 
+def _with_framing(repo: CardRepository, card_id: UUID, **framing: str) -> None:
+    head = repo.card_detail(card_id).main
+    changed = head.content.model_copy(
+        update={"framing": head.content.framing.model_copy(update=framing)}
+    )
+    repo.save_main_version(card_id, head.head.id, changed, ME)
+
+
+def _moved(repo: CardRepository, card_id: UUID, to: UUID) -> None:
+    head = repo.card_detail(card_id).main
+    repo.save_main_version(
+        card_id, head.head.id, head.content.model_copy(update={"parent": to}), ME
+    )
+
+
+def test_emptying_a_headline_or_story_hands_it_back_to_plytos(make_user, cards: Cards) -> None:
+    user = make_user()
+    with cards(user) as (repo, _):
+        job = Job(repo)
+    with cards(user) as (repo, _):
+        summarize(repo, FakeThinker(SummaryAnswer=answer(HEADLINE, **STORIES)), job.job, Usage())
+    queued: list[UUID] = []
+    with cards(user, queued.append) as (repo, _):
+        # Changing a title's dates leaves its story as it is: nothing to write.
+        head = repo.card_detail(job.lead).main
+        dated = head.content.model_copy(update={"facts": {**head.content.facts, "end": "2025-01"}})
+        repo.save_main_version(job.lead, head.head.id, dated, ME)
+        assert queued == []
+        _with_framing(repo, job.lead, body="")
+        assert queued == [job.job]
+        _with_framing(repo, job.job, headline="Fernwood Freight")
+        assert queued == [job.job, job.job]
+    with cards(user) as (repo, _):
+        thinker = FakeThinker(SummaryAnswer=answer(HEADLINE, **STORIES))
+        written = summarize(repo, thinker, job.job, Usage())
+        assert (written.headline, written.stories) == (True, 1)
+        assert main(repo, job.lead).framing.body == STORIES["Planning Lead"]
+
+
+def test_accomplishments_under_a_project_are_summed_up(make_user, cards: Cards) -> None:
+    user = make_user()
+    with cards(user) as (repo, _):
+        job = Job(repo)
+        project = repo.create_card(
+            "project", under(job.lead, content("Depot pooling pilot")), ME
+        ).id
+        repo.create_card(
+            "accomplishment", under(project, content("Signed 3 carriers onto pooled routes")), ME
+        )
+    with cards(user) as (repo, _):
+        thinker = FakeThinker(SummaryAnswer=answer(HEADLINE, **STORIES))
+        summarize(repo, thinker, job.job, Usage())
+        lines = [a["text"] for a in thinker.asked[0][1]["titles"][0]["accomplishments"]]
+        assert lines[1:] == ["Depot pooling pilot", "Signed 3 carriers onto pooled routes"]
+
+
+def test_work_moving_away_makes_what_it_left_out_of_date(make_user, cards: Cards) -> None:
+    user = make_user()
+    with cards(user) as (repo, _):
+        job = Job(repo)
+        extra = repo.create_card(
+            "accomplishment", under(job.lead, content("Ran the depot planning huddle")), ME
+        ).id
+    with cards(user) as (repo, _):
+        summarize(repo, FakeThinker(SummaryAnswer=answer(HEADLINE, **STORIES)), job.job, Usage())
+    with cards(user) as (repo, _):
+        _moved(repo, extra, job.analyst)
+    with cards(user) as (repo, _):
+        # Both titles: the analyst gained a line, the lead lost one.
+        thinker = FakeThinker(SummaryAnswer=answer(HEADLINE, **STORIES))
+        summarize(repo, thinker, job.job, Usage())
+        assert [t["write_story"] for t in thinker.asked[0][1]["titles"]] == [True, True]
+    with cards(user) as (repo, _):
+        # The lead's last line moves too: its story was Plytos's, so it goes.
+        _moved(repo, job.win, job.analyst)
+    with cards(user) as (repo, _):
+        summarize(repo, FakeThinker(SummaryAnswer=answer(HEADLINE, **STORIES)), job.job, Usage())
+        lead = main(repo, job.lead)
+        assert (lead.framing.body, lead.framing.plytos_wrote) == ("", [])
+
+
 def test_no_answer_leaves_everything_as_it_was(make_user, cards: Cards) -> None:
     with cards(make_user()) as (repo, _):
         job = Job(repo)

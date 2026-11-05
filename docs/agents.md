@@ -135,10 +135,14 @@ title's story, a few sentences on what was done in it, from the
 accomplishments under them. It writes a part only where Plytos may: empty,
 or written by Plytos before (`framing.plytos_wrote`, docs/data-model.md). A
 part Plytos wrote is written again when the accomplishments under it changed
-since. Every number it writes must appear in the cards it sums up, or that
+since, including work moving out from under it (a `card.moved_out` event on
+what it left), and goes back to empty when nothing is left under it.
+Accomplishments under a project count for the title the project sits under.
+Every number it writes must appear in the cards it sums up, or that
 part stays as it was. It runs from the queue 20 seconds after an
 accomplishment or project is made or changed (one run per job for a burst of
-edits), or a title or job is made, and once for a job with accomplishments
+edits), when a title or job is made, when the person empties a headline or
+story, and once for a job with accomplishments
 and nothing summed up yet, the first time the library is read. The library
 marks jobs it is about to write for (`writing`), and the cards check every few
 seconds until it's done. The person can also ask from the card (the Rewrite

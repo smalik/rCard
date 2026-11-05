@@ -207,16 +207,18 @@ export function writtenBy(card: LibraryCard, part: WrittenPart): "plytos" | "per
 }
 
 /** A card's content with one part of its wording changed by the person. An
- * empty headline hands the job's headline back: it stands in with the name. */
+ * empty headline hands the job's headline back: it stands in with the name.
+ * On an older job whose name lived only in its headline, the name is kept as
+ * a fact first, so new words don't replace it. */
 export function withWords(card: LibraryCard, part: WrittenPart, text: string): LibraryContent | null {
   const content = card.content;
   if (!content) return null;
   const words = text.trim();
-  const framing =
-    part === "headline"
-      ? { ...content.framing, headline: words || fact(card, "employer") || content.framing.headline }
-      : { ...content.framing, body: words };
-  return { ...content, framing };
+  if (part === "body") return { ...content, framing: { ...content.framing, body: words } };
+  const name = fact(card, "employer") || content.framing.headline;
+  const facts =
+    card.kind === "employment" && !fact(card, "employer") ? { ...content.facts, employer: name } : content.facts;
+  return { ...content, facts, framing: { ...content.framing, headline: words || name } };
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

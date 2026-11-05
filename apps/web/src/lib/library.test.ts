@@ -337,4 +337,11 @@ describe("who wrote a job's headline and a title's story", () => {
     const title = card("position", "Planning Lead", { title: "Planning Lead" });
     expect(withWords(title, "body", " Mine. ")?.framing.body).toBe("Mine.");
   });
+
+  it("keeps an older job's name as a fact before its headline changes", () => {
+    const older = card("employment", "Fernwood Freight");
+    const mine = withWords(older, "headline", "Ran planning for the depots");
+    expect(mine?.facts.employer).toBe("Fernwood Freight");
+    expect(mine?.framing.headline).toBe("Ran planning for the depots");
+  });
 });
