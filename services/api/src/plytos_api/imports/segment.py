@@ -980,9 +980,12 @@ def _parse_header(header: list[Block]) -> tuple[Role, str | None]:
     role = Role(ref="", header_blocks=[b.index for b in header])
     role.header_text = "\n".join(b.text for b in header)
     pieces: list[tuple[int, str]] = []  # (line number, text) in reading order
+    dated: set[int] = set()  # the lines with a date range on them
     for line_no, block in enumerate(header):
         text = block.text
         found = find_range(text)
+        if found is not None:
+            dated.add(line_no)
         if found is not None and (role.dates is None or found.separator is not None):
             role.dates = found
             text = strip_range(text, found)
@@ -1010,7 +1013,9 @@ def _parse_header(header: list[Block]) -> tuple[Role, str | None]:
         return role, label
     if len(pieces) == 1:
         piece = pieces[0][1]
-        run_together = _run_together(piece)
+        # Only a line of its own, under its dates: a dated title line ("Benefits
+        # Specialist Health Services  2009 - 2012") usually has its employer below it.
+        run_together = None if pieces[0][0] in dated else _run_together(piece)
         if run_together is not None:
             role.title, role.organization, role.title_first = run_together
             # Nothing between them on the page: a guess the person should see.

@@ -281,3 +281,18 @@ def test_an_employer_line_with_a_place_no_rule_knows_is_still_the_employer() -> 
         assert employment.content.facts.get("location") == place
         titles = [c.content.facts.get("title") for c in result.cards if c.kind == "position"]
         assert titles == ["Sales Associate"]
+
+
+def test_a_dated_title_line_is_not_divided_when_its_employer_follows() -> None:
+    result = read(
+        "Pat Lee\nExperience\nSenior Engineer Health Services Oct 2015 to Current\n"
+        "Contoso Systems\n• Cut build times in half.\n"
+    )
+    jobs = [
+        (c.content.facts.get("title"), by.content.facts.get("employer"))
+        for by in result.cards
+        if by.kind == "employment"
+        for c in result.cards
+        if c.kind in ("position", "engagement") and c.parent_ref == by.ref
+    ]
+    assert jobs == [("Senior Engineer Health Services", "Contoso Systems")]
