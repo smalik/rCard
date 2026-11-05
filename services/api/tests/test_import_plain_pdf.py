@@ -246,3 +246,25 @@ def test_a_short_sentence_in_a_paragraph_is_kept() -> None:
         "Processed returns and exchanges.",
         "Trained four new cashiers on the register.",
     ]
+
+
+def test_a_title_and_employer_run_together_are_told_apart() -> None:
+    result = read(
+        "Pat Lee\nExperience\n2015 to 2017\nSenior Software Engineer Contoso Systems\n"
+        "• Cut build times in half.\n2012 to 2015\nFabrikam Bank Senior Analyst\n"
+        "• Built the loan dashboard.\n2010 to 2012\nDirector of Health Services\n"
+        "• Opened two clinics.\n"
+    )
+    jobs = [
+        (c.content.facts.get("title"), by.content.facts.get("employer"))
+        for by in result.cards
+        if by.kind == "employment"
+        for c in result.cards
+        if c.kind == "position" and c.parent_ref == by.ref
+    ]
+    assert jobs[:2] == [
+        ("Senior Software Engineer", "Contoso Systems"),
+        ("Senior Analyst", "Fabrikam Bank"),
+    ]
+    # Joined by "of", the words are one name, whichever it is.
+    assert "Director of Health Services" in jobs[2]

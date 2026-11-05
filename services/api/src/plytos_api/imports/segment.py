@@ -909,6 +909,50 @@ def _tidy(piece: str) -> str:
     return piece if any(c.isalpha() for c in piece) else ""
 
 
+# Words that end an organization's name, so it can stand before a title on a line:
+# "Fabrikam Bank Senior Analyst", but not "Health Information Technology Specialist".
+_NAME_ENDS = _wordset(
+    """
+    inc inc. llc llc. llp lp ltd ltd. corp corp. corporation company co co. group bank
+    university college school hospital partners plc gmbh ag foundation institute
+    association agency labs laboratories industries holdings enterprises studios
+    ministry council authority commission church clinic center centre trust fund
+    ventures department dept army navy marines county
+    """
+)
+_JOINS = _wordset("of for and & in at to the on with")
+
+
+def _run_together(piece: str) -> tuple[str, str, bool] | None:
+    """A title and its employer run together on one line with nothing between them,
+    as when a tab or a column is lost: "Senior Software Engineer Contoso Systems" is
+    the title, then the employer. The title, the employer, and whether the title came
+    first; or nothing when the words don't divide cleanly."""
+    words = piece.split()
+    bare = [w.strip(",.()&").lower() for w in words]
+    titles = [i for i, w in enumerate(bare) if w in TITLE_WORDS]
+    if not titles:
+        return None
+    is_org = [w in ORG_WORDS or w.rstrip(".") in ORG_WORDS for w in bare]
+    ends = [i for i, w in enumerate(bare) if w in _NAME_ENDS or w.rstrip(".") in _NAME_ENDS]
+    last = titles[-1]
+    # The title first, up to its last title word; then words that name an employer.
+    if last < len(words) - 1 and any(is_org[last + 1 :]) and not [i for i in ends if i <= last]:
+        cut, title_first = last + 1, True
+        title, org = words[:cut], words[cut:]
+    # The employer first, ending on a word that ends a name; then the title.
+    elif last == len(words) - 1 and [i for i in ends if i < titles[0]]:
+        cut, title_first = max(i for i in ends if i < titles[0]) + 1, False
+        org, title = words[:cut], words[cut:]
+        if len(org) < 2:
+            return None
+    else:
+        return None
+    if bare[cut] in _JOINS or not words[cut][:1].isupper() or not org[0][:1].isupper():
+        return None
+    return " ".join(title), " ".join(org), title_first
+
+
 def _parse_header(header: list[Block]) -> tuple[Role, str | None]:
     """The role a header describes, and a workstream label under it if there is one."""
     role = Role(ref="", header_blocks=[b.index for b in header])
@@ -944,6 +988,12 @@ def _parse_header(header: list[Block]) -> tuple[Role, str | None]:
         return role, label
     if len(pieces) == 1:
         piece = pieces[0][1]
+        run_together = _run_together(piece)
+        if run_together is not None:
+            role.title, role.organization, role.title_first = run_together
+            # Nothing between them on the page: a guess the person should see.
+            role.confidence = "low"
+            return role, label
         if _score(piece) > 0:
             role.title = piece
         elif _score(piece) < 0:
