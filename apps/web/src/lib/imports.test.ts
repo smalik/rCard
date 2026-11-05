@@ -26,7 +26,6 @@ import {
   type Review,
   readerName,
   reviewQueue,
-  settledCount,
   settleState,
   stageSpan,
   stageStates,
@@ -160,7 +159,7 @@ function review(progress: Partial<Review["progress"]> = {}): Review {
     cards: CARDS,
     findings: [FIGURES, TENSE, GAP, LAYOUT],
     toSettle: [0, 2],
-    progress: { settled: {}, cards: {}, edits: {}, moves: {}, ...progress },
+    progress: { settled: {}, cards: {}, edits: {}, moves: {}, fixes: {}, corrections: {}, ...progress },
     contactKept: true,
     readBy: null,
     matches: {},
@@ -227,7 +226,14 @@ describe("toReview", () => {
   it("copes with an empty answer", () => {
     const shaped = toReview(null);
     expect(shaped.cards).toEqual([]);
-    expect(shaped.progress).toEqual({ settled: {}, cards: {}, edits: {}, moves: {} });
+    expect(shaped.progress).toEqual({
+      settled: {},
+      cards: {},
+      edits: {},
+      moves: {},
+      fixes: {},
+      corrections: {},
+    });
     expect(shaped.readBy).toBeNull();
   });
 
@@ -256,7 +262,6 @@ describe("questions to settle", () => {
     expect(settleState(0, r.progress)).toBe("settled");
     expect(settleState(2, r.progress)).toBe("later");
     expect(settleState(1, r.progress)).toBe("open");
-    expect(settledCount(r)).toBe(1);
   });
 
   it("ties findings to the cards they're about", () => {
