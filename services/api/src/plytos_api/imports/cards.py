@@ -22,6 +22,7 @@ from plytos_api.imports.segment import (
     _SCHOOL,
     _STATE_NAMES,
     _US_STATES,
+    _wordset,
     is_generic_label,
     sentences,
 )
@@ -402,6 +403,10 @@ def _sentences_over(run: list[tuple[int, str]], shortest: int = 0) -> list[tuple
     return out
 
 
+def _next(pieces: list[str], i: int) -> str:
+    return _DATE_EDGE.sub("", pieces[i + 1]).strip() if i + 1 < len(pieces) else ""
+
+
 def _dated(facts: dict[str, FactValue], entry: Entry) -> dict[str, FactValue]:
     if entry.dates is not None and entry.dates.end is not None:
         facts["date"] = entry.dates.end.iso()
@@ -420,6 +425,110 @@ _DATE_EDGE = re.compile(
 )
 
 
+# Words of what people study, and of how they write it, that aren't a school's own
+# name: where a line run together ("Business Administration Lakeshore College") is cut.
+_STUDIED = _wordset(
+    """
+    accounting administration agriculture anthropology applied architecture art arts
+    assisting aviation behavioral biochemistry biological biology business chemistry civil
+    communication communications computer concentration construction counseling courses
+    coursework criminal criminology culinary degree dental design development economics
+    education electrical electronics elementary emphasis engineering english environmental
+    exercise fashion finance financial fitness general gpa graduate graphic health
+    healthcare history honors hospitality human hygiene industrial information interior
+    international journalism justice kinesiology law leadership legal liberal logistics major
+    management marketing mathematics mechanical media medical minor music network networking
+    nursing nutrition operations organizational paralegal pharmacy philosophy physics
+    political program psychology public radiology relations resources respiratory sales
+    science sciences security services social sociology software specialization studies
+    systems technology theology therapy undergraduate work
+    """
+)
+# Small words a school's name keeps inside it: "College of Southern Nevada".
+_NAME_JOINS = frozenset({"of", "the", "at", "and", "&", "for", "de", "-"})
+_MID_DATE = re.compile(rf"\s(?:{_MONTH}\s+)?(?:19|20)\d{{2}}\s", re.I)
+
+
+def _school_line(piece: str, then: str) -> tuple[str, str] | None:
+    """A school's line run together with what was studied there, as (studied, school):
+    "Bachelor of Science : Nursing 2015 Lakeshore College", "High School Diploma
+    Washington High School", "Accounting Lakeshore College City" (before ", State").
+    None when the piece is only a school, or has none."""
+    cut = _cut_school_line(piece, then)
+    if cut is None:
+        return None
+    studied, school = _DATE_EDGE.sub("", cut[0]).strip(" :,-"), cut[1]
+    if _STATE.fullmatch(then) or then == "State":
+        # A resume builder's "City , State", never filled in: "City" is neither.
+        studied, school = (re.sub(r"\s+City$", "", part) for part in (studied, school))
+    return studied, school
+
+
+def _cut_school_line(piece: str, then: str) -> tuple[str, str] | None:
+    anchors = list(_SCHOOL.finditer(piece))
+    if not anchors:
+        return None
+    mid = _MID_DATE.search(piece)
+    if mid is not None:
+        left, right = piece[: mid.start()].strip(" :,"), piece[mid.end() :].strip(" :,")
+        if _SCHOOL.search(right) and not _SCHOOL.search(left):
+            return (left, right) if left else None
+        if _SCHOOL.search(left) and not _SCHOOL.search(right):
+            return (right, left) if right else None
+    anchor = anchors[-1]
+    words = [(m.start(), m.end(), m.group()) for m in re.finditer(r"[^\s:]+|:", piece)]
+    at = next(i for i, w in enumerate(words) if w[0] <= anchor.start() < w[1])
+    # Degree words before the school ("High School Diploma"), but not those of the
+    # school's own name ("Washington High School").
+    degree = {
+        i
+        for m in _DEGREE.finditer(piece)
+        if m.end() <= words[at][0]
+        for i, w in enumerate(words)
+        if m.start() <= w[0] < m.end()
+    }
+
+    def stops(i: int, *, studied_ok: bool) -> bool:
+        word = words[i][2]
+        if i in degree or word == ":" or re.search(r"\d", word):
+            return True
+        if word.lower() in _NAME_JOINS:
+            return False
+        if not word[:1].isupper():
+            return True
+        return word.lower().strip(".,") in _STUDIED and not studied_ok
+
+    start = at
+    while start > 0 and not stops(start - 1, studied_ok=False):
+        start -= 1
+    if start == at and at == len(words) - 1:
+        # A bare "School" or "University" ("Columbia Business School"): its name runs
+        # back over the words of a subject, to the first word that isn't one.
+        named = False
+        while start > 0 and not stops(start - 1, studied_ok=not named):
+            start -= 1
+            named = named or words[start][2].lower() not in _STUDIED
+    while start < at and words[start][2].lower() in _NAME_JOINS:
+        start += 1
+    end = len(words)
+    after = words[at + 1 :]
+    if after and after[0][2].lower() not in _NAME_JOINS:
+        if all(w[2].lower() in _STUDIED for w in after):
+            # "Lakeshore College Nursing"
+            studied_after = piece[after[0][0] :].strip()
+            school = piece[words[start][0] : words[at][1]].strip()
+            before = piece[: words[start][0]].strip(" :,")
+            return (" ".join(p for p in (before, studied_after) if p), school)
+        if _STATE.fullmatch(then) or then == "State":
+            # "Lakeshore College Springfield" before ", IL": the town isn't the name.
+            end = at + 1
+    studied = piece[: words[start][0]].strip(" :,-")
+    school = piece[words[start][0] : words[end - 1][1]].strip()
+    if not studied and end == len(words):
+        return None
+    return studied, school
+
+
 def _education_facts(entry: Entry) -> dict[str, FactValue]:
     facts: dict[str, FactValue] = {}
     # Claude names the school and the degree; the rules find what it didn't.
@@ -430,9 +539,18 @@ def _education_facts(entry: Entry) -> dict[str, FactValue]:
     pieces = [
         p.strip() for p in re.split(r",|\t|\s+[|–—-]\s+", " , ".join([entry.text, *entry.details]))
     ]
-    for piece in pieces:
+    for i, piece in enumerate(pieces):
         piece = _DATE_EDGE.sub("", piece).strip()
         if not piece:
+            continue
+        run_together = None if entry.school else _school_line(piece, _next(pieces, i))
+        if run_together is not None and "institution" not in facts:
+            studied, facts["institution"] = run_together
+            if studied and not entry.degree:
+                # "Bachelor of Science, Business Administration 2015 Lakeshore College":
+                # the subject goes with the degree written before it.
+                had = facts.get("degree")
+                facts["degree"] = f"{had}, {studied}" if isinstance(had, str) else studied
             continue
         # "High School Diploma" is a degree; "Lincoln High School" is a school.
         degree = _DEGREE.search(piece) and (not _SCHOOL.search(piece) or _DEGREE_WORD.search(piece))

@@ -5,6 +5,7 @@ typed, and characters mangled on the way. Everyone here is made up."""
 from datetime import date
 from typing import Any
 
+import pytest
 from fpdf import FPDF
 
 from plytos_api.imports.extract import clean, extract
@@ -172,6 +173,75 @@ def test_a_place_or_a_grade_is_not_taken_for_what_was_studied() -> None:
         result = read(f"Pat Lee\nEducation\n{line}\n")
         [card] = [c for c in result.cards if c.kind == "education"]
         assert "degree" not in card.content.facts, line
+
+
+# A builder's school line printed as one: degree : subject, year, school, then the
+# place, with the commas the builder left out.
+RUN_TOGETHER = [
+    (
+        "Bachelor of Science : Business Administration Lakeshore College - City , State",
+        "Bachelor of Science : Business Administration",
+        "Lakeshore College",
+    ),
+    (
+        "High School Diploma : 2008 Lincoln High School - City , State",
+        "High School Diploma",
+        "Lincoln High School",
+    ),
+    (
+        "High School Diploma Washington High School - City , State",
+        "High School Diploma",
+        "Washington High School",
+    ),
+    (
+        "MBA : Finance 2012 University of Phoenix City , State",
+        "MBA : Finance",
+        "University of Phoenix",
+    ),
+    (
+        "Business Administration Lakeshore College - City , State",
+        "Business Administration",
+        "Lakeshore College",
+    ),
+    (
+        "Master of Science : Computer Science Massachusetts Institute of Technology",
+        "Master of Science : Computer Science",
+        "Massachusetts Institute of Technology",
+    ),
+    (
+        "Bachelor of Science : Marketing Columbia Business School - New York , NY",
+        "Bachelor of Science : Marketing",
+        "Columbia Business School",
+    ),
+    (
+        "Bachelor of Science in Nursing College of Southern Nevada - Las Vegas , NV",
+        "Bachelor of Science in Nursing",
+        "College of Southern Nevada",
+    ),
+    (
+        "Lakeshore College 2015 Bachelor of Arts : English City , State",
+        "Bachelor of Arts : English",
+        "Lakeshore College",
+    ),
+    ("Lakeshore College Springfield , IL", None, "Lakeshore College"),
+]
+
+
+@pytest.mark.parametrize(("line", "degree", "school"), RUN_TOGETHER)
+def test_a_school_line_run_together_is_cut_where_the_school_begins(
+    line: str, degree: str | None, school: str
+) -> None:
+    result = read(f"Pat Lee\nEducation\n{line}\n")
+    [card] = [c for c in result.cards if c.kind == "education"]
+    assert card.content.facts["institution"] == school
+    assert card.content.facts.get("degree") == degree
+
+
+def test_a_school_named_on_its_own_is_left_whole() -> None:
+    for line in ("University of Phoenix School of Business", "State University"):
+        result = read(f"Pat Lee\nEducation\n{line}\n")
+        [card] = [c for c in result.cards if c.kind == "education"]
+        assert card.content.facts == {"institution": line}
 
 
 def test_accomplishments_with_a_colon_inside_a_job_stay_in_the_job() -> None:
