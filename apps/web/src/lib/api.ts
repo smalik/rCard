@@ -220,6 +220,21 @@ export async function getOriginal(
   };
 }
 
+// A page of the person's PDF as a picture, to check what was read from it.
+export async function getPage(
+  session: Session,
+  id: string,
+  page: number,
+): Promise<{ data: ArrayBuffer; type: string }> {
+  const response = await apiRequest(`/v1/imports/${encodeURIComponent(id)}/pages/${page}`, session, {
+    headers: { Accept: "image/jpeg" },
+  });
+  return {
+    data: await response.arrayBuffer(),
+    type: response.headers.get("content-type") ?? "image/jpeg",
+  };
+}
+
 export async function deleteImport(session: Session, id: string): Promise<void> {
   await apiRequest(`/v1/imports/${encodeURIComponent(id)}`, session, {
     method: "DELETE",

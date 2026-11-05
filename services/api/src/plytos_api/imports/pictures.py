@@ -3,18 +3,28 @@
 A screenshot of bullets, a heading drawn as an image or a scanned page holds
 words the text of the file doesn't. Claude reads them, and each becomes a line
 right after the line the picture follows, marked as read from a picture. The
-reading and the audit then treat them like any other line, and every card made
-from one asks the person to check its wording, since reading a picture can get
-a word wrong.
+reading and the audit then treat them like any other line. Reading a picture can
+get a word wrong, so the review shows the page beside the cards made from it and
+asks once whether they match (page_picture), not on every card.
 """
 
 from __future__ import annotations
 
+import io
+import logging
+
+import pdfplumber
+
 from plytos_api.imports.ai import AiPictureLine, AiPictures
 from plytos_api.imports.extract import _is_caps, _words, clean, split_bullet
-from plytos_api.imports.model import Block, ExtractedDocument, ProposedCard
+from plytos_api.imports.model import Block, ExtractedDocument
 
-PICTURE_CHECK = "Plytos read this from a picture in your resume. Check the wording."
+log = logging.getLogger(__name__)
+
+# A page shown to check against: wide enough to read on a laptop, and no bigger,
+# however tall the page.
+PAGE_WIDTH = 1000
+PAGE_PIXELS = 6_000_000
 
 
 def add_picture_lines(doc: ExtractedDocument, found: AiPictures) -> ExtractedDocument:
@@ -79,11 +89,20 @@ def add_picture_lines(doc: ExtractedDocument, found: AiPictures) -> ExtractedDoc
     return ExtractedDocument(facts=facts, blocks=blocks)
 
 
-def mark_picture_cards(blocks: list[Block], cards: list[ProposedCard]) -> None:
-    """Asks the person to check the wording of every card made from a picture's words."""
-    from_pictures = {b.index for b in blocks if b.where == "image"}
-    if not from_pictures:
-        return
-    for card in cards:
-        if from_pictures.intersection(card.source_blocks) and PICTURE_CHECK not in card.needs_check:
-            card.needs_check.append(PICTURE_CHECK)
+def page_picture(data: bytes, page: int) -> bytes | None:
+    """A page of a PDF as a JPEG, for the person to check what was read from it
+    against: None when the file has no such page or it can't be drawn."""
+    try:
+        with pdfplumber.open(io.BytesIO(data)) as pdf:
+            if not 1 <= page <= len(pdf.pages):
+                return None
+            drawn = pdf.pages[page - 1]
+            width, height = float(drawn.width), float(drawn.height)
+            scale = min(PAGE_WIDTH / width, (PAGE_PIXELS / (width * height)) ** 0.5)
+            image = drawn.to_image(resolution=72 * scale).original.convert("RGB")
+    except Exception as exc:  # a file that read once but won't draw
+        log.warning("Couldn't draw a page of a resume: %s", type(exc).__name__)
+        return None
+    out = io.BytesIO()
+    image.save(out, "JPEG", quality=82)
+    return out.getvalue()

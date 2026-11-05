@@ -17,6 +17,8 @@ import {
   lineNotes,
   lineText,
   NO_CHOICES,
+  pictureCheck,
+  picturePages,
   quoteLabel,
   reviewGroups,
   reviewSteps,
@@ -375,5 +377,34 @@ describe("quoting a line", () => {
   it("falls back to the line when nothing was read from it", () => {
     expect(quoteLabel(review({ cards: placed }), 40)).toBe("Line 41");
     expect(quoteLabel(review({ cards: placed }), null)).toBe("Your resume");
+  });
+});
+
+describe("scans", () => {
+  const line = (block: number, page: number | null, picture: boolean) => ({
+    block,
+    page,
+    text: "Cut late shipments by 22%.",
+    picture,
+  });
+  const read = (...source: ReturnType<typeof line>[]): Proposal => ({
+    ...card("card-9", "accomplishment", "Cut late shipments by 22%."),
+    source,
+  });
+
+  it("are checked a page at a time, against the pages the cards were read from", () => {
+    expect(picturePages([read(line(1, 1, false))])).toBeNull();
+    expect(picturePages([read(line(4, 2, true)), read(line(1, 1, true), line(2, 2, true))])).toEqual([
+      1, 2,
+    ]);
+    expect(pictureCheck([2])).toBe(
+      "I read this from a picture of page 2, so check that the wording matches.",
+    );
+    expect(pictureCheck([1, 2])).toContain("pages 1 and 2");
+  });
+
+  it("say so when a picture in a Word file has no page to show", () => {
+    expect(picturePages([read(line(3, null, true))])).toEqual([]);
+    expect(pictureCheck([])).toContain("a picture in your file");
   });
 });

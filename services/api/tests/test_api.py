@@ -261,6 +261,8 @@ def test_resume_import_keeps_the_original_and_saves_only_approved_cards(
     assert original.content == data
     assert original.headers["content-type"].startswith("application/vnd.openxml")
     assert unquote(original.headers["x-plytos-filename"]) == "Casey Morgan Resume.docx"
+    # Only a PDF has pages to show.
+    assert client.get(f"/v1/imports/{import_id}/pages/1", headers=me).status_code == 404
 
     [summary] = [s for s in client.get("/v1/imports", headers=me).json() if s["id"] == import_id]
     assert summary["cards"] == len(view["result"]["cards"])
@@ -353,12 +355,34 @@ def test_resume_import_keeps_the_original_and_saves_only_approved_cards(
     assert client.get(f"/v1/imports/{import_id}/status", headers=someone).status_code == 404
     assert client.post(f"/v1/imports/{import_id}/read-again", headers=someone).status_code == 404
     assert client.get(f"/v1/imports/{import_id}/original", headers=someone).status_code == 404
+    assert client.get(f"/v1/imports/{import_id}/pages/1", headers=someone).status_code == 404
     assert client.delete(f"/v1/imports/{import_id}", headers=someone).status_code == 404
     assert client.get("/v1/imports", headers=someone).json() == []
 
     assert client.delete(f"/v1/imports/{import_id}", headers=me).status_code == 204
     assert client.get(f"/v1/imports/{import_id}", headers=me).status_code == 404
     assert len(client.get("/v1/cards", headers=me).json()) == len(before) + 4
+
+
+def test_a_page_of_a_pdf_resume_is_shown_to_its_owner_only(
+    client: TestClient, reads: ImportWorker
+) -> None:
+    from .resume_samples import scanned_pdf
+
+    me = as_user("scanner")
+    kept = client.post(
+        "/v1/imports", content=scanned_pdf(), headers={**me, "X-Plytos-Filename": "scan.pdf"}
+    ).json()
+    reads.run_until_idle()
+    page = client.get(f"/v1/imports/{kept['id']}/pages/1", headers=me)
+    assert page.status_code == 200
+    assert page.headers["content-type"] == "image/jpeg"
+    assert page.headers["cache-control"] == "no-store"
+    assert page.content[:3] == b"\xff\xd8\xff"
+    assert client.get(f"/v1/imports/{kept['id']}/pages/2", headers=me).status_code == 404
+    assert client.get(f"/v1/imports/{kept['id']}/pages/0", headers=me).status_code == 422
+    someone = as_user("someone-else")
+    assert client.get(f"/v1/imports/{kept['id']}/pages/1", headers=someone).status_code == 404
 
 
 def test_resume_import_refuses_bad_files(client: TestClient) -> None:

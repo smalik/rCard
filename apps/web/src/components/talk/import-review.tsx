@@ -55,6 +55,8 @@ import {
   laterRequest,
   lineNotes,
   lineText,
+  pictureCheck,
+  picturePages,
   type Reply as ReplyChoice,
   type ReviewGroup,
   quoteLabel,
@@ -475,6 +477,9 @@ function GroupStep({
   }
 
   const intro = groupIntro(group, review, first);
+  // Read from a scan or a screenshot: one look at the page, not a note on every line.
+  const pictured = picturePages(left);
+  const pages = review.file.format === "pdf" ? (pictured ?? []) : [];
   const already =
     mine.mine === 0
       ? ""
@@ -486,57 +491,61 @@ function GroupStep({
     <PlytosSays
       label={group.root ? contentFor(group.root, review.progress).framing.headline : "The rest"}
       attached={
-        <article
-          aria-label="Draft cards"
-          className="w-full max-w-full overflow-hidden rounded-card border bg-card shadow-card sm:max-w-[92%]"
-        >
-          {group.kind === "job" ? (
-            <JobDraft
-              group={group}
-              review={review}
-              choices={choices}
-              onToggle={toggle}
-              onWord={(ref, words) => setWording((w) => ({ ...w, [ref]: words }))}
-              onChoose={(ref, c) => setChoice((now) => ({ ...now, [ref]: c }))}
-              onDates={(ref, d) => setDates((now) => ({ ...now, [ref]: d }))}
-            />
-          ) : (
-            <RestDraft
-              cards={left}
-              review={review}
-              choices={choices}
-              onToggle={toggle}
-              onWord={(ref, words) => setWording((w) => ({ ...w, [ref]: words }))}
-              onChoose={(ref, c) => setChoice((now) => ({ ...now, [ref]: c }))}
-              onDates={(ref, d) => setDates((now) => ({ ...now, [ref]: d }))}
-            />
-          )}
-          <footer className="flex flex-wrap items-center gap-2 border-t bg-muted/40 px-4 py-3">
-            <Button disabled={busy} onClick={keep} variant={everythingOut ? "outline" : "default"}>
-              {everythingOut
-                ? "Leave it out"
-                : group.kind === "job"
-                  ? "Keep this job"
-                  : `Keep ${left.filter((c) => !out.has(c.ref)).length}`}
-            </Button>
-            <Button
-              variant="ghost"
-              disabled={busy}
-              onClick={() => onDecide("Not now", laterRequest(group, review))}
-            >
-              Not now
-            </Button>
-            {!everythingOut && out.size > 0 && (
-              <span className="text-[13px] text-muted-foreground">
-                {plural(all ? left.length : out.size, "line")} left out
-              </span>
+        <>
+          {pages.length > 0 && <PicturePages id={review.id} pages={pages} />}
+          <article
+            aria-label="Draft cards"
+            className="w-full max-w-full overflow-hidden rounded-card border bg-card shadow-card sm:max-w-[92%]"
+          >
+            {group.kind === "job" ? (
+              <JobDraft
+                group={group}
+                review={review}
+                choices={choices}
+                onToggle={toggle}
+                onWord={(ref, words) => setWording((w) => ({ ...w, [ref]: words }))}
+                onChoose={(ref, c) => setChoice((now) => ({ ...now, [ref]: c }))}
+                onDates={(ref, d) => setDates((now) => ({ ...now, [ref]: d }))}
+              />
+            ) : (
+              <RestDraft
+                cards={left}
+                review={review}
+                choices={choices}
+                onToggle={toggle}
+                onWord={(ref, words) => setWording((w) => ({ ...w, [ref]: words }))}
+                onChoose={(ref, c) => setChoice((now) => ({ ...now, [ref]: c }))}
+                onDates={(ref, d) => setDates((now) => ({ ...now, [ref]: d }))}
+              />
             )}
-          </footer>
-        </article>
+            <footer className="flex flex-wrap items-center gap-2 border-t bg-muted/40 px-4 py-3">
+              <Button disabled={busy} onClick={keep} variant={everythingOut ? "outline" : "default"}>
+                {everythingOut
+                  ? "Leave it out"
+                  : group.kind === "job"
+                    ? "Keep this job"
+                    : `Keep ${left.filter((c) => !out.has(c.ref)).length}`}
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={busy}
+                onClick={() => onDecide("Not now", laterRequest(group, review))}
+              >
+                Not now
+              </Button>
+              {!everythingOut && out.size > 0 && (
+                <span className="text-[13px] text-muted-foreground">
+                  {plural(all ? left.length : out.size, "line")} left out
+                </span>
+              )}
+            </footer>
+          </article>
+        </>
       }
     >
       {intro}
       {already}
+      {pictured && ` ${pictureCheck(pictured)}`}
       {first && (
         <span className="text-muted-foreground">
           {" "}
@@ -545,6 +554,37 @@ function GroupStep({
         </span>
       )}
     </PlytosSays>
+  );
+}
+
+// The pages a group was read from, small enough to sit beside its cards; each
+// opens full size. The person's own file, drawn for them and never cached, so a
+// plain img: the image optimizer would keep a copy.
+function PicturePages({ id, pages }: { id: string; pages: number[] }) {
+  return (
+    <div className="flex max-w-full gap-2 overflow-x-auto pb-1" aria-label="Pages to check against">
+      {pages.map((page) => {
+        const src = `/import/${encodeURIComponent(id)}/pages/${page}`;
+        return (
+          <a
+            key={page}
+            href={src}
+            target="_blank"
+            rel="noreferrer"
+            className="group flex shrink-0 flex-col items-center gap-1 focus-visible:outline-none"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={src}
+              alt={`Page ${page} of your resume`}
+              loading="lazy"
+              className="h-44 w-auto rounded-card border bg-white shadow-card group-focus-visible:ring-2 group-focus-visible:ring-ring"
+            />
+            <span className="text-[12px] text-muted-foreground">Page {page}, tap for full size</span>
+          </a>
+        );
+      })}
+    </div>
   );
 }
 

@@ -24,7 +24,7 @@ from plytos_api.imports.career import group_employments, settle_employments
 from plytos_api.imports.extract import UnsupportedFileError, extract
 from plytos_api.imports.facts import add_result_facts, to_ask, words
 from plytos_api.imports.model import ExtractedDocument, ImportResult, ParsedResume
-from plytos_api.imports.pictures import add_picture_lines, mark_picture_cards
+from plytos_api.imports.pictures import add_picture_lines
 from plytos_api.imports.placement import check_placements
 from plytos_api.imports.proofread import proofread_findings
 from plytos_api.imports.segment import segment
@@ -124,7 +124,6 @@ def _read(
             findings += proofread_findings(doc, parsed, typos)
 
     lines = account(doc, parsed, cards, skipped=parsed.skipped)
-    mark_picture_cards(doc.blocks, cards)
     return ImportResult(
         facts=doc.facts,
         contact=parsed.contact,

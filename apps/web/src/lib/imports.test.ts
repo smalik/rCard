@@ -193,13 +193,35 @@ describe("toReview", () => {
       words: 300,
     });
     expect(shaped.cards[0]?.source).toEqual([
-      { block: 12, page: 1, text: "Cut claim review time 30% by rebuilding triage." },
+      {
+        block: 12,
+        page: 1,
+        text: "Cut claim review time 30% by rebuilding triage.",
+        picture: false,
+      },
     ]);
     expect(shaped.contactKept).toBe(true);
     expect(shaped.toSettle).toEqual([0]);
     const text = JSON.stringify(shaped);
     expect(text).not.toContain("riley.park@example.com");
     expect(text).not.toContain("555-0100");
+  });
+
+  it("marks lines read from a picture, and drops the old question on every scanned card", () => {
+    const shaped = toReview({
+      result: {
+        blocks: [{ index: 3, text: "Cut late shipments by 22%.", page: 2, where: "image" }],
+        cards: [
+          {
+            ...CARDS[1],
+            source_blocks: [3],
+            needs_check: ["Plytos read this from a picture in your resume. Check the wording."],
+          },
+        ],
+      },
+    });
+    expect(shaped.cards[0]?.source[0]?.picture).toBe(true);
+    expect(shaped.cards[0]?.needs_check).toEqual([]);
   });
 
   it("copes with an empty answer", () => {
