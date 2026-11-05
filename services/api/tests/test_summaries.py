@@ -436,6 +436,17 @@ def test_changing_an_accomplishment_queues_one_summary_for_its_job(
         summarize(hooked, thinker, job.job, Usage(), force=True)
 
 
+def test_a_run_no_worker_picks_up_stops_counting_as_writing(make_user, cards: Cards) -> None:
+    with cards(make_user()) as (repo, store):
+        job = Job(repo)
+        store.enqueue("summarizer", "card", job.job, dedupe_key=f"summarize-{job.job}")
+        assert store.runs_in_hand("summarizer", within_seconds=120) == {job.job}
+        # Long overdue: nothing is working the queue here, so the card stops saying so.
+        repo._conn.execute("update plytos.agent_run set run_after = now() - interval '5 minutes'")
+        assert store.runs_in_hand("summarizer", within_seconds=120) == set()
+        assert store.runs_about("summarizer", waiting=True) == {job.job}
+
+
 # -- re-imports ------------------------------------------------------------------------
 
 

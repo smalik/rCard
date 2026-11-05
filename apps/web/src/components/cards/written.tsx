@@ -187,7 +187,8 @@ export function WrittenText({
   }
 
   // Plytos writes what it wrote before, and what nobody has written yet.
-  if (writing && by !== "person" && ready) {
+  const rewriting = writing && by !== "person" && ready;
+  if (rewriting && !text) {
     return (
       <div className={className}>
         <Writing
@@ -206,8 +207,16 @@ export function WrittenText({
         <p className="text-[13.5px] text-muted-foreground">{empty}</p>
       )}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-        {by && <WrittenTag by={by} />}
-        {by && <span aria-hidden className="text-[12px] text-muted-foreground/70">·</span>}
+        {rewriting ? (
+          // What it wrote before stays readable while it writes again.
+          <span role="status" className="inline-flex items-center gap-1 text-[12px] font-medium text-primary">
+            <Sparkles className="size-3 animate-live-dot motion-reduce:animate-none" aria-hidden />
+            Rewriting…
+          </span>
+        ) : (
+          by && <WrittenTag by={by} />
+        )}
+        {(by || rewriting) && <span aria-hidden className="text-[12px] text-muted-foreground/70">·</span>}
         <button
           type="button"
           onClick={start}

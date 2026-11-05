@@ -499,7 +499,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         employment_id,
                         dedupe_key=f"summarize-{employment_id}",
                     )
-            writing = store.runs_about("summarizer", waiting=True)
+            # Jobs Plytos is writing for now or in a moment. A run no worker has
+            # picked up two minutes after it was due doesn't count.
+            writing = store.runs_in_hand("summarizer", within_seconds=120)
             for card in cards:
                 card.writing = card.id in writing
             return cards
