@@ -3,7 +3,7 @@
 // worked out from the import itself (what was read and the person's progress),
 // so the conversation reads the same after a reload, and no model is asked.
 
-import type { CardContent, CardKind } from "./cards";
+import { type CardContent, type CardKind, HEADLINE_MAX } from "./cards";
 import {
   type Answer,
   contentFor,
@@ -119,15 +119,27 @@ export function reviewSteps(review: Review): Step[] {
 
 const NONE: ReadonlySet<string> = new Set();
 
-// Whether the person has answered a step. A job set aside counts as answered
-// unless they asked to go back to it (`revisit` holds its key).
+// Names a step, so the conversation can go back to it.
+export function stepKey(step: Step): string {
+  if (step.kind === "place") return `place-${step.card.ref}`;
+  if (step.kind === "settle") return `settle-${step.index}`;
+  return step.group.key;
+}
+
+// Whether the person has answered a step. A job set aside, or a question left
+// for later ("Not sure yet"), counts as answered unless they asked to go back
+// to it (`revisit` holds its key).
 export function answered(step: Step, review: Review, revisit = NONE): boolean {
   const { progress } = review;
   if (step.kind === "place") {
     const state = stateOf(step.card.ref, progress);
     return step.card.ref in progress.moves || state === "dropped" || state === "approved";
   }
-  if (step.kind === "settle") return String(step.index) in progress.settled;
+  if (step.kind === "settle") {
+    const settled = progress.settled[String(step.index)];
+    if (settled === undefined) return false;
+    return settled.answer !== "later" || !revisit.has(stepKey(step));
+  }
   const status = groupStatus(step.group, review);
   return status === "done" || (status === "later" && !revisit.has(step.group.key));
 }
@@ -171,7 +183,11 @@ export function settleReplies(finding: Finding): Reply[] {
   }
   return [
     { answer: "as_is", value: null, label: "That's right" },
-    { answer: "on_card", value: null, label: "I'll fix it on the card" },
+    {
+      answer: "on_card",
+      value: null,
+      label: finding.rule.startsWith("dates.") ? "I'll fix the dates below" : "I'll fix it on the card",
+    },
     later,
   ];
 }
@@ -257,10 +273,15 @@ export function groupMatches(
 
 // Notes under a line: where the reading had to guess, then wording tips.
 export function lineNotes(card: Proposal, review: Review): string[] {
-  const tips = findingsForCard(card, review)
+  const found = findingsForCard(card, review);
+  // What the person said they'd fix here comes first.
+  const toFix = found
+    .filter((i) => review.toSettle.includes(i) && review.progress.settled[String(i)]?.answer === "on_card")
+    .map((i) => review.findings[i]!.title);
+  const tips = found
     .filter((i) => !review.toSettle.includes(i))
     .map((i) => review.findings[i]!.title);
-  return [...card.needs_check, ...tips].slice(0, 2);
+  return [...toFix, ...card.needs_check, ...tips].slice(0, 2);
 }
 
 // What Plytos asked, said again briefly above the person's answer once it's
@@ -329,9 +350,11 @@ export type GroupChoices = {
   wording: Readonly<Record<string, string>>;
   // For cards that are already theirs: what keeping does.
   choice: Readonly<Record<string, MatchChoice>>;
+  // Dates the person corrected on a job or title, by ref.
+  dates: Readonly<Record<string, Dates>>;
 };
 
-export const NO_CHOICES: GroupChoices = { out: new Set(), wording: {}, choice: {} };
+export const NO_CHOICES: GroupChoices = { out: new Set(), wording: {}, choice: {}, dates: {} };
 
 export type KeepRequest = {
   keep: { ref: string; content: CardContent | null; choice: MatchChoice | null }[];
@@ -339,10 +362,81 @@ export type KeepRequest = {
   later: string[];
 };
 
-function reworded(content: CardContent, words: string | undefined): CardContent | null {
+// A line as it reads in full. A long one (a summary, say) keeps its whole text
+// in the body and a shortened headline that ends in "…".
+export function lineText(content: CardContent): string {
+  const { headline, body } = content.framing;
+  if (body && headline.endsWith("…") && body.startsWith(headline.slice(0, -1).trimEnd())) {
+    return body;
+  }
+  return headline;
+}
+
+// Whether a line is long enough that its full text sits in the body.
+export function isLong(content: CardContent): boolean {
+  return lineText(content) !== content.framing.headline;
+}
+
+// The line in new words, framed the way the import frames it: a long one gets
+// a shortened headline and its full text in the body.
+export function withLineText(content: CardContent, text: string): CardContent {
+  const long = isLong(content);
+  if (text.length <= HEADLINE_MAX) {
+    const body = long ? "" : content.framing.body;
+    return { ...content, framing: { ...content.framing, headline: text, body } };
+  }
+  const cut = text.slice(0, HEADLINE_MAX - 1);
+  const space = cut.lastIndexOf(" ");
+  const short = space > 0 ? cut.slice(0, space) : cut;
+  return { ...content, framing: { ...content.framing, headline: `${short}…`, body: text } };
+}
+
+export type Dates = { start: string; end: string };
+
+const DATE = /^\d{4}(-(0[1-9]|1[0-2]))?$/;
+
+// The dates a job or title has, as the person edits them.
+export function datesOf(content: CardContent): Dates {
+  const text = (value: unknown) => (typeof value === "string" ? value : "");
+  return { start: text(content.facts.start), end: text(content.facts.end) };
+}
+
+// What's wrong with dates the person typed, in plain words, or null.
+export function datesProblem(dates: Dates): string | null {
+  const start = dates.start.trim();
+  const end = dates.end.trim().toLowerCase();
+  if (start && !DATE.test(start)) return "Write the start as a year and month, like 2021-03.";
+  if (end && end !== "present" && !DATE.test(end)) {
+    return "Write the end as a year and month, like 2021-03, or as present.";
+  }
+  if (start && end && end !== "present") {
+    const from = start.length === 4 ? `${start}-01` : start;
+    const to = end.length === 4 ? `${end}-12` : end;
+    if (to < from) return "The end comes before the start.";
+  }
+  return null;
+}
+
+// A card in the person's words and dates, or null when they changed nothing.
+function edited(
+  content: CardContent,
+  words: string | undefined,
+  dates: Dates | undefined,
+): CardContent | null {
+  let next = content;
   const trimmed = words?.trim();
-  if (!trimmed || trimmed === content.framing.headline) return null;
-  return { ...content, framing: { ...content.framing, headline: trimmed } };
+  if (trimmed && trimmed !== lineText(content)) next = withLineText(next, trimmed);
+  if (dates) {
+    const facts = { ...next.facts };
+    const start = dates.start.trim();
+    const end = dates.end.trim().toLowerCase() === "present" ? "present" : dates.end.trim();
+    if (start) facts.start = start;
+    else delete facts.start;
+    if (end) facts.end = end;
+    else delete facts.end;
+    if (facts.start !== next.facts.start || facts.end !== next.facts.end) next = { ...next, facts };
+  }
+  return next === content ? null : next;
 }
 
 // Keeps every undecided card in a group but the ones left out, in the
@@ -359,7 +453,11 @@ export function keepRequest(group: ReviewGroup, review: Review, choices: GroupCh
     }
     request.keep.push({
       ref: card.ref,
-      content: reworded(contentFor(card, review.progress), choices.wording[card.ref]),
+      content: edited(
+        contentFor(card, review.progress),
+        choices.wording[card.ref],
+        choices.dates[card.ref],
+      ),
       choice: review.matches[card.ref] ? (choices.choice[card.ref] ?? null) : null,
     });
   }
@@ -376,13 +474,31 @@ export function leaveOutRequest(group: ReviewGroup, review: Review): KeepRequest
   return { keep: [], leave_out: undecided(group, review).map((c) => c.ref), later: [] };
 }
 
-// The jobs with cards set aside, to go back to them.
-export function setAside(review: Review): Set<string> {
-  return new Set(
-    reviewGroups(review)
-      .filter((group) => groupStatus(group, review) === "later")
-      .map((group) => group.key),
+// Whether a question is about cards the person has already kept, so answering
+// it now won't change them.
+export function keptAlready(step: Step, review: Review): boolean {
+  if (step.kind !== "settle") return false;
+  return review.cards.some(
+    (card) =>
+      stateOf(card.ref, review.progress) === "approved" &&
+      findingsForCard(card, review).includes(step.index),
   );
+}
+
+// The questions left for later ("Not sure yet").
+export function deferred(review: Review): Step[] {
+  return reviewSteps(review).filter(
+    (step) => step.kind === "settle" && review.progress.settled[String(step.index)]?.answer === "later",
+  );
+}
+
+// The jobs with cards set aside and the questions left for later, to go back
+// to them.
+export function setAside(review: Review): Set<string> {
+  const groups = reviewGroups(review)
+    .filter((group) => groupStatus(group, review) === "later")
+    .map((group) => group.key);
+  return new Set([...groups, ...deferred(review).map(stepKey)]);
 }
 
 // -- where things stand ---------------------------------------------------------

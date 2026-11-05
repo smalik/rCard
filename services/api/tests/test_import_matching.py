@@ -333,6 +333,32 @@ def test_a_group_that_cant_all_be_kept_keeps_none_of_it(make_user, open_: Open) 
         assert s.imports.summary(import_id).approved == 0
 
 
+def twice_text() -> str:
+    """The same result written twice under one title. Made up."""
+    return title_first_text().replace(
+        "• Cut load time by 40%.", "• Cut load time by 40%.\n• Cut load time by 40%."
+    )
+
+
+def test_a_line_left_out_keeps_its_match_to_itself(make_user, open_: Open) -> None:
+    user = make_user()
+    with open_(user) as s:
+        first_id, first = bring_in(s, twice_text())
+        kept = approve_all(s, first_id, first)
+
+        again_id, _ = bring_in(s, twice_text())
+        seen = s.imports.matches(again_id, s.cards)
+        assert seen["card-4"].card_id == kept["card-4"]
+        assert seen["card-5"].card_id == kept["card-5"]
+        # Leaving out the first copy doesn't hand its card to the second: the
+        # second carries on as the card it showed as.
+        progress = s.imports.keep_group(
+            again_id, keeping("card-1", "card-2", "card-5"), s.cards, ME, leave_out=["card-4"]
+        )
+        assert progress.cards["card-5"].card_id == kept["card-5"]
+        assert progress.cards["card-4"].state == "dropped"
+
+
 def test_a_job_brought_in_again_carries_on_as_the_persons_cards(make_user, open_: Open) -> None:
     user = make_user()
     with open_(user) as s:

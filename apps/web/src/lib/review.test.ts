@@ -5,20 +5,27 @@ import {
   activeImport,
   answerText,
   currentStep,
+  datesProblem,
+  deferred,
   groupIntro,
   groupMatches,
   groupStatus,
   keepRequest,
+  keptAlready,
   laterRequest,
   leaveOutRequest,
+  lineNotes,
+  lineText,
   NO_CHOICES,
   quoteLabel,
   reviewGroups,
   reviewSteps,
   setAside,
   settleReplies,
+  stepKey,
   stepRecap,
   tally,
+  withLineText,
 } from "./review";
 
 // A made-up person's resume, as the import reads it.
@@ -136,6 +143,37 @@ describe("steps", () => {
     ]);
   });
 
+  it("goes back to a question left for later when the person asks to", () => {
+    const later = review({}, { settled: { "0": { answer: "later", value: null, changed: [] } } });
+    expect(deferred(later).map(stepKey)).toEqual(["settle-0"]);
+    expect(setAside(later).has("settle-0")).toBe(true);
+    expect(currentStep(later, setAside(later))?.kind).toBe("settle");
+    const sure = review({}, { settled: { "0": { answer: "as_is", value: null, changed: [] } } });
+    expect(deferred(sure)).toEqual([]);
+    // Once the cards it's about are kept, Plytos says the answer won't change them.
+    const cards = CARDS.map((c, i) => ({ ...c, source_blocks: [i] }));
+    const step = { kind: "settle" as const, index: 0, finding: FIGURES };
+    expect(keptAlready(step, review({ cards }))).toBe(false);
+    const kept = review({ cards }, { cards: { "card-2": { state: "approved", card_id: "c2" } } });
+    expect(keptAlready(step, kept)).toBe(true);
+  });
+
+  it("points the person to the dates when they'll fix them, and reminds them there", () => {
+    const gap: Finding = {
+      ...FIGURES,
+      rule: "dates.gap",
+      title: "An 8-month gap",
+      locations: [{ block: 5, excerpt: "Brightline Consulting", figure: null }],
+    };
+    expect(settleReplies(gap).map((r) => r.label)).toContain("I'll fix the dates below");
+    const cards = CARDS.map((c, i) => ({ ...c, source_blocks: [i] }));
+    const fixing = review(
+      { cards, findings: [gap], toSettle: [0] },
+      { settled: { "0": { answer: "on_card", value: null, changed: [] } } },
+    );
+    expect(lineNotes(cards[5]!, fixing)).toEqual(["An 8-month gap"]);
+  });
+
   it("asks where a line belongs before anything else", () => {
     const unsure: Proposal = {
       ...CARDS[7]!,
@@ -208,6 +246,7 @@ describe("keeping a job", () => {
       out: new Set(["card-5"]),
       wording: { "card-4": "  Cut late shipments by 25%.  ", "card-3": "Director" },
       choice: {},
+      dates: {},
     });
     expect(request.leave_out).toEqual(["card-5"]);
     expect(request.later).toEqual([]);
@@ -241,6 +280,49 @@ describe("keeping a job", () => {
     });
     expect(request.keep.map((k) => k.choice)).toEqual(["keep", null, null, null]);
     expect(groupMatches(group, mine)).toEqual({ mine: 1, changes: 1 });
+  });
+});
+
+describe("rewording and dates", () => {
+  const LONG = `${"Operations leader who ships on time across many sites ".repeat(5).trim()}.`;
+  const summary = withLineText(CARDS[0]!.content, LONG);
+
+  it("edits a long summary in full, not its shortened headline", () => {
+    expect(summary.framing.headline.endsWith("…")).toBe(true);
+    expect(summary.framing.headline.length).toBeLessThanOrEqual(200);
+    expect(summary.framing.body).toBe(LONG);
+    expect(lineText(summary)).toBe(LONG);
+    // Shortened again, it goes back to a plain headline.
+    expect(withLineText(summary, "Ships on time.").framing).toEqual({ headline: "Ships on time.", body: "" });
+  });
+
+  it("keeps a reworded summary's full text", () => {
+    const long = review({ cards: CARDS.map((c) => (c.ref === "card-1" ? { ...c, content: summary } : c)) });
+    const rest = reviewGroups(long).at(-1)!;
+    const words = `${LONG} Known for calm launches.`;
+    const request = keepRequest(rest, long, { ...NO_CHOICES, wording: { "card-1": words } });
+    const kept = request.keep.find((k) => k.ref === "card-1")!.content!;
+    expect(kept.framing.body).toBe(words);
+    expect(lineText(kept)).toBe(words);
+  });
+
+  it("keeps a job or title with the dates the person corrected", () => {
+    const group = reviewGroups(review())[1]!;
+    const request = keepRequest(group, review(), {
+      ...NO_CHOICES,
+      dates: { "card-6": { start: "2010-06", end: "2013-06" }, "card-7": { start: "2010", end: "" } },
+    });
+    const facts = (ref: string) => request.keep.find((k) => k.ref === ref)!.content!.facts;
+    expect(facts("card-6")).toMatchObject({ start: "2010-06", end: "2013-06" });
+    expect(facts("card-7")).toEqual({ start: "2010" });
+  });
+
+  it("says plainly what's wrong with dates", () => {
+    expect(datesProblem({ start: "2014-03", end: "present" })).toBeNull();
+    expect(datesProblem({ start: "2014", end: "2014" })).toBeNull();
+    expect(datesProblem({ start: "March 2014", end: "" })).toMatch(/start/);
+    expect(datesProblem({ start: "2014-03", end: "soon" })).toMatch(/end/);
+    expect(datesProblem({ start: "2015-01", end: "2014-12" })).toBe("The end comes before the start.");
   });
 });
 

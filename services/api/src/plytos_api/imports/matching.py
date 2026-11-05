@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -165,12 +165,15 @@ def match_cards(
     moves: Mapping[str, str | None],
     contents: Mapping[str, MainContent],
     cards: Mapping[UUID, CardText],
+    reserved: Collection[UUID] = (),
 ) -> dict[str, CardMatch]:
     """The person's card each proposed card stands for, by ref. `contents` is
-    each proposal's wording as it stands (after the person's edits)."""
+    each proposal's wording as it stands (after the person's edits). `reserved`
+    cards match nothing, such as ones a proposal left out in the same breath
+    showed as its match."""
     by_ref = {p.ref: p for p in result.cards}
     # Cards this import already linked to or made, so no second proposal takes them.
-    taken = {d.card_id for d in decided.values() if d.card_id is not None}
+    taken = {d.card_id for d in decided.values() if d.card_id is not None} | set(reserved)
     matches: dict[str, CardMatch] = {}
     visited: set[str] = set()
     # Oldest first (ids are time-ordered), so a tie goes to the card kept longest.

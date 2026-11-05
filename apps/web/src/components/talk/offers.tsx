@@ -336,9 +336,15 @@ export function SharedResume({
             {making.busy ? "Setting it up…" : "Make my resume"}
           </Button>
         )}
-        {resume.state === "read" && !reviewing && pending === 0 && resume.later > 0 && (
+        {resume.state === "read" && !reviewing && pending === 0 && (resume.later > 0 || resume.to_settle > 0) && (
           <Button size="sm" variant="outline" onClick={() => onGoThrough(true)}>
-            Go through the {resume.later} set aside
+            {resume.later > 0 && resume.to_settle > 0
+              ? "Go back to what's set aside"
+              : resume.later > 0
+                ? `Go through the ${resume.later} set aside`
+                : resume.to_settle === 1
+                  ? "Answer the question left"
+                  : `Answer the ${resume.to_settle} questions left`}
           </Button>
         )}
         {resumeId && (

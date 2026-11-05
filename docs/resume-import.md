@@ -101,17 +101,22 @@ stack.
      "Summary"). Where a line belongs comes first. When a result has two
      numbers, the person taps the right one and every proposed card that
      used the other is rewritten to match. Other questions take "that's
-     right", "I'll fix it on the card" or "not sure yet".
+     right", "I'll fix it on the card" ("I'll fix the dates below" for
+     dates) or "not sure yet". A question left for later can be answered
+     afterwards; if its cards were kept meanwhile, Plytos says the answer
+     won't change them.
    - Then each job as a whole: the employer, its titles and their lines, as
      they'd read on a resume. Every line starts ticked. The person unticks
-     what they don't want, rewords a line in place, and keeps the job with
-     one tap ("Keep this job"), or says "Not now" to come back to it. A line
+     what they don't want, rewords a line in place (a long summary in
+     full), corrects a job's or title's dates, and keeps the job with one
+     tap ("Keep this job"), or says "Not now" to come back to it. What they
+     said they'd fix shows as a "Check:" note where it applies. A line
      that's already one of their cards says so, with a menu to use their card,
      update it, or make a separate one (see "Bringing a resume in again").
    - Then the rest (summary, highlights and awards, projects, education,
      skills and the like), in one draft the same way.
    - Then Plytos says what was kept and offers to make the resume as written,
-     go through what was set aside, or see the cards.
+     go through what was set aside (jobs and questions), or see the cards.
 
    Each answer shows as the person's reply in the thread, and the answers
    before the last two fold away. The steps are worked out from the import
@@ -139,7 +144,7 @@ contact details stay on the server. Nothing goes to browser storage.
 | `POST /v1/imports/{id}/settle` | Answers one question. A chosen number rewrites the proposed cards that use the other |
 | `POST /v1/imports/{id}/cards/{ref}/decision` | Sets a proposed card aside for later, leaves it out, or undoes that |
 | `POST /v1/imports/{id}/cards/{ref}/place` | Answers a placement question: the card it sits under (`parent_ref`, or null for none) |
-| `POST /v1/imports/{id}/keep` | Decides a group of cards at once, all or nothing: `keep` (each a `ref`, with the person's `content` and a match `choice` where they gave one), `leave_out` and `later` (refs). Kept cards are made parents first, so each lands under its own. 409 if any of them was decided meanwhile, and then none is |
+| `POST /v1/imports/{id}/keep` | Decides a group of cards at once, all or nothing: `keep` (each a `ref`, with the person's `content` and a match `choice` where they gave one), `leave_out` and `later` (refs). Kept cards are made parents first, so each lands under its own. Each goes onto the card of the person's it showed as matching before these decisions: a line left out keeps its match to itself, a line that showed as new stays new, and a match that changed is refused. 409 if any of them was decided meanwhile, and then none is |
 | `POST /v1/imports/{id}/cards/{ref}/approve` | Makes the card, as proposed or in the person's edited words, as an approved card written by the person. For a card that matches one of theirs, `choice` says what happens: `update` (the default) saves it as that card's next version, `keep` links it to theirs as it is, `separate` makes a new card |
 | `GET /v1/imports/{id}/matches` | The person's cards that the proposed cards stand for, by ref, as their decisions stand. `GET /v1/imports/{id}` includes them too |
 | `DELETE /v1/imports/{id}` | Deletes the original file and everything read from it. Approved cards stay |

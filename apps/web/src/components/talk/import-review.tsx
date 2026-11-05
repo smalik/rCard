@@ -13,6 +13,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { KindTile, type Purpose } from "@/components/cards/strength-card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,7 +22,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
-import { type CardKind, HEADLINE_MAX } from "@/lib/cards";
+import { BODY_MAX, type CardKind, HEADLINE_MAX } from "@/lib/cards";
 import {
   type CardMatch,
   contentFor,
@@ -39,14 +40,21 @@ import {
   answered,
   answerText,
   currentStep,
+  type Dates,
+  datesOf,
+  datesProblem,
+  deferred,
   type GroupChoices,
   groupIntro,
   groupMatches,
   isFrame,
+  isLong,
   keepRequest,
+  keptAlready,
   type KeepRequest,
   laterRequest,
   lineNotes,
+  lineText,
   type Reply as ReplyChoice,
   type ReviewGroup,
   quoteLabel,
@@ -56,6 +64,7 @@ import {
   settleQuestion,
   settleReplies,
   type Step,
+  stepKey,
   stepRecap,
   tally,
   undecided,
@@ -219,11 +228,13 @@ export function ImportReview({
           lead={history.length === 0 ? questionsLeft : 0}
           busy={busy !== null}
           onAnswer={(reply) =>
-            void act(reply.label, `${base}/answer`, {
-              finding: current.index,
-              answer: reply.answer,
-              value: reply.value,
-            })
+            void act(
+              reply.label,
+              `${base}/answer`,
+              { finding: current.index, answer: reply.answer, value: reply.value },
+              // Answered again, even "not sure yet": it moves on.
+              () => setRevisit((keys) => new Set([...keys].filter((k) => k !== stepKey(current)))),
+            )
           }
         />
       )}
@@ -261,12 +272,6 @@ export function ImportReview({
       )}
     </section>
   );
-}
-
-function stepKey(step: Step): string {
-  if (step.kind === "place") return `place-${step.card.ref}`;
-  if (step.kind === "settle") return `settle-${step.index}`;
-  return `group-${step.group.key}`;
 }
 
 /** An answered step: what Plytos asked, briefly, and what the person said. */
@@ -393,6 +398,12 @@ function SettleQuestion({
         <span className="font-medium">{settleQuestion(finding)}</span>
       </p>
       <p className="mt-1 text-[14px] text-muted-foreground">{finding.detail}</p>
+      {keptAlready(step, review) && (
+        <p className="mt-1 text-[14px] text-muted-foreground">
+          You&apos;ve already kept the cards this is about, so your answer won&apos;t change them.
+          You can fix a card from Cards.
+        </p>
+      )}
     </PlytosSays>
   );
 }
@@ -433,7 +444,8 @@ function GroupStep({
   const [out, setOut] = useState<ReadonlySet<string>>(new Set());
   const [wording, setWording] = useState<Record<string, string>>({});
   const [choice, setChoice] = useState<Record<string, MatchChoice>>({});
-  const choices: GroupChoices = { out, wording, choice };
+  const [dates, setDates] = useState<Record<string, Dates>>({});
+  const choices: GroupChoices = { out, wording, choice, dates };
   const left = undecided(group, review);
   const mine = groupMatches(group, review);
   const all = group.root !== null && out.has(group.root.ref);
@@ -486,6 +498,7 @@ function GroupStep({
               onToggle={toggle}
               onWord={(ref, words) => setWording((w) => ({ ...w, [ref]: words }))}
               onChoose={(ref, c) => setChoice((now) => ({ ...now, [ref]: c }))}
+              onDates={(ref, d) => setDates((now) => ({ ...now, [ref]: d }))}
             />
           ) : (
             <RestDraft
@@ -495,6 +508,7 @@ function GroupStep({
               onToggle={toggle}
               onWord={(ref, words) => setWording((w) => ({ ...w, [ref]: words }))}
               onChoose={(ref, c) => setChoice((now) => ({ ...now, [ref]: c }))}
+              onDates={(ref, d) => setDates((now) => ({ ...now, [ref]: d }))}
             />
           )}
           <footer className="flex flex-wrap items-center gap-2 border-t bg-muted/40 px-4 py-3">
@@ -540,6 +554,7 @@ type DraftProps = {
   onToggle: (ref: string) => void;
   onWord: (ref: string, words: string) => void;
   onChoose: (ref: string, choice: MatchChoice) => void;
+  onDates: (ref: string, dates: Dates) => void;
 };
 
 function depthIn(group: ReviewGroup, review: Review): Map<string, number> {
@@ -558,9 +573,7 @@ function JobDraft({ group, ...props }: DraftProps & { group: ReviewGroup }) {
   const left = new Set(undecided(group, review).map((c) => c.ref));
   const depth = depthIn(group, review);
   const all = choices.out.has(root.ref);
-  const where = [dateSpan(content.facts), content.facts.location]
-    .filter((v): v is string => typeof v === "string" && !!v)
-    .join(" · ");
+  const location = typeof content.facts.location === "string" ? content.facts.location : "";
   return (
     <div className="flex flex-col px-4 pt-4 pb-2">
       <header className="flex items-start gap-3 pb-2">
@@ -569,7 +582,7 @@ function JobDraft({ group, ...props }: DraftProps & { group: ReviewGroup }) {
           <h3 className={cn("text-[17px] leading-snug font-semibold tracking-[-0.01em]", all && "text-muted-foreground line-through")}>
             {content.framing.headline}
           </h3>
-          {where && <p className="text-[13px] text-muted-foreground">{where}</p>}
+          <FrameDates card={root} place={location} editable={left.has(root.ref) && !all} {...props} />
           <MatchNote card={root} {...props} />
         </div>
         {left.has(root.ref) && (
@@ -587,7 +600,14 @@ function JobDraft({ group, ...props }: DraftProps & { group: ReviewGroup }) {
             const indent = Math.max(0, (depth.get(card.ref) ?? 1) - 1);
             if (isFrame(card.kind)) {
               return (
-                <TitleRow key={card.ref} card={card} indent={indent} dimmed={all} {...props} />
+                <TitleRow
+                  key={card.ref}
+                  card={card}
+                  indent={indent}
+                  decided={!left.has(card.ref)}
+                  dimmed={all}
+                  {...props}
+                />
               );
             }
             return (
@@ -655,19 +675,136 @@ function Tick({ kept, label, onClick }: { kept: boolean; label: string; onClick:
 function TitleRow({
   card,
   indent,
+  decided,
   dimmed,
   ...props
-}: DraftProps & { card: Proposal; indent: number; dimmed: boolean }) {
+}: DraftProps & { card: Proposal; indent: number; decided: boolean; dimmed: boolean }) {
   const content = contentFor(card, props.review.progress);
-  const when = dateSpan(content.facts);
+  const gone = dimmed || props.choices.out.has(card.ref);
   return (
     <li className="pt-3 pb-1" style={{ paddingLeft: `${indent * 16 + 34}px` }}>
-      <p className={cn("text-[15px] font-semibold italic", dimmed && "text-muted-foreground line-through")}>
+      <p className={cn("text-[15px] font-semibold italic", gone && "text-muted-foreground line-through")}>
         {content.framing.headline}
       </p>
-      {when && <p className="text-[13px] text-muted-foreground">{when}</p>}
+      <FrameDates card={card} editable={!decided && !gone} {...props} />
       <MatchNote card={card} {...props} />
     </li>
+  );
+}
+
+// Shortens a line for a button's spoken name.
+function short(text: string): string {
+  return text.length > 60 ? `${text.slice(0, 59).trimEnd()}…` : text;
+}
+
+/** A job's or title's dates. The person can correct them before keeping it,
+ * such as when they said they'd fix the dates. */
+function FrameDates({
+  card,
+  place = "",
+  editable,
+  review,
+  choices,
+  onDates,
+}: DraftProps & { card: Proposal; place?: string; editable: boolean }) {
+  const content = contentFor(card, review.progress);
+  const original = datesOf(content);
+  const dates = choices.dates[card.ref] ?? original;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(dates);
+  const [tried, setTried] = useState(false);
+  const problem = datesProblem(draft);
+  const facts = { ...content.facts, start: dates.start, end: dates.end };
+  const when = dateSpan(facts);
+  const where = [when, place].filter(Boolean).join(" · ");
+  const changed = dates.start !== original.start || dates.end !== original.end;
+  const notes = editable ? lineNotes(card, review) : [];
+  const name = content.framing.headline;
+
+  if (editing) {
+    return (
+      <div className="mt-1 flex max-w-sm flex-col gap-2">
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex flex-col gap-1 text-[12px] font-medium text-muted-foreground">
+            From
+            <Input
+              autoFocus
+              value={draft.start}
+              placeholder="2014-03"
+              autoComplete="off"
+              onChange={(e) => setDraft((d) => ({ ...d, start: e.target.value }))}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-[12px] font-medium text-muted-foreground">
+            To
+            <Input
+              value={draft.end}
+              placeholder="present"
+              autoComplete="off"
+              onChange={(e) => setDraft((d) => ({ ...d, end: e.target.value }))}
+            />
+          </label>
+        </div>
+        <p className="text-[12px] text-muted-foreground">
+          A year and month, like 2021-03. For a job you&apos;re still in, the end is present.
+        </p>
+        {tried && problem && (
+          <p role="alert" className="text-[12px] text-destructive">
+            {problem}
+          </p>
+        )}
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            onClick={() => {
+              setTried(true);
+              if (problem) return;
+              onDates(card.ref, { start: draft.start.trim(), end: draft.end.trim() });
+              setEditing(false);
+            }}
+          >
+            Done
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setDraft(dates);
+              setTried(false);
+              setEditing(false);
+            }}
+          >
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <>
+      <p className="flex flex-wrap items-baseline gap-x-2 text-[13px] text-muted-foreground">
+        {where && <span>{where}</span>}
+        {editable && (
+          <button
+            type="button"
+            aria-label={`Change the dates for ${short(name)}`}
+            className="font-medium text-primary"
+            onClick={() => {
+              setDraft(dates);
+              setEditing(true);
+            }}
+          >
+            {when ? "Change dates" : "Add dates"}
+          </button>
+        )}
+      </p>
+      {changed && <p className="text-[12px] font-medium text-primary">Your dates</p>}
+      {notes.map((note) => (
+        <p key={note} className="text-[12px] leading-snug text-muted-foreground">
+          <span className="font-semibold text-live">Check:</span> {note}
+        </p>
+      ))}
+    </>
   );
 }
 
@@ -679,7 +816,9 @@ function LineRow({
   ...props
 }: DraftProps & { card: Proposal; indent: number; decided: boolean; dimmed: boolean }) {
   const { review, choices, onToggle, onWord } = props;
-  const original = contentFor(card, review.progress).framing.headline;
+  const content = contentFor(card, review.progress);
+  // A long line, such as a summary, is edited in full, not its shortened headline.
+  const original = lineText(content);
   const words = choices.wording[card.ref];
   const shown = words?.trim() || original;
   const kept = !dimmed && !choices.out.has(card.ref);
@@ -693,7 +832,7 @@ function LineRow({
     <li className="flex items-start gap-3 py-2" style={{ paddingLeft: `${indent * 16}px` }}>
       <Tick
         kept={kept}
-        label={kept ? `Leave out “${shown}”` : `Keep “${shown}”`}
+        label={kept ? `Leave out “${short(shown)}”` : `Keep “${short(shown)}”`}
         onClick={() => onToggle(card.ref)}
       />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -703,8 +842,8 @@ function LineRow({
               autoFocus
               aria-label="Reword this line"
               value={draft}
-              maxLength={HEADLINE_MAX}
-              rows={3}
+              maxLength={isLong(content) ? BODY_MAX : HEADLINE_MAX}
+              rows={isLong(content) ? 6 : 3}
               onChange={(e) => setDraft(e.target.value)}
             />
             <div className="flex gap-2">
@@ -756,7 +895,7 @@ function LineRow({
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={`Reword “${shown}”`}
+          aria-label={`Reword “${short(shown)}”`}
           className="-mt-1 -mr-2 text-muted-foreground"
           onClick={() => {
             setDraft(shown);
@@ -839,11 +978,22 @@ function Done({
   onGoBack: () => void;
 }) {
   const { kept, later } = tally(review);
+  const asked = deferred(review).length;
   const { make, busy, error } = useMakeResume(review.id);
 
   const what = kept > 0 ? `You kept ${plural(kept, "card")}` : "You didn't keep anything from it this time";
   const aside = later > 0 ? `, and set ${later} aside for later` : "";
-  const said = `That's everything from ${review.file.name}. ${what}${aside}.`;
+  const open =
+    asked === 0 ? "" : asked === 1 ? " One question is left for later." : ` ${asked} questions are left for later.`;
+  const said = `That's everything from ${review.file.name}. ${what}${aside}.${open}`;
+  const goBack =
+    later > 0 && asked > 0
+      ? "Go back to what's set aside"
+      : later > 0
+        ? `Go through the ${later} set aside`
+        : asked === 1
+          ? "Answer the question left"
+          : `Answer the ${asked} questions left`;
 
   return (
     <PlytosSays
@@ -861,9 +1011,9 @@ function Done({
                 </Button>
               )
             )}
-            {later > 0 && (
+            {(later > 0 || asked > 0) && (
               <Button variant="outline" onClick={onGoBack}>
-                Go through the {later} set aside
+                {goBack}
               </Button>
             )}
             <Button variant="ghost" asChild>

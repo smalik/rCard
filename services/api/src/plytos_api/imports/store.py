@@ -15,7 +15,7 @@ The connection passed in must already be scoped to the person
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Mapping, Sequence
 from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
@@ -157,12 +157,13 @@ def find_matches(
     result: ImportResult,
     progress: ImportProgress,
     cards: dict[UUID, CardText],
+    reserved: Collection[UUID] = (),
 ) -> dict[str, CardMatch]:
     """The person's card each proposed card stands for, by ref, as things stand:
     the person's decisions, moves and edits count."""
     contents = {p.ref: progress.edits.get(p.ref) or p.content for p in result.cards}
     decided = {ref: Decided(state=d.state, card_id=d.card_id) for ref, d in progress.cards.items()}
-    return match_cards(result, decided, progress.moves, contents, cards)
+    return match_cards(result, decided, progress.moves, contents, cards, reserved)
 
 
 def to_settle(result: ImportResult | None) -> list[int]:
@@ -423,15 +424,29 @@ class ImportStore:
         refs = [k.ref for k in keep] + list(leave_out) + list(later)
         if len(set(refs)) != len(refs):
             raise ImportConflictError("Each card can be decided once at a time.")
+        contents = cards.main_contents()
+        # The matches as the person saw them, before any of these decisions. A line
+        # left out keeps its match to itself, so leaving it out can't hand that card
+        # to another line with the same words.
+        seen = find_matches(result, progress, contents)
+        reserved = {seen[ref].card_id for ref in leave_out if ref in seen}
         for ref in leave_out:
             _decide(result, progress, ref, "dropped")
         for ref in later:
             _decide(result, progress, ref, "later")
-        contents = cards.main_contents()
         depth = {k.ref: _depth(result, progress, k.ref) for k in keep}
         for item in sorted(keep, key=lambda k: depth[k.ref]):
             self._approve(
-                result, progress, item.ref, item.content, item.choice, cards, contents, author
+                result,
+                progress,
+                item.ref,
+                item.content,
+                item.choice,
+                cards,
+                contents,
+                author,
+                seen=seen,
+                reserved=reserved,
             )
         self._save_progress(import_id, progress)
         return progress
@@ -446,9 +461,13 @@ class ImportStore:
         cards: CardRepository,
         contents: dict[UUID, CardText],
         author: Author,
+        seen: Mapping[str, CardMatch] | None = None,
+        reserved: Collection[UUID] = (),
     ) -> CardDetail:
         """Approves one proposed card, recording it in `progress`. The caller saves
-        the progress. `contents` are the person's cards as they were before."""
+        the progress. `contents` are the person's cards as they were before. `seen`
+        holds the matches as the person saw them, when several cards are decided
+        at once: a card never goes onto one of theirs they weren't shown."""
         proposal = _proposal(result, ref)
         current = progress.cards.get(ref)
         if current is not None and current.state == "approved":
@@ -463,7 +482,15 @@ class ImportStore:
         if choice != "separate":
             # The card it matched as the person saw it: wording they edit on the
             # way to approving goes into that card, and doesn't change which it is.
-            match = find_matches(result, progress, contents).get(ref)
+            match = find_matches(result, progress, contents, reserved).get(ref)
+        if seen is not None and match is not None:
+            shown = seen.get(ref)
+            if shown is None:
+                match = None  # It showed as a new card, so it becomes one.
+            elif shown.card_id != match.card_id:
+                raise ImportConflictError(
+                    "Which of your cards this matches changed. Look at it again and keep it."
+                )
         if match is None and choice in ("update", "keep"):
             raise ImportConflictError(
                 "That card doesn't match one of yours any more. Approve it as a new card."
