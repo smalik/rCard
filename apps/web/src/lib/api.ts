@@ -119,6 +119,21 @@ export async function reorderCards(
   );
 }
 
+// What Plytos wrote when the person asked it to sum a job up again.
+export type Rewritten = { headline: boolean; stories: number; dropped: number };
+
+export async function rewriteSummaries(
+  session: Session,
+  cardId: string,
+  replaceOwn: boolean,
+): Promise<Rewritten> {
+  return apiFetch<Rewritten>(
+    `/v1/cards/${encodeURIComponent(cardId)}/summaries`,
+    session,
+    json({ replace_own: replaceOwn }),
+  );
+}
+
 export type CardVersion = {
   id: string;
   number: number;

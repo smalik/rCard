@@ -28,7 +28,7 @@ from pydantic import BaseModel
 
 from plytos_api.cards.model import MainContent
 from plytos_api.cards.repository import CardText
-from plytos_api.cards.rules import has_headline
+from plytos_api.cards.rules import employer_name, has_headline
 from plytos_api.imports.model import ImportResult, ProposedCard
 
 
@@ -252,9 +252,15 @@ def match_cards(
                 or not overlaps(card.content, content)
             ):
                 continue
+            # A job is known by its employer; its headline may sum it up.
+            known_as = (
+                employer_name(card.content)
+                if card.kind == "employment"
+                else card.content.framing.headline
+            )
             matches[p.ref] = CardMatch(
                 card_id=card_id,
-                headline=card.content.framing.headline,
+                headline=known_as,
                 same=unchanged(card.content, content),
             )
             taken.add(card_id)

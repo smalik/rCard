@@ -8,6 +8,7 @@ import {
   cleanContent,
   evidence,
   formatDate,
+  hasJobHeadline,
   isWebAddress,
   type LibraryCard,
   listFact,
@@ -15,6 +16,8 @@ import {
   relativeTime,
   tenure,
   withOrder,
+  withWords,
+  writtenBy,
 } from "./library";
 
 let made = 0;
@@ -225,6 +228,13 @@ describe("cleanContent", () => {
     expect(clean?.facts.figures).toEqual(["40 people"]);
   });
 
+  it("keeps Plytos's marks it knows, and only those", () => {
+    const marked = { ...valid, framing: { ...valid.framing, plytos_wrote: ["body", "x", "headline"] } };
+    expect(cleanContent(marked)?.framing.plytos_wrote).toEqual(["headline", "body"]);
+    expect(cleanContent(valid)?.framing.plytos_wrote).toEqual([]);
+    expect(cleanContent({ ...valid, framing: { ...valid.framing, plytos_wrote: "body" } })).toBeNull();
+  });
+
   it("treats missing attachments as none", () => {
     const old: Record<string, unknown> = { ...valid };
     delete old.attachments;
@@ -281,5 +291,38 @@ describe("order", () => {
     const c = card("position", "C");
     const changed = changedSince([a, b], [a, { ...b, version_id: "version-next" }, c]);
     expect([...changed].sort()).toEqual([b.id, c.id].sort());
+  });
+});
+
+describe("who wrote a job's headline and a title's story", () => {
+  const job = (headline: string, marks: ("headline" | "body")[] = []) => {
+    const c = card("employment", headline, { employer: "Fernwood Freight" });
+    c.content!.framing.plytos_wrote = marks;
+    return c;
+  };
+
+  it("reads the employer's name as no headline yet", () => {
+    expect(hasJobHeadline(job("Fernwood Freight"))).toBe(false);
+    expect(hasJobHeadline(job("fernwood freight "))).toBe(false);
+    expect(writtenBy(job("Fernwood Freight"), "headline")).toBeNull();
+    expect(hasJobHeadline(job("Grew from analyst to planning lead"))).toBe(true);
+  });
+
+  it("tells Plytos's words from the person's", () => {
+    expect(writtenBy(job("Grew from analyst to lead", ["headline"]), "headline")).toBe("plytos");
+    expect(writtenBy(job("Grew from analyst to lead"), "headline")).toBe("person");
+    const title = card("position", "Planning Lead", { title: "Planning Lead" });
+    expect(writtenBy(title, "body")).toBeNull();
+    title.content!.framing.body = "Led planning for the depots.";
+    title.content!.framing.plytos_wrote = ["body"];
+    expect(writtenBy(title, "body")).toBe("plytos");
+  });
+
+  it("hands an emptied headline back to the employer's name", () => {
+    const written = job("Grew from analyst to lead", ["headline"]);
+    expect(withWords(written, "headline", "  ")?.framing.headline).toBe("Fernwood Freight");
+    expect(withWords(written, "headline", " My own line ")?.framing.headline).toBe("My own line");
+    const title = card("position", "Planning Lead", { title: "Planning Lead" });
+    expect(withWords(title, "body", " Mine. ")?.framing.body).toBe("Mine.");
   });
 });

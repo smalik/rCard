@@ -4,7 +4,12 @@ import Link from "next/link";
 import { type ReactNode, useCallback, useMemo, useState } from "react";
 
 import { AccomplishmentCard, AccomplishmentSheet } from "@/components/cards/accomplishment";
-import { type CardActions, CardActionsProvider, type CardVersion } from "@/components/cards/actions";
+import {
+  type CardActions,
+  CardActionsProvider,
+  type CardVersion,
+  type Rewritten,
+} from "@/components/cards/actions";
 import { ExperienceCard } from "@/components/cards/experience-card";
 import {
   ActivityCard,
@@ -165,9 +170,20 @@ export function LibraryScreen({
     return (await response.json()) as CardVersion[];
   }, []);
 
+  const rewrite = useCallback(
+    async (jobId: string, replaceOwn: boolean) => {
+      const response = await post(`/cards/${jobId}/summaries`, { replace_own: replaceOwn });
+      if (!response.ok) throw await failure(response);
+      const written = (await response.json()) as Rewritten;
+      await refresh();
+      return written;
+    },
+    [refresh],
+  );
+
   const actions: CardActions = useMemo(
-    () => ({ save, reorder, history, fresh, now }),
-    [save, reorder, history, fresh, now],
+    () => ({ save, reorder, history, rewrite, fresh, now }),
+    [save, reorder, history, rewrite, fresh, now],
   );
 
   async function saveContact(header: ResumeHeader) {

@@ -16,6 +16,11 @@ a proposal, and Plytos offers it in the conversation. Keeping it creates the
 card version: `author_kind = 'ai'` when kept as proposed, `'person'` when the
 person edited it first. Dismissed and replaced proposals stay on record.
 
+The one exception is the Summarizer, below. The person asked for a job's
+headline and its titles' stories to be written for them, so it saves them as
+versions without a tap, marked as Plytos's words, and leaves the person's own
+words alone.
+
 ## Records
 
 Schema: [`0004_agents.sql`](../services/api/migrations/0004_agents.sql) and
@@ -124,6 +129,23 @@ Assembler's), and turns each kept rewording into the card's variant for that
 target, also the Assembler's. Keeping after changes makes the first version
 the person's. With AI off, it says so and points to making a copy by hand.
 
+**Summarizer** (`agents/summarizer.py`) sums up a job in Plytos's own words:
+the employment's headline, one line across every title there, and each
+title's story, a few sentences on what was done in it, from the
+accomplishments under them. It writes a part only where Plytos may: empty,
+or written by Plytos before (`framing.plytos_wrote`, docs/data-model.md). A
+part Plytos wrote is written again when the accomplishments under it changed
+since. Every number it writes must appear in the cards it sums up, or that
+part stays as it was. It runs from the queue 20 seconds after an
+accomplishment or project is made or changed (one run per job for a burst of
+edits), or a title or job is made, and once for a job with accomplishments
+and nothing summed up yet, the first time the library is read. The library
+marks jobs it is about to write for (`writing`), and the cards check every few
+seconds until it's done. The person can also ask from the card (the Rewrite
+button): it runs at once, and asks first whether to replace their own words,
+which stay in the history either way. Its own saves never queue another run.
+With AI off it writes nothing and the card says so.
+
 ## A resume in the conversation
 
 The person can share a resume from the composer (or "Start from my resume"
@@ -171,6 +193,7 @@ details.
 | `POST /v1/resumes/{id}/take` | Takes the changes named by `keys` and catches up with `parent_version_id`, the version reviewed; no keys passes on them all. A parent change made meanwhile still shows afterwards |
 | `POST /v1/resumes/{id}/copies` | Makes a version for a target by hand (`name`, `target`, `target_kind`). Lines worded for the source's target keep that wording |
 | `POST /v1/resumes/{id}/ask` | Asks Plytos in the conversation for a version of this resume (`text`); the Assembler answers there |
+| `POST /v1/cards/{id}/summaries` | Sums a job up again now: its headline and each title's story (`replace_own` also replaces the person's own words). Says what it wrote; 503 with AI off |
 | `GET /v1/tidbits?card_id=` | The person's notes, oldest first, all or under one job |
 | `GET /v1/agent-runs` | What the agents did lately, for "how I got here". Never content |
 | `GET /v1/check-ins` | The check-in plan, said plainly, and when the next one is due. No plan means the person hasn't been asked yet |

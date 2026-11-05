@@ -34,10 +34,17 @@ export const CARD_KINDS = Object.keys(KIND_LABELS) as CardKind[];
 
 export type FactValue = string | number | string[];
 
+// The parts of a card's wording Plytos wrote itself, such as a job's headline
+// or a title's story summed up from its accomplishments.
+export type WrittenPart = "headline" | "body";
+
 export type Framing = {
   headline: string;
   body: string;
   shown_facts?: string[] | null;
+  // The parts Plytos wrote and nobody changed since. The API keeps this
+  // honest: editing a part makes it the person's own.
+  plytos_wrote?: WrittenPart[];
 };
 
 // A main-line version: the card it sits under, the facts, and the default way

@@ -64,6 +64,7 @@ function contentOf(
   base: LibraryCard,
   fields: Field[],
   headlineFrom: string | undefined,
+  standIn: string | undefined,
 ): LibraryContent | null {
   const content = base.content;
   if (!content) return null;
@@ -76,12 +77,21 @@ function contentOf(
     else facts[f.key] = value;
   }
   const followed = headlineFrom ? facts[headlineFrom] : undefined;
+  let headline = typeof followed === "string" && followed ? followed : draft.headline.trim();
+  if (standIn) {
+    // A headline that only repeats the fact follows it when the fact changes.
+    const was = content.facts[standIn];
+    const now = facts[standIn];
+    const standing =
+      typeof was === "string" && content.framing.headline.trim().toLowerCase() === was.trim().toLowerCase();
+    if (standing && typeof now === "string" && now) headline = now;
+  }
   return {
     ...content,
     facts,
     framing: {
       ...content.framing,
-      headline: typeof followed === "string" && followed ? followed : draft.headline.trim(),
+      headline,
       body: draft.body.trim(),
     },
     attachments: draft.attachments,
@@ -117,7 +127,8 @@ export function CardBack({
   wording = true,
   headlineLabel = "Headline",
   headlineFrom,
-  story = { label: "The story", placeholder: "What you did, how, and what changed because of it." },
+  standIn,
+  story = { label: "Detail", placeholder: "How you did it, and what changed because of it." },
 }: {
   card: LibraryCard;
   fields: Field[];
@@ -127,6 +138,10 @@ export function CardBack({
   // A fact the headline follows, such as the employer's name, when the card's
   // front shows that fact instead. The headline field is then left out.
   headlineFrom?: string;
+  // A fact the headline stands in with until someone writes one, such as a
+  // job's employer before its headline sums it up. The headline is edited on
+  // the front, so its field is left out here; a stand-in follows the fact.
+  standIn?: string;
   story?: { label: string; placeholder: string };
 }) {
   const { save, history, now } = useCardActions();
@@ -150,7 +165,7 @@ export function CardBack({
     };
   }, [id, head, history]);
 
-  const next = contentOf(draft, base, fields, headlineFrom);
+  const next = contentOf(draft, base, fields, headlineFrom, standIn);
   const dirty = !sameContent(next, base.content);
 
   // When the card moves on, follow it unless there are edits to keep. Our own
@@ -243,7 +258,7 @@ export function CardBack({
       {wording && (
         <fieldset className="grid gap-3">
           <legend className="sr-only">Wording</legend>
-          <div className={cn("grid gap-1.5", headlineFrom && "hidden")}>
+          <div className={cn("grid gap-1.5", (headlineFrom || standIn) && "hidden")}>
             <Label htmlFor={`${card.id}-headline`}>{headlineLabel}</Label>
             {/* One line of text that wraps as it grows; Return saves. */}
             <Textarea

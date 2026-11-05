@@ -3,7 +3,7 @@
 // awards, credentials, skills, projects and activities. Pure functions only,
 // so the shaping is tested without a browser.
 
-import type { CardContent, CardKind, FactValue } from "./cards";
+import type { CardContent, CardKind, FactValue, WrittenPart } from "./cards";
 
 export type AttachmentKind = "paper" | "repo" | "link";
 
@@ -31,6 +31,8 @@ export type LibraryCard = {
   updated_at: string;
   variants: number;
   variants_behind: number;
+  // A job Plytos is about to sum up, or summing up now.
+  writing?: boolean;
 };
 
 export type EngagementView = { card: LibraryCard; items: LibraryCard[] };
@@ -187,6 +189,36 @@ export function headline(card: LibraryCard): string {
   return card.content?.framing.headline ?? "Hidden (redacted)";
 }
 
+/** Whether a job's headline sums it up, rather than standing in with the
+ * employer's name as it does until someone writes one. */
+export function hasJobHeadline(card: LibraryCard): boolean {
+  const name = fact(card, "employer");
+  const text = card.content?.framing.headline.trim() ?? "";
+  return name !== "" && text !== "" && text.toLowerCase() !== name.toLowerCase();
+}
+
+/** Who wrote a part of a card's wording: Plytos, the person, or nobody yet. */
+export function writtenBy(card: LibraryCard, part: WrittenPart): "plytos" | "person" | null {
+  const content = card.content;
+  if (!content) return null;
+  const text = part === "headline" ? (hasJobHeadline(card) ? content.framing.headline : "") : content.framing.body;
+  if (!text.trim()) return null;
+  return content.framing.plytos_wrote?.includes(part) ? "plytos" : "person";
+}
+
+/** A card's content with one part of its wording changed by the person. An
+ * empty headline hands the job's headline back: it stands in with the name. */
+export function withWords(card: LibraryCard, part: WrittenPart, text: string): LibraryContent | null {
+  const content = card.content;
+  if (!content) return null;
+  const words = text.trim();
+  const framing =
+    part === "headline"
+      ? { ...content.framing, headline: words || fact(card, "employer") || content.framing.headline }
+      : { ...content.framing, body: words };
+  return { ...content, framing };
+}
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** "2005-06" reads "Jun 2005"; "2005" stays "2005"; "present" reads "Present". */
@@ -292,6 +324,7 @@ export function changedSince(
 }
 
 const FACT_KEY = /^[a-z][a-z0-9_]{0,63}$/;
+const WRITTEN_PARTS: readonly WrittenPart[] = ["headline", "body"];
 const ATTACHMENT_KINDS: readonly AttachmentKind[] = ["paper", "repo", "link"];
 export const MAX_ATTACHMENTS = 20;
 
@@ -338,6 +371,8 @@ export function cleanContent(raw: unknown): LibraryContent | null {
   if (attachments.some((a) => a === null)) return null;
   const parent = c.parent;
   if (parent !== undefined && parent !== null && typeof parent !== "string") return null;
+  const marks = framing?.plytos_wrote ?? [];
+  if (!Array.isArray(marks)) return null;
 
   return {
     parent: (parent as string | null | undefined) ?? null,
@@ -346,6 +381,8 @@ export function cleanContent(raw: unknown): LibraryContent | null {
       headline,
       body,
       shown_facts: Array.isArray(shown) ? shown.filter((s): s is string => typeof s === "string") : null,
+      // Kept as sent; the API keeps a mark only on text left as Plytos wrote it.
+      plytos_wrote: WRITTEN_PARTS.filter((p) => marks.includes(p)),
     },
     attachments: attachments as Attachment[],
   };
