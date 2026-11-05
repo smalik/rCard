@@ -28,6 +28,7 @@ from plytos_api.agents.model import NewResume, ProposalBody
 from plytos_api.agents.runtime import Agent, Worker
 from plytos_api.agents.stitcher import Stitcher
 from plytos_api.agents.store import AgentStore, ProposalConflictError
+from plytos_api.cards.hashing import canonical_json
 from plytos_api.cards.model import Framing, MainContent, VariantContent
 from plytos_api.cards.repository import Author, CardRepository
 from plytos_api.db import Database
@@ -39,6 +40,7 @@ from plytos_api.resumes.model import (
     ResumeContent,
     ResumeEntry,
     ResumeHeader,
+    ResumeHighlights,
     ResumeItem,
     keep_wording,
 )
@@ -463,6 +465,143 @@ def test_a_copy_reads_the_same_as_the_resume_it_was_made_from(make_user, open_: 
         ]
 
 
+def test_deleting_a_version_keeps_the_ones_after_it_whole(make_user, open_: Open) -> None:
+    user = make_user()
+    with open_(user) as s:
+        c = career(s.cards)
+        first = s.resumes.create("My resume", whole(c), ME)
+        shorter = whole(c)
+        shorter.context = []
+        second = s.resumes.save(first.id, shorter, first.head.id, ME)
+        s.resumes.name_version(first.id, 2, "Sent to Contoso")
+        shortest = shorter.model_copy(deep=True)
+        shortest.entries = shortest.entries[:1]
+        third = s.resumes.save(first.id, shortest, second.head.id, ME)
+
+        plan = s.resumes.plan_deletion(first.id, 2, after=False)
+        assert (plan.numbers, plan.back_to, plan.deletes_resume) == ([2], None, False)
+        with pytest.raises(StaleResumeError):
+            s.resumes.delete_versions(first.id, 2, second.head.id, ME, after=False)
+        after = s.resumes.delete_versions(first.id, 2, third.head.id, ME, after=False)
+        assert after is not None
+        assert after.head.id == third.head.id
+        assert lines(after.content) == lines(shortest)
+        assert [(v.number, v.redacted, v.names) for v in after.versions] == [
+            (1, False, []),
+            (2, True, []),
+            (3, False, []),
+        ]
+        with pytest.raises(ResumeNotFoundError):
+            s.resumes.version(first.id, 2)
+        with pytest.raises(ResumeNotFoundError):
+            s.resumes.plan_deletion(first.id, 2, after=False)
+        assert s.resumes.verify(first.id) == []
+
+
+def test_deleting_the_version_its_at_goes_back_to_the_nearest_kept(make_user, open_: Open) -> None:
+    user = make_user()
+    with open_(user) as s:
+        c = career(s.cards)
+        first = s.resumes.create("My resume", whole(c), ME)
+        shorter = whole(c)
+        shorter.context = []
+        second = s.resumes.save(first.id, shorter, first.head.id, ME)
+        third = s.resumes.save(first.id, whole(c), second.head.id, ME)
+
+        now = s.resumes.delete_versions(first.id, 3, third.head.id, ME, after=False)
+        assert now is not None
+        assert now.head.number == 4
+        assert now.head.note == "Deleted version 3; back to version 2"
+        assert lines(now.content) == lines(shorter)
+
+        plan = s.resumes.plan_deletion(first.id, 2, after=True)
+        assert (plan.numbers, plan.back_to) == ([2, 4], 1)
+        now = s.resumes.delete_versions(first.id, 2, now.head.id, ME, after=True)
+        assert now is not None
+        assert now.head.number == 5
+        assert now.head.note == "Deleted versions 2, 4; back to version 1"
+        assert lines(now.content) == lines(whole(c))
+        assert [v.number for v in now.versions if not v.redacted] == [1, 5]
+        assert s.resumes.verify(first.id) == []
+
+
+def test_a_resume_made_from_a_deleted_version_recenters(make_user, open_: Open) -> None:
+    user = make_user()
+    with open_(user) as s:
+        c = career(s.cards)
+        mine = s.resumes.create("My resume", whole(c), ME)
+        copy = s.resumes.create(
+            "Copy", whole(c), ME, parent_id=mine.id, synced_parent_version_id=mine.head.id
+        )
+        shorter = whole(c)
+        shorter.context = []
+        mine = s.resumes.save(mine.id, shorter, mine.head.id, ME)
+        copy = s.resumes.take(copy.id, [], copy.head.id, ME)  # Passes on the change.
+        shortest = shorter.model_copy(deep=True)
+        shortest.entries = shortest.entries[:1]
+        mine = s.resumes.save(mine.id, shortest, mine.head.id, ME)
+        assert [ch.kind for ch in s.resumes.parent_changes(copy.id)] == ["entry_removed"]
+
+        # Version 2, which the copy caught up with, goes; it counts from version 1.
+        plan = s.resumes.plan_deletion(mine.id, 2, after=False)
+        [reached] = plan.branches
+        assert (reached.name, reached.made_from, reached.caught_up_with, reached.recenters_on) == (
+            "Copy",
+            1,
+            2,
+            1,
+        )
+        s.resumes.delete_versions(mine.id, 2, mine.head.id, ME, after=False)
+        # Counting from version 1 offers again the change it passed on in version 2,
+        # rather than hiding one it never saw.
+        assert [ch.kind for ch in s.resumes.parent_changes(copy.id)] == [
+            "entry_removed",
+            "context_removed",
+        ]
+        assert s.resumes.detail(copy.id).parent_changes == 2
+        # A version made from neither stays out of it.
+        assert s.resumes.plan_deletion(mine.id, 3, after=False).branches == []
+
+
+def test_deleting_every_version_deletes_the_resume(make_user, open_: Open) -> None:
+    user = make_user()
+    with open_(user) as s:
+        c = career(s.cards)
+        mine = s.resumes.create("My resume", whole(c), ME)
+        mine = s.resumes.save(mine.id, whole(c), mine.head.id, ME)
+        keep = s.resumes.create(
+            "Keep", whole(c), ME, parent_id=mine.id, synced_parent_version_id=mine.head.id
+        )
+        drop = s.resumes.create(
+            "Drop", whole(c), ME, parent_id=mine.id, synced_parent_version_id=mine.head.id
+        )
+        under = s.resumes.create(
+            "Under drop", whole(c), ME, parent_id=drop.id, synced_parent_version_id=drop.head.id
+        )
+
+        plan = s.resumes.plan_deletion(mine.id, 1, after=True)
+        assert plan.deletes_resume
+        assert [(b.name, b.recenters_on) for b in plan.branches] == [("Keep", None), ("Drop", None)]
+        with pytest.raises(ResumeNotFoundError):
+            s.resumes.delete_versions(
+                mine.id, 1, mine.head.id, ME, after=True, with_branches=[under.id]
+            )
+        gone = s.resumes.delete_versions(
+            mine.id, 1, mine.head.id, ME, after=True, with_branches=[drop.id]
+        )
+        assert gone is None
+        for deleted in (mine.id, drop.id):
+            with pytest.raises(ResumeNotFoundError):
+                s.resumes.detail(deleted)
+        assert {r.name for r in s.resumes.summaries()} == {"Keep", "Under drop"}
+        # What stays stands on its own, with every version it had.
+        for stays in (keep.id, under.id):
+            detail = s.resumes.detail(stays)
+            assert (detail.parent_id, detail.parent_name, detail.parent_changes) == (None, None, 0)
+            assert s.resumes.parent_changes(stays) == []
+            assert lines(detail.content) == lines(whole(c))
+
+
 # -- how a page reads ----------------------------------------------------------
 
 
@@ -524,6 +663,84 @@ def test_a_page_lists_the_cards_outside_the_career_tree_it_leaves_out(
         assert [i.card for i in page.left_out_context] == [skills, c.degree, award]
         # With no story on the card, the line shows what its facts say.
         assert [i.detail for i in page.left_out_context] == ["SQL, Python", "B.S.", ""]
+
+
+def test_highlights_feature_lines_from_under_their_jobs(make_user, open_: Open) -> None:
+    user = make_user()
+    with open_(user) as s:
+        c = career(s.cards)
+        loose = card(s.cards, "accomplishment", "Ran the 2022 peak season")
+        content = whole(c)
+        content.highlights = ResumeHighlights(
+            style="both",
+            paragraph="Operations leader who ships.",
+            items=[
+                ResumeItem(card=c.forecast),
+                ResumeItem(card=loose),
+                ResumeItem(card=c.mentoring),
+            ],
+        )
+        page = render(content, s.cards)
+        assert page.highlights is not None
+        assert (page.highlights.style, page.highlights.paragraph) == (
+            "both",
+            "Operations leader who ships.",
+        )
+        assert [(i.text, i.where) for i in page.highlights.items] == [
+            ("Built the demand forecast, saving $3.1M", "Director · Northwind Logistics"),
+            ("Mentored new analysts", "Northwind Logistics"),
+        ]
+        # A line under no job can't be a highlight: it waits for one.
+        assert [(i.text, i.where) for i in page.unplaced] == [("Ran the 2022 peak season", "")]
+        assert render(whole(c), s.cards).highlights is None
+
+
+def test_loose_accomplishments_wait_for_a_job_and_awards_stand_alone(
+    make_user, open_: Open
+) -> None:
+    user = make_user()
+    with open_(user) as s:
+        c = career(s.cards)
+        loose = card(s.cards, "accomplishment", "Ran the 2022 peak season")
+        award = card(s.cards, "accomplishment", "Leader of the Year", award="Leader of the Year")
+        content = whole(c)
+        content.context += [ResumeItem(card=loose), ResumeItem(card=award), ResumeItem(card=c.late)]
+        page = render(content, s.cards)
+        assert [(sec.label, [i.text for i in sec.items]) for sec in page.sections] == [
+            ("Education", ["B.S. Industrial Engineering"]),
+            ("Awards", ["Leader of the Year"]),
+        ]
+        assert [(i.text, i.where) for i in page.unplaced] == [
+            ("Ran the 2022 peak season", ""),
+            ("Cut late shipments by 22%", "Director · Northwind Logistics"),
+        ]
+        content.context = []
+        offered = [i.text for i in render(content, s.cards).left_out_context]
+        assert "Leader of the Year" in offered
+        assert "Ran the 2022 peak season" not in offered
+
+
+def test_highlights_come_from_the_parent_like_any_change(make_user, open_: Open) -> None:
+    user = make_user()
+    with open_(user) as s:
+        c = career(s.cards)
+        plain = whole(c)
+        assert b"highlights" not in canonical_json(plain)
+        mine = s.resumes.create("My resume", plain, ME)
+        copy = s.resumes.create(
+            "Copy", whole(c), ME, parent_id=mine.id, synced_parent_version_id=mine.head.id
+        )
+        featured = whole(c)
+        featured.highlights = ResumeHighlights(items=[ResumeItem(card=c.late)])
+        mine = s.resumes.save(mine.id, featured, mine.head.id, ME)
+        [change] = s.resumes.parent_changes(copy.id)
+        assert describe(change, s.cards.main_contents()) == (
+            "Changed the highlights: their style, words or lines"
+        )
+        taken = s.resumes.take(copy.id, [change.key], copy.head.id, ME)
+        assert taken.content.highlights == featured.highlights
+        assert taken.head.schema_version == 2
+        assert s.resumes.verify(copy.id) == []
 
 
 def test_each_line_shows_the_wording_the_resume_asks_for(make_user, open_: Open) -> None:

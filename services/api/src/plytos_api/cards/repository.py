@@ -469,7 +469,7 @@ class CardRepository:
             " join plytos.card_line l on l.card_id = c.id and l.target_id is null"
             " join plytos.card_version v on v.id = l.head_version_id"
             " where c.status <> 'archived'"
-            " order by c.sort_key nulls last, c.created_at"
+            " order by c.sort_key nulls last, c.created_at, c.id"
         ).fetchall()
         return [
             LibraryCard(

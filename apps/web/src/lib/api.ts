@@ -10,6 +10,8 @@ import {
 } from "./imports";
 import type { LibraryCard, LibraryContent } from "./library";
 import type {
+  Deleted,
+  DeletionPlan,
   ParentChanges,
   ProposedResume,
   RenderedResume,
@@ -418,6 +420,34 @@ export function restoreResume(
     resumePath(id, "/restore"),
     session,
     json({ number, base_version_id: baseVersionId }),
+  );
+}
+
+// What deleting a version (and, with `after`, every one after it) would do.
+export function planDeletion(
+  session: Session,
+  id: string,
+  number: number,
+  after: boolean,
+): Promise<DeletionPlan> {
+  return apiFetch<DeletionPlan>(
+    resumePath(id, `/versions/${number}/deletion?after=${after ? "true" : "false"}`),
+    session,
+  );
+}
+
+export function deleteVersions(
+  session: Session,
+  id: string,
+  number: number,
+  baseVersionId: string,
+  after: boolean,
+  withBranches: string[],
+): Promise<Deleted> {
+  return apiFetch<Deleted>(
+    resumePath(id, `/versions/${number}/delete`),
+    session,
+    json({ base_version_id: baseVersionId, after, with_branches: withBranches }),
   );
 }
 

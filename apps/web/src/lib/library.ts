@@ -62,7 +62,7 @@ export type LibraryView = {
   projects: LibraryCard[];
   activities: LibraryCard[];
   // Accomplishments that sit on no job yet.
-  highlights: LibraryCard[];
+  unplaced: LibraryCard[];
   // Every card none of the above shows, such as a summary, a title whose
   // employer was left out, or work under a project, so nothing kept is hidden.
   other: LibraryCard[];
@@ -102,7 +102,7 @@ export function buildLibrary(cards: readonly LibraryCard[]): LibraryView {
     skills: [],
     projects: [],
     activities: [],
-    highlights: [],
+    unplaced: [],
     other: [],
   };
   const top = cards.filter((c) => c.parent_id === null).sort(bySortKey);
@@ -137,7 +137,7 @@ export function buildLibrary(cards: readonly LibraryCard[]): LibraryView {
         view.activities.push(card);
         break;
       case "accomplishment":
-        (fact(card, "award") ? view.awards : view.highlights).push(card);
+        (fact(card, "award") ? view.awards : view.unplaced).push(card);
         break;
       default:
         break;
@@ -163,7 +163,7 @@ export function buildLibrary(cards: readonly LibraryCard[]): LibraryView {
     view.skills,
     view.projects,
     view.activities,
-    view.highlights,
+    view.unplaced,
   ]) {
     for (const c of list) shown.add(c.id);
   }

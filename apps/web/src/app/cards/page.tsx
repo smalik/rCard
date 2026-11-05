@@ -11,17 +11,18 @@ import { currentSession } from "@/lib/session";
 export const metadata: Metadata = { title: "Your cards" };
 export const dynamic = "force-dynamic";
 
-// The contact card comes from the top of the resume changed most recently.
+// The contact and highlights cards come from the resume changed most recently.
 async function latestContact(session: Session): Promise<Contact | null> {
   const { resumes } = await listResumes(session);
   const latest = [...resumes].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
   if (!latest) return null;
-  const { resume } = await getResume(session, latest.id);
+  const { resume, page } = await getResume(session, latest.id);
   return {
     resumeId: resume.id,
     resumeName: resume.name,
     baseVersionId: resume.head.id,
     header: resume.content.header,
+    highlights: page.highlights ?? null,
   };
 }
 

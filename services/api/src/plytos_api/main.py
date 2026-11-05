@@ -78,6 +78,7 @@ from plytos_api.resumes.as_written import as_written
 from plytos_api.resumes.model import ResumeChange, ResumeContent, keep_wording
 from plytos_api.resumes.render import RenderedResume, describe, render
 from plytos_api.resumes.store import (
+    DeletionPlan,
     ResumeDetail,
     ResumeNotFoundError,
     ResumeStore,
@@ -232,6 +233,14 @@ class NameVersion(BaseModel):
     name: str = Field(min_length=1, max_length=120)
 
 
+class DeleteVersions(BaseModel):
+    base_version_id: UUID
+    # Every version after it goes too.
+    after: bool = False
+    # Resumes made from it to delete with it; the rest stay and re-center.
+    with_branches: list[UUID] = Field(default_factory=list, max_length=100)
+
+
 class RenameResume(BaseModel):
     name: str = Field(min_length=1, max_length=120)
 
@@ -278,6 +287,11 @@ class ResumeVersionPage(BaseModel):
     version: ResumeVersionView
     content: ResumeContent
     page: RenderedResume
+
+
+class Deleted(BaseModel):
+    # The resume as it is now; None when deleting took its last version.
+    resume: ResumePage | None
 
 
 class LabeledChange(BaseModel):
@@ -883,6 +897,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         with db.as_user(user_id) as conn:
             store, _ = resumes(conn, user_id)
             return store.name_version(resume_id, number, body.name)
+
+    @app.get("/v1/resumes/{resume_id}/versions/{number}/deletion")
+    def plan_deletion(
+        resume_id: UUID, number: int, user_id: User, after: bool = False
+    ) -> DeletionPlan:
+        """What deleting a version (with ``after``, and every one after it)
+        would do, before the person confirms. Changes nothing."""
+        with db.as_user(user_id) as conn:
+            store, _ = resumes(conn, user_id)
+            return store.plan_deletion(resume_id, number, after=after)
+
+    @app.post("/v1/resumes/{resume_id}/versions/{number}/delete")
+    def delete_versions(
+        resume_id: UUID, number: int, body: DeleteVersions, user_id: User
+    ) -> Deleted:
+        """Deletes a version for good, and with ``after`` every one after it.
+        What stays re-centers; see ResumeStore."""
+        with db.as_user(user_id) as conn:
+            store, cards = resumes(conn, user_id)
+            detail = store.delete_versions(
+                resume_id,
+                number,
+                body.base_version_id,
+                person(user_id),
+                after=body.after,
+                with_branches=body.with_branches,
+            )
+            return Deleted(resume=page(detail, cards) if detail else None)
 
     @app.get("/v1/resumes/{resume_id}/parent-changes")
     def parent_changes(resume_id: UUID, user_id: User) -> ParentChanges:

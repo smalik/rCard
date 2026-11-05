@@ -686,8 +686,34 @@ def test_resume_flow_over_http(client: TestClient, reads: ImportWorker) -> None:
     )
     assert asked.status_code == 201 and asked.json()["resume_id"] == resume_id
 
+    plan = client.get(f"/v1/resumes/{resume_id}/versions/2/deletion", headers=me)
+    assert plan.status_code == 200, plan.text
+    assert plan.json() == {"numbers": [2], "back_to": None, "deletes_resume": False, "branches": []}
+    assert (
+        client.get(f"/v1/resumes/{resume_id}/versions/2/deletion", headers=other).status_code == 404
+    )
+    latest = client.get(f"/v1/resumes/{resume_id}", headers=me).json()["resume"]["head"]["id"]
+    stale = client.post(
+        f"/v1/resumes/{resume_id}/versions/2/delete", json={"base_version_id": head}, headers=me
+    )
+    assert stale.status_code == 409
+    deleted = client.post(
+        f"/v1/resumes/{resume_id}/versions/2/delete", json={"base_version_id": latest}, headers=me
+    )
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["resume"]["resume"]["versions"][1]["redacted"] is True
+    assert client.get(f"/v1/resumes/{resume_id}/versions/2", headers=me).status_code == 404
+
     assert client.get(f"/v1/resumes/{resume_id}", headers=other).status_code == 404
     assert client.get(f"/v1/resumes/{resume_id}/versions/1", headers=other).status_code == 404
+    assert (
+        client.post(
+            f"/v1/resumes/{resume_id}/versions/1/delete",
+            json={"base_version_id": latest, "after": True},
+            headers=other,
+        ).status_code
+        == 404
+    )
     assert (
         client.post(f"/v1/resumes/{resume_id}/ask", json={"text": "Mine now"}, headers=other)
     ).status_code == 404

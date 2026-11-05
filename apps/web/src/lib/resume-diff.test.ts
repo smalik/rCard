@@ -190,4 +190,29 @@ describe("compareResumes", () => {
       ["skill", "added", ["added"]],
     ]);
   });
+
+  it("compares highlights: the featured lines and the paragraph's words", () => {
+    const withHighlights = (paragraph: string, items: RenderedItem[]): RenderedResume => ({
+      ...page(before.entries),
+      highlights: { style: "both", paragraph, items },
+    });
+    const a = withHighlights("Ships on time.", [item("late", "Cut late shipments by 22%")]);
+    const b = withHighlights("Ships on time, every time.", [
+      item("late", "Cut late shipments by 22%"),
+      item("forecast", "Built the demand forecast"),
+    ]);
+    const diff = compareResumes(a, b);
+    expect(diff.paragraph).toBe("Ships on time, every time.");
+    expect(diff.paragraphChange).toEqual({ was: "Ships on time.", now: "Ships on time, every time." });
+    const [featured] = diff.sections;
+    expect(featured?.kind).toBe("highlights");
+    expect(featured?.lines.map((l) => [l.card, l.presence])).toEqual([
+      ["late", "same"],
+      ["forecast", "added"],
+    ]);
+    expect(diffSummary(diff)).toBe("1 line added, the highlights paragraph changed");
+    // In bullets alone the paragraph doesn't show, so it doesn't count.
+    const bullets = { ...b, highlights: { ...b.highlights!, style: "bullets" as const } };
+    expect(compareResumes(bullets, bullets).paragraph).toBe("");
+  });
 });

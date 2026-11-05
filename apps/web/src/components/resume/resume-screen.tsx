@@ -16,13 +16,15 @@ import {
   Plus,
   Printer,
   Sparkles,
+  Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, type ReactNode, useCallback, useMemo, useState } from "react";
+import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
 import { AccomplishmentSheet } from "@/components/cards/accomplishment";
 import { type CardActions, CardActionsProvider, type CardVersion } from "@/components/cards/actions";
+import { type Place, PlacePicker } from "@/components/cards/place-picker";
 import { DiffPaper, Paper, type PaperEdits } from "@/components/resume/paper";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -51,11 +53,20 @@ import {
   askText,
   bringBack,
   changesLabel,
+  type Deleted,
+  type DeletionPlan,
+  feature,
+  HIGHLIGHT_PARAGRAPH_MAX,
+  HIGHLIGHT_STYLES,
+  HIGHLIGHTS_MAX,
+  keptVersions,
   leaveOut,
   move,
   moveContextLine,
+  moveHighlight,
   moveLine,
   type ParentChanges as Changes,
+  placeLine,
   type RenderedItem,
   type RenderedResume,
   type ResumeContent,
@@ -69,10 +80,14 @@ import {
   sameContent,
   setFold,
   setHeader,
+  setHighlightParagraph,
+  setHighlightStyle,
+  showHighlights,
   switchOff,
   switchOn,
   switchOnContext,
   TARGET_MAX,
+  unfeature,
   versionAuthor,
   versionLabel,
 } from "@/lib/resumes";
@@ -134,6 +149,10 @@ export function ResumeScreen({
   const [editingTop, setEditingTop] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [openCard, setOpenCard] = useState<string | null>(null);
+  // The version being deleted, and whether every one after it goes too.
+  const [deleting, setDeleting] = useState<{ number: number; after: boolean; whole: boolean } | null>(
+    null,
+  );
   const resume = current.resume;
   const base = `/resumes/${encodeURIComponent(resume.id)}`;
   const byId = useMemo(() => new Map(library.map((c) => [c.id, c])), [library]);
@@ -189,6 +208,51 @@ export function ResumeScreen({
     }
   }
 
+  // After a deletion: the resume as it is now, or the list when it's gone.
+  function deleted(result: Deleted) {
+    setDeleting(null);
+    setVersionsOpen(false);
+    if (!result.resume) {
+      router.push("/resumes");
+      return;
+    }
+    setCurrent(result.resume);
+    if (viewing || compared) router.replace(base);
+  }
+
+  // A line that waits outside any job goes under one: the card moves there in
+  // the library, and on this resume it shows under that job.
+  async function place(card: string, to: Place) {
+    if (!draft) return;
+    const lib = byId.get(card);
+    if (!lib?.content) return;
+    setBusy(true);
+    setError(null);
+    const moved = await send<{ ok: true }>(`/cards/${encodeURIComponent(card)}`, {
+      base_version_id: lib.version_id,
+      content: { ...lib.content, parent: to.card },
+    });
+    setBusy(false);
+    if (!moved.ok) return setError(moved.error);
+    const fresh = await send<LibraryCard[]>("/cards/library");
+    if (fresh.ok) setLibrary(fresh.data);
+    await change(placeLine(draft, card, to.employment));
+  }
+
+  // The employment a card already sits under, however deep.
+  const employmentOf = (card: string): string | null => {
+    let current = byId.get(card);
+    const seen = new Set<string>();
+    while (current?.parent_id && !seen.has(current.parent_id)) {
+      seen.add(current.parent_id);
+      const parent = byId.get(current.parent_id);
+      if (!parent) return null;
+      if (parent.kind === "employment" || parent.kind === "role") return parent.id;
+      current = parent;
+    }
+    return null;
+  };
+
   // The cards behind the lines: opening one shows it as on the cards screen.
   const saveCard = useCallback(
     async (card: LibraryCard, content: LibraryContent) => {
@@ -229,10 +293,13 @@ export function ResumeScreen({
         moveEntry: (entry, by) => change(move(draft, entry, by)),
         moveLine: (entry, group, card, by) => change(moveLine(draft, entry, group, card, by)),
         moveContext: (group, card, by) => change(moveContextLine(draft, group, card, by)),
+        unfeature: (card) => change(unfeature(draft, card)),
+        moveHighlight: (card, by) => change(moveHighlight(draft, card, by)),
         editHeader: () => setEditingTop(true),
       }
     : undefined;
 
+  const kept = keptVersions(resume.versions);
   const parent = family.find((r) => r.id === resume.parent_id) ?? null;
   const children = family.filter((r) => r.parent_id === resume.id);
   const page = draftPage ?? current.page;
@@ -286,12 +353,29 @@ export function ResumeScreen({
         />
         <aside className="flex min-w-0 flex-col gap-4 print:hidden" aria-label={draft ? "On file" : "About this resume"}>
           {draft ? (
-            <OnFileRail
-              page={page}
-              busy={busy}
-              onJob={(card) => change(bringBack(draft, card))}
-              onCard={(card) => change(switchOnContext(draft, card))}
-            />
+            <>
+              <UnplacedRail
+                page={page}
+                library={library}
+                busy={busy}
+                employmentOf={employmentOf}
+                onPlace={place}
+                onShow={(card, employment) => change(placeLine(draft, card, employment))}
+              />
+              <HighlightsRail
+                key={resume.head.id}
+                content={draft}
+                page={page}
+                busy={busy}
+                onChange={change}
+              />
+              <OnFileRail
+                page={page}
+                busy={busy}
+                onJob={(card) => change(bringBack(draft, card))}
+                onCard={(card) => change(switchOnContext(draft, card))}
+              />
+            </>
           ) : (
             <>
               <AboutRail
@@ -349,7 +433,7 @@ export function ResumeScreen({
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={() => setVersionsOpen(true)}>
                   <History /> Versions
-                  <span className="font-mono text-[11.5px] text-muted-foreground">{resume.versions.length}</span>
+                  <span className="font-mono text-[11.5px] text-muted-foreground">{kept.length}</span>
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => window.print()}>
                   <Printer /> <span className="max-sm:sr-only">Print or PDF</span>
@@ -364,13 +448,21 @@ export function ResumeScreen({
                     <DropdownMenuItem onSelect={() => setRenaming(true)}>
                       <Pencil /> Rename
                     </DropdownMenuItem>
-                    {resume.versions.length > 1 && (
+                    {kept.length > 1 && (
                       <DropdownMenuItem asChild>
-                        <Link href={`${base}?from=${resume.versions.at(-2)!.number}`}>
+                        <Link href={`${base}?from=${kept[1]!.number}`}>
                           <ArrowLeftRight /> Compare with the version before
                         </Link>
                       </DropdownMenuItem>
                     )}
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onSelect={() =>
+                        setDeleting({ number: kept.at(-1)!.number, after: true, whole: true })
+                      }
+                    >
+                      <Trash2 /> Delete this resume…
+                    </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <Button size="sm" onClick={startEditing}>
@@ -436,8 +528,17 @@ export function ResumeScreen({
           busy={busy}
           now={now}
           onRestore={restore}
+          onDelete={(number) => setDeleting({ number, after: false, whole: false })}
           onNamed={(detail) => setCurrent((c) => ({ ...c, resume: detail }))}
           act={act}
+        />
+        <DeleteDialog
+          key={deleting ? `${deleting.number}-${deleting.whole}` : "closed"}
+          request={deleting}
+          resume={resume}
+          base={base}
+          onClose={() => setDeleting(null)}
+          onDeleted={deleted}
         />
         {draft && (
           <TopDialog
@@ -512,7 +613,8 @@ function AboutRail({
   now: Date;
   onVersions: () => void;
 }) {
-  const latest = [...resume.versions].reverse().slice(0, 3);
+  const kept = keptVersions(resume.versions);
+  const latest = kept.slice(0, 3);
   return (
     <RailCard title="Versions">
       <ol className="flex flex-col">
@@ -542,7 +644,7 @@ function AboutRail({
         ))}
       </ol>
       <Button variant="outline" size="sm" className="mt-3 w-full" onClick={onVersions}>
-        <History /> All {resume.versions.length} versions and compare
+        <History /> All {kept.length} {kept.length === 1 ? "version" : "versions"} and compare
       </Button>
       {(parent || children.length > 0) && (
         <div className="mt-4 border-t pt-3">
@@ -686,6 +788,387 @@ function AddRow({
   );
 }
 
+/** Lines on this resume that sit outside any job on it. They don't show on
+ * the page until they're under one: an accomplishment means most under the
+ * job it's from. */
+function UnplacedRail({
+  page,
+  library,
+  busy,
+  employmentOf,
+  onPlace,
+  onShow,
+}: {
+  page: RenderedResume;
+  library: LibraryCard[];
+  busy: boolean;
+  employmentOf: (card: string) => string | null;
+  onPlace: (card: string, to: Place) => void;
+  onShow: (card: string, employment: string) => void;
+}) {
+  const lines = page.unplaced ?? [];
+  if (lines.length === 0) return null;
+  return (
+    <RailCard title="Not under a job yet">
+      <p className="text-[13px] text-muted-foreground">
+        {lines.length === 1 ? "This line doesn't" : `These ${lines.length} lines don't`} show on
+        the page until {lines.length === 1 ? "it sits" : "each sits"} under the job it&apos;s from.
+        Then you can feature {lines.length === 1 ? "it" : "them"} in Highlights too.
+      </p>
+      <ul className="mt-2 flex flex-col">
+        {lines.map((item) => {
+          const employment = item.where ? employmentOf(item.card) : null;
+          return (
+            <li key={item.card} className="flex flex-col gap-1.5 border-b py-2.5 last:border-b-0">
+              <p className="text-[14px] leading-snug">{item.text}</p>
+              {employment ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 self-start px-2.5 text-[12.5px]"
+                  disabled={busy}
+                  onClick={() => onShow(item.card, employment)}
+                >
+                  <CornerDownRight /> Show under {item.where}
+                </Button>
+              ) : (
+                <div className="self-start">
+                  <PlacePicker
+                    cards={library}
+                    line={item.text}
+                    busy={busy}
+                    size="xs"
+                    onPlace={(to) => onPlace(item.card, to)}
+                  />
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </RailCard>
+  );
+}
+
+/** The highlights section: on or off, its style, the paragraph in the
+ * person's own words, and the lines from their jobs to feature. */
+function HighlightsRail({
+  content,
+  page,
+  busy,
+  onChange,
+}: {
+  content: ResumeContent;
+  page: RenderedResume;
+  busy: boolean;
+  onChange: (next: ResumeContent) => void;
+}) {
+  const highlights = content.highlights ?? null;
+  const [paragraph, setParagraph] = useState(highlights?.paragraph ?? "");
+  if (!highlights) {
+    return (
+      <RailCard title="Highlights">
+        <p className="text-[13.5px] text-muted-foreground">
+          Feature your strongest lines again near the top: as bullets, as a paragraph in your own
+          words, or both.
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-3 w-full"
+          disabled={busy}
+          onClick={() => onChange(showHighlights(content, true))}
+        >
+          <Sparkles /> Add highlights
+        </Button>
+      </RailCard>
+    );
+  }
+  const featured = new Set(highlights.items.map((i) => i.card));
+  const full = highlights.items.length >= HIGHLIGHTS_MAX;
+  const bullets = highlights.style !== "paragraph";
+  const candidates = page.entries
+    .map((entry) => ({
+      employer: entry.employer,
+      lines: entry.roles.flatMap((r) => r.items).filter((i) => !featured.has(i.card)),
+    }))
+    .filter((g) => g.lines.length > 0);
+  const saveParagraph = () => {
+    if (paragraph !== highlights.paragraph) onChange(setHighlightParagraph(content, paragraph));
+  };
+  return (
+    <RailCard title="Highlights">
+      <div role="radiogroup" aria-label="Highlights style" className="grid grid-cols-3 gap-1 rounded-inset bg-muted p-0.5">
+        {HIGHLIGHT_STYLES.map((style) => (
+          <button
+            key={style.value}
+            type="button"
+            role="radio"
+            aria-checked={highlights.style === style.value}
+            disabled={busy}
+            onClick={() => {
+              saveParagraph();
+              onChange(setHighlightStyle(content, style.value));
+            }}
+            className={cn(
+              "h-7 rounded-[3px] text-[12.5px] font-medium text-muted-foreground transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none",
+              highlights.style === style.value && "bg-card text-foreground shadow-sm",
+            )}
+          >
+            {style.label}
+          </button>
+        ))}
+      </div>
+      {highlights.style !== "bullets" && (
+        <div className="mt-3 grid gap-1.5">
+          <Label htmlFor="highlights-paragraph" className="text-[13px]">
+            Your paragraph
+          </Label>
+          <Textarea
+            id="highlights-paragraph"
+            value={paragraph}
+            maxLength={HIGHLIGHT_PARAGRAPH_MAX}
+            rows={4}
+            placeholder="A few sentences on what you do best, in your own words."
+            onChange={(e) => setParagraph(e.target.value)}
+            onBlur={saveParagraph}
+          />
+        </div>
+      )}
+      {bullets && (
+        <div className="mt-3">
+          <h3 className="text-[13px] font-semibold">
+            Feature a line{" "}
+            <span className="font-normal text-muted-foreground tabular-nums">
+              {highlights.items.length} of {HIGHLIGHTS_MAX}
+            </span>
+          </h3>
+          {candidates.length === 0 ? (
+            <p className="mt-1 text-[13px] text-muted-foreground">
+              Lines under the jobs on this resume show here to feature.
+            </p>
+          ) : (
+            <div className="mt-1 flex max-h-72 flex-col gap-2 overflow-y-auto">
+              {candidates.map((group) => (
+                <div key={group.employer}>
+                  <p className="text-[12px] font-medium text-muted-foreground">{group.employer}</p>
+                  <ul className="flex flex-col">
+                    {group.lines.map((item) => (
+                      <AddRow
+                        key={item.card}
+                        label={item.text}
+                        detail=""
+                        busy={busy || full}
+                        onAdd={() => onChange(feature(content, item.card))}
+                      />
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      <Button
+        variant="ghost"
+        size="sm"
+        className="mt-2 -ml-2 text-muted-foreground"
+        disabled={busy}
+        onClick={() => onChange(showHighlights(content, false))}
+      >
+        Remove the highlights section
+      </Button>
+    </RailCard>
+  );
+}
+
+// -- deleting versions ------------------------------------------------------------
+
+function DeleteDialog({
+  request,
+  resume,
+  base,
+  onClose,
+  onDeleted,
+}: {
+  request: { number: number; after: boolean; whole: boolean } | null;
+  resume: ResumeDetail;
+  base: string;
+  onClose: () => void;
+  onDeleted: (result: Deleted) => void;
+}) {
+  const [after, setAfter] = useState(request?.after ?? false);
+  const [fetched, setFetched] = useState<{ key: string; plan: DeletionPlan } | null>(null);
+  const [also, setAlso] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const number = request?.number ?? 0;
+  const later = keptVersions(resume.versions).filter((v) => v.number > number).length;
+
+  // What deleting reaches, for what's chosen now.
+  const key = request ? `${number}-${after}-${resume.head.id}` : null;
+  const plan = fetched && fetched.key === key ? fetched.plan : null;
+  useEffect(() => {
+    if (!key) return;
+    let live = true;
+    void send<DeletionPlan>(`${base}/deletion`, { number, after }).then((result) => {
+      if (!live) return;
+      if (result.ok) setFetched({ key, plan: result.data });
+      else setError(result.error);
+    });
+    return () => {
+      live = false;
+    };
+  }, [key, base, number, after]);
+
+  async function confirm() {
+    if (!plan) return;
+    setBusy(true);
+    setError(null);
+    const result = await send<Deleted>(`${base}/delete`, {
+      number,
+      after,
+      base_version_id: resume.head.id,
+      with_branches: [...also],
+    });
+    setBusy(false);
+    if (!result.ok) return setError(result.error);
+    onDeleted(result.data);
+  }
+
+  const span = plan ? numbersText(plan.numbers) : "";
+  return (
+    <Dialog open={request !== null} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            {request?.whole ? `Delete ${resume.name}?` : `Delete version ${number}?`}
+          </DialogTitle>
+          <DialogDescription>
+            Its content and names are erased for good. This can&apos;t be undone.
+          </DialogDescription>
+        </DialogHeader>
+
+        {!request?.whole && later > 0 && (
+          <fieldset className="flex flex-col gap-2 text-[14px]">
+            <legend className="sr-only">What to delete</legend>
+            <label className="flex items-start gap-2.5">
+              <input
+                type="radio"
+                name="delete-after"
+                className="mt-0.5 size-4 accent-[var(--destructive)]"
+                checked={!after}
+                onChange={() => setAfter(false)}
+              />
+              <span>
+                Only version {number}
+                <span className="block text-[12.5px] text-muted-foreground">
+                  The {later === 1 ? "version" : `${later} versions`} after it stay as they are;
+                  each holds its whole page.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2.5">
+              <input
+                type="radio"
+                name="delete-after"
+                className="mt-0.5 size-4 accent-[var(--destructive)]"
+                checked={after}
+                onChange={() => setAfter(true)}
+              />
+              <span>Version {number} and every one after it</span>
+            </label>
+          </fieldset>
+        )}
+
+        {plan === null ? (
+          <p className="text-[14px] text-muted-foreground" role="status">
+            {error ?? "Checking what this reaches…"}
+          </p>
+        ) : (
+          <div className="flex flex-col gap-3 text-[14px]">
+            <p>
+              {plan.deletes_resume ? (
+                <>
+                  That&apos;s every version, so this deletes the resume.
+                  {resume.import_id && " You can make it again from the file it came from."}
+                </>
+              ) : (
+                <>
+                  Deletes {span}.
+                  {plan.back_to !== null &&
+                    ` Your resume goes back to version ${plan.back_to}, saved as version ${resume.head.number + 1}.`}
+                </>
+              )}
+            </p>
+            {plan.branches.length > 0 && (
+              <div className="rounded-inset border p-3">
+                <p className="text-[13px] font-semibold">Made from this resume</p>
+                <ul className="mt-1.5 flex flex-col gap-2">
+                  {plan.branches.map((b) => (
+                    <li key={b.id}>
+                      <label className="flex items-start gap-2.5">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 size-4 accent-[var(--destructive)]"
+                          checked={also.has(b.id)}
+                          onChange={(e) => {
+                            const next = new Set(also);
+                            if (e.target.checked) next.add(b.id);
+                            else next.delete(b.id);
+                            setAlso(next);
+                          }}
+                        />
+                        <span>
+                          Delete <b className="font-semibold">{b.name}</b> too
+                          <span className="block text-[12.5px] text-muted-foreground">
+                            {also.has(b.id)
+                              ? "Every version of it goes. Resumes made from it stay, on their own."
+                              : b.recenters_on === null
+                                ? "Otherwise it stays, on its own, with every version it has."
+                                : `Otherwise it stays, and takes changes from version ${b.recenters_on} on.`}
+                          </span>
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {error && (
+              <p role="alert" className="text-[13.5px] text-destructive">
+                {error}
+              </p>
+            )}
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="ghost" disabled={busy} onClick={onClose}>
+            Keep it
+          </Button>
+          <Button variant="destructive" disabled={busy || plan === null} onClick={confirm}>
+            <Trash2 />
+            {plan?.deletes_resume
+              ? "Delete the resume"
+              : plan && plan.numbers.length > 1
+                ? `Delete ${plan.numbers.length} versions`
+                : `Delete version ${number}`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// "version 3", "versions 3–5", or "versions 2, 4".
+function numbersText(numbers: number[]): string {
+  if (numbers.length === 1) return `version ${numbers[0]}`;
+  const run = numbers.every((n, i) => i === 0 || n === numbers[i - 1]! + 1);
+  return run
+    ? `versions ${numbers[0]}–${numbers.at(-1)}`
+    : `versions ${numbers.join(", ")}`;
+}
+
 // -- the resume it was made from ------------------------------------------------
 
 function ParentChanges({
@@ -791,6 +1274,7 @@ function VersionsSheet({
   busy,
   now,
   onRestore,
+  onDelete,
   onNamed,
   act,
 }: {
@@ -801,10 +1285,12 @@ function VersionsSheet({
   busy: boolean;
   now: Date;
   onRestore: (number: number) => void;
+  onDelete: (number: number) => void;
   onNamed: (detail: ResumeDetail) => void;
   act: <T>(action: string, body: unknown) => Promise<T | null>;
 }) {
   const versions = [...resume.versions].reverse();
+  const kept = keptVersions(resume.versions);
   const head = resume.head.number;
   const [naming, setNaming] = useState<number | null>(null);
   const [name, setName] = useState("");
@@ -826,16 +1312,31 @@ function VersionsSheet({
         <SheetHeader>
           <SheetTitle>Versions</SheetTitle>
           <SheetDescription>
-            Every change is kept. Name the ones you send, compare any two, or bring one back.
+            Every change is kept until you delete it. Name the ones you send, compare any two, or
+            bring one back.
           </SheetDescription>
         </SheetHeader>
 
-        {versions.length > 1 && (
-          <ComparePicker versions={versions} base={base} onGo={() => onOpenChange(false)} />
+        {kept.length > 1 && (
+          <ComparePicker versions={kept} base={base} onGo={() => onOpenChange(false)} />
         )}
 
         <ol className="flex flex-col overflow-y-auto px-5 pb-6">
-          {versions.map((v, i) => (
+          {versions.map((v, i) =>
+            v.redacted ? (
+              <li key={v.id} className="relative flex gap-3 pt-3">
+                <span
+                  aria-hidden
+                  className="relative z-10 mt-1.5 size-2.5 shrink-0 rounded-full border-2 border-dashed border-muted-foreground/40 bg-popover"
+                />
+                {i < versions.length - 1 && (
+                  <span aria-hidden className="absolute top-6 -bottom-3 left-[4px] w-px bg-border" />
+                )}
+                <p className="min-w-0 flex-1 border-b pb-3 text-[13px] text-muted-foreground">
+                  Version {v.number} · deleted
+                </p>
+              </li>
+            ) : (
             <li key={v.id} className="relative flex gap-3 pt-3">
               <span
                 aria-hidden
@@ -885,6 +1386,15 @@ function VersionsSheet({
                   >
                     {v.names.length ? "Rename" : "Name it"}
                   </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-destructive hover:text-destructive"
+                    disabled={busy}
+                    onClick={() => onDelete(v.number)}
+                  >
+                    Delete…
+                  </Button>
                 </div>
                 {naming === v.number && (
                   <form className="mt-2 flex gap-2" onSubmit={saveName}>
@@ -906,7 +1416,8 @@ function VersionsSheet({
                 )}
               </div>
             </li>
-          ))}
+            ),
+          )}
         </ol>
       </SheetContent>
     </Sheet>
@@ -987,7 +1498,7 @@ function CompareView({
   const router = useRouter();
   const diff = useMemo(() => compareResumes(compared.from.page, compared.to.page), [compared]);
   const summary = diffSummary(diff);
-  const versions = [...resume.versions].reverse();
+  const versions = keptVersions(resume.versions);
   const go = (from: number, to: number) => router.push(`${base}?from=${from}&to=${to}`);
   return (
     <>

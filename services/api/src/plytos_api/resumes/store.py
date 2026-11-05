@@ -11,6 +11,22 @@ Restoring an old version is a new version with that version's content.
 A resume made from another (its parent) records, on each version, which of
 the parent's versions it has caught up with. What changed in the parent since
 is offered change by change; taking some, or none, catches it up.
+
+The person can delete a version, or a version and every one after it. Its
+content and names are erased for good; the row, its number and hashes stay,
+so the history still verifies and later versions keep their whole pages.
+What stays re-centers on what's left:
+
+* Deleting the version the resume is at brings back the nearest earlier
+  version that stays, as a new version.
+* A resume made from this one that had caught up with a deleted version
+  counts from the nearest earlier version that stays (or the first one
+  after, if none is earlier). It's offered only what it doesn't already
+  show, though a change it passed on in a deleted version may be offered
+  again: better than hiding one it never saw.
+* Deleting every version deletes the resume. Resumes made from it, unless
+  deleted with it, stand on their own: they keep every version and stop
+  following it.
 """
 
 from __future__ import annotations
@@ -56,6 +72,7 @@ class StaleResumeError(Exception):
 class ResumeVersionView(BaseModel):
     id: UUID
     number: int
+    schema_version: int = 1
     author_kind: str
     author_ref: str | None
     created_at: datetime
@@ -79,6 +96,29 @@ class ResumeSummary(BaseModel):
     head_number: int
     created_at: datetime
     updated_at: datetime
+
+
+class DeletionBranch(BaseModel):
+    """A resume made from this one that a deletion reaches."""
+
+    id: UUID
+    name: str
+    # This resume's version it was made from, and the one it has caught up with.
+    made_from: int | None
+    caught_up_with: int | None
+    # Where it counts from if it stays; None when it will stand on its own.
+    recenters_on: int | None
+
+
+class DeletionPlan(BaseModel):
+    """What deleting a version, or it and every one after, would do."""
+
+    numbers: list[int]
+    # The version the resume goes back to, when the one it's at is deleted.
+    back_to: int | None
+    # Every version goes, so the resume does too.
+    deletes_resume: bool
+    branches: list[DeletionBranch]
 
 
 class ResumeDetail(ResumeSummary):
@@ -123,7 +163,8 @@ def _version_name_aad(name_id: UUID) -> bytes:
 
 _VERSION_COLUMNS = (
     "id, number, author_kind, author_ref, created_at, synced_parent_version_id,"
-    " content_hash, chain_hash, redacted_at is not null, content_ciphertext, resume_id"
+    " content_hash, chain_hash, redacted_at is not null, content_ciphertext, resume_id,"
+    " schema_version"
 )
 
 
@@ -230,11 +271,8 @@ class ResumeStore:
             return []
         _, their_content = theirs
         head, mine = self._head_content(resume_id)
-        base = (
-            self._content(head.synced_parent_version_id)
-            if head.synced_parent_version_id
-            else ResumeContent()
-        )
+        synced = self._recentered(head.synced_parent_version_id)
+        base = self._content(synced) if synced else ResumeContent()
         return still_to_take(diff(base, their_content), mine, their_content)
 
     def take(
@@ -273,24 +311,112 @@ class ResumeStore:
         self._append(resume_id, base, content, author, their_head.id)
         return self.detail(resume_id)
 
+    def plan_deletion(self, resume_id: UUID, number: int, *, after: bool) -> DeletionPlan:
+        """What deleting version ``number`` would do; with ``after``, every
+        version after it goes too."""
+        versions = self._versions(resume_id)
+        kept = [v for v in versions if not v.redacted]
+        if all(v.number != number for v in kept):
+            raise ResumeNotFoundError(f"{resume_id} v{number}")
+        going = {v.number for v in kept if v.number == number or (after and v.number > number)}
+        staying = [v.number for v in kept if v.number not in going]
+        head = kept[-1].number
+        back_to = staying[-1] if head in going and staying else None
+        by_id = {v.id: v.number for v in versions}
+
+        branches: list[DeletionBranch] = []
+        for branch_id, name_blob, made_from, caught_up in self._conn.execute(
+            "select r.id, r.name_ciphertext, first.synced_parent_version_id,"
+            " head.synced_parent_version_id"
+            " from plytos.resume r"
+            " join plytos.resume_version head on head.id = r.head_version_id"
+            " join plytos.resume_version first on first.resume_id = r.id and first.number = 1"
+            " where r.parent_id = %s and r.archived_at is null order by r.created_at",
+            (resume_id,),
+        ).fetchall():
+            made = by_id.get(made_from) if made_from else None
+            synced = by_id.get(caught_up) if caught_up else None
+            if not staying:
+                recenters_on = None
+            elif made not in going and synced not in going:
+                continue
+            else:
+                point = synced if synced is not None else made
+                recenters_on = _nearest(staying, point) if point is not None else staying[0]
+            branches.append(
+                DeletionBranch(
+                    id=branch_id,
+                    name=self._cipher.decrypt(bytes(name_blob), _name_aad(branch_id)).decode(),
+                    made_from=made,
+                    caught_up_with=synced,
+                    recenters_on=recenters_on,
+                )
+            )
+        return DeletionPlan(
+            numbers=sorted(going),
+            back_to=back_to,
+            deletes_resume=not staying,
+            branches=branches,
+        )
+
+    def delete_versions(
+        self,
+        resume_id: UUID,
+        number: int,
+        base_version_id: UUID,
+        author: Author,
+        *,
+        after: bool,
+        with_branches: Sequence[UUID] = (),
+    ) -> ResumeDetail | None:
+        """Deletes version ``number`` (and, with ``after``, every one after
+        it), and the resumes made from it named in ``with_branches``. Returns
+        the resume as it is now, or None when it's gone."""
+        base = self._head_for_update(resume_id, base_version_id)
+        plan = self.plan_deletion(resume_id, number, after=after)
+        reached = {b.id for b in plan.branches}
+        if not set(with_branches) <= reached:
+            raise ResumeNotFoundError("a resume made from this one that the deletion doesn't reach")
+        if plan.back_to is not None:
+            old, content = self.version(resume_id, plan.back_to)
+            content.note = _deleted_note(plan.numbers, plan.back_to)
+            self._append(resume_id, base, content, author, old.synced_parent_version_id)
+        ids = [v.id for v in self._versions(resume_id) if v.number in plan.numbers]
+        self._erase(ids)
+        self._event(author, "resume.versions_deleted", "resume", resume_id)
+        if plan.deletes_resume:
+            self._archive(resume_id)
+        for branch_id in with_branches:
+            self._erase([v.id for v in self._versions(branch_id) if not v.redacted])
+            self._archive(branch_id)
+            self._event(author, "resume.deleted", "resume", branch_id)
+        if plan.deletes_resume:
+            self._event(author, "resume.deleted", "resume", resume_id)
+            return None
+        return self.detail(resume_id)
+
     # -- reading ---------------------------------------------------------------
 
     def summaries(self) -> list[ResumeSummary]:
         rows = self._conn.execute(
-            "select r.id, r.name_ciphertext, r.target_id, r.parent_id, r.import_id,"
+            "select r.id, r.name_ciphertext, r.target_id, p.id, r.import_id,"
             " v.number, r.created_at, v.created_at, t.name_ciphertext"
             " from plytos.resume r join plytos.resume_version v on v.id = r.head_version_id"
             " left join plytos.target t on t.id = r.target_id"
+            # A resume made from one since deleted stands on its own.
+            " left join plytos.resume p on p.id = r.parent_id and p.archived_at is null"
             " where r.archived_at is null order by v.created_at desc"
         ).fetchall()
         return [self._summary(r) for r in rows]
 
     def detail(self, resume_id: UUID) -> ResumeDetail:
         row = self._conn.execute(
-            "select r.id, r.name_ciphertext, r.target_id, r.parent_id, r.import_id,"
+            "select r.id, r.name_ciphertext, r.target_id, p.id, r.import_id,"
             " v.number, r.created_at, v.created_at, t.name_ciphertext"
             " from plytos.resume r join plytos.resume_version v on v.id = r.head_version_id"
             " left join plytos.target t on t.id = r.target_id"
+            # A resume made from one since deleted stands on its own.
+            " left join plytos.resume p on p.id = r.parent_id and p.archived_at is null"
             " where r.id = %s and r.archived_at is null",
             (resume_id,),
         ).fetchone()
@@ -320,9 +446,8 @@ class ResumeStore:
 
     def version(self, resume_id: UUID, number: int) -> tuple[ResumeVersionView, ResumeContent]:
         for v in self._versions(resume_id):
-            if v.number == number:
-                content = ResumeContent() if v.redacted else self._content(v.id)
-                return v, content
+            if v.number == number and not v.redacted:
+                return v, self._content(v.id)
         raise ResumeNotFoundError(f"{resume_id} v{number}")
 
     def head_version_id(self, resume_id: UUID) -> UUID:
@@ -354,7 +479,7 @@ class ResumeStore:
             expected = resume_chain_hash(
                 resume_id=resume_id,
                 number=v.number,
-                schema_version=RESUME_SCHEMA_VERSION,
+                schema_version=v.schema_version,
                 parent_chain_hash=previous,
                 synced_parent_version_id=v.synced_parent_version_id,
                 content_hash=bytes.fromhex(v.content_hash),
@@ -437,7 +562,7 @@ class ResumeStore:
     def _parent_now(self, resume_id: UUID) -> tuple[ResumeVersionView, ResumeContent] | None:
         row = self._conn.execute(
             "select p.id from plytos.resume r join plytos.resume p on p.id = r.parent_id"
-            " where r.id = %s and p.head_version_id is not null",
+            " where r.id = %s and p.head_version_id is not null and p.archived_at is null",
             (resume_id,),
         ).fetchone()
         if row is None:
@@ -451,14 +576,58 @@ class ResumeStore:
         if parent_version_id is None:
             return self._parent_now(resume_id)
         row = self._conn.execute(
-            "select parent_id from plytos.resume where id = %s", (resume_id,)
+            "select r.parent_id from plytos.resume r join plytos.resume p on p.id = r.parent_id"
+            " where r.id = %s and p.archived_at is null",
+            (resume_id,),
         ).fetchone()
         if row is None or row[0] is None:
             return None
-        version = self._version_view(self._version_row(parent_version_id))
-        if self._version_row(parent_version_id)[10] != row[0]:
+        found = self._version_row(parent_version_id)
+        if found[10] != row[0]:
             raise ResumeNotFoundError(f"{parent_version_id} isn't a version of the parent")
+        version = self._version_view(found)
+        if version.redacted:
+            # Deleted while the person was deciding: they review it again.
+            raise StaleResumeError(None)
         return version, self._content(version.id)
+
+    def _erase(self, version_ids: list[UUID]) -> None:
+        """Erases versions' content and the names given to them. Their rows,
+        numbers and hashes stay, so the history still verifies."""
+        if not version_ids:
+            return
+        self._conn.execute(
+            "delete from plytos.resume_version_name where version_id = any(%s)", (version_ids,)
+        )
+        self._conn.execute(
+            "update plytos.resume_version set content_ciphertext = null,"
+            " redacted_at = clock_timestamp() where id = any(%s) and redacted_at is null",
+            (version_ids,),
+        )
+
+    def _archive(self, resume_id: UUID) -> None:
+        # The name goes too; only IDs, numbers, hashes and times stay.
+        self._conn.execute(
+            "update plytos.resume set archived_at = clock_timestamp(), name_ciphertext = %s"
+            " where id = %s and archived_at is null",
+            (self._cipher.encrypt(b"", _name_aad(resume_id)), resume_id),
+        )
+
+    def _recentered(self, version_id: UUID | None) -> UUID | None:
+        """The version to count from in place of a deleted one: the nearest
+        earlier version of its resume that stays, or the first one after."""
+        if version_id is None:
+            return None
+        row = self._version_row(version_id)
+        if not row[8]:
+            return version_id
+        found = self._conn.execute(
+            "select id from plytos.resume_version"
+            " where resume_id = %s and redacted_at is null"
+            " order by number < %s desc, abs(number - %s) limit 1",
+            (row[10], row[1], row[1]),
+        ).fetchone()
+        return found[0] if found else None
 
     def _versions(self, resume_id: UUID) -> list[ResumeVersionView]:
         rows = self._conn.execute(
@@ -519,6 +688,7 @@ class ResumeStore:
             content_hash=bytes(r[6]).hex(),
             chain_hash=bytes(r[7]).hex(),
             redacted=bool(r[8]),
+            schema_version=r[11],
         )
 
     def _summary(self, r: Sequence[Any]) -> ResumeSummary:
@@ -544,3 +714,20 @@ class ResumeStore:
             " record_id) values (%s, %s, %s, %s, %s, %s)",
             (self._user_id, author.kind, author.ref, action, record_type, record_id),
         )
+
+
+def _nearest(staying: list[int], number: int) -> int:
+    """The nearest version that stays at or before ``number``, or the first after."""
+    earlier = [n for n in staying if n <= number]
+    return earlier[-1] if earlier else staying[0]
+
+
+def _deleted_note(numbers: list[int], back_to: int) -> str:
+    gone = (
+        f"version {numbers[0]}"
+        if len(numbers) == 1
+        else f"versions {numbers[0]}\u2013{numbers[-1]}"
+        if numbers == list(range(numbers[0], numbers[-1] + 1))
+        else "versions " + ", ".join(str(n) for n in numbers)
+    )
+    return f"Deleted {gone}; back to version {back_to}"
