@@ -732,31 +732,50 @@ def _score_others(
             what = "highlight misplaced" if not placed else "highlight misread"
             miss(what, f"Highlight “{short}” on a card ({card.kind}) under {where}", card)
 
-    skill_cards = [c for c in reading.cards if c.kind == "skill"]
+    # Skills are scored as the skills a group lists, wherever the reading put them:
+    # how a list is cut into groups is the person's to tidy, not a skill lost.
+    read_skills: dict[str, ProposedCard] = {}
+    for card in reading.cards:
+        listed_on = card.content.facts.get("skills") if card.kind == "skill" else None
+        for skill in listed_on if isinstance(listed_on, list) else []:
+            read_skills.setdefault(norm(str(skill)), card)
+
+    def skill_card(skill: str) -> ProposedCard | None:
+        want = norm(skill)
+        if want in read_skills:
+            return read_skills[want]
+        return next(
+            (
+                c
+                for have, c in read_skills.items()
+                if want and have and (want in have or have in want)
+            ),
+            None,
+        )
+
     for group in career.skills:
-        listed = {norm(s) for s in group.items}
-        match = None
-        for card in skill_cards:
-            category = card.content.facts.get("category")
-            if isinstance(category, str) and norm(category) == norm(group.category):
-                match = card
-                break
-        if match is not None:
-            reading.used.add(match.ref)
-        skills = match.content.facts.get("skills") if match is not None else None
-        got = {norm(s) for s in skills} if isinstance(skills, list) else set()
-        if not out.others.add(match is not None and got == listed):
+        holders = [skill_card(s) for s in group.items]
+        on = [c for c in holders if c is not None]
+        reading.used.update(c.ref for c in on)
+        if not out.others.add(len(on) == len(holders)):
             miss(
-                "skills misread" if match else "skills lost",
-                f"Skills “{group.category}” read as {sorted(got) or 'nothing'}",
-                *([match] if match else []),
+                "skills misread" if on else "skills lost",
+                f"Skills “{group.category}”: {len(on)} of {len(holders)} found",
+                *on,
+            )
+            continue
+        categories = {norm(str(c.content.facts.get("category") or "")) for c in on}
+        if categories != {norm(group.category)}:
+            # Noted, not counted against the reading.
+            out.kinds["skills grouped differently"] = (
+                out.kinds.get("skills grouped differently", 0) + 1
             )
 
     for school in career.education:
         known_by = school.school or " ".join(t for t in (school.degree, school.field) if t)
         if not norm(known_by):
             continue
-        card = find(known_by, ["education"])
+        card = find(known_by, ["education", "credential"])
         if card is None:
             out.others.add(False)
             miss("education lost", f"Education at {school.school}: lost")
@@ -766,7 +785,13 @@ def _score_others(
         wrong_parts = [
             part
             for part, ok in (
-                ("as another kind", card.kind == "education"),
+                # A school with no degree or field ("Microsoft Certified...") may be
+                # a certificate listed under Education: either reading is right.
+                (
+                    "as another kind",
+                    card.kind == "education"
+                    or (card.kind == "credential" and not (school.degree or school.field)),
+                ),
                 (
                     "school misread",
                     not school.school
@@ -843,12 +868,9 @@ def _score_contact(out: Score, contact: Contact, career: Career, miss: Miss) -> 
     if career.phone:
         checks.append(("phone", digits(career.phone) in [digits(p) for p in contact.phones]))
     if career.location:
-        checks.append(
-            (
-                "location",
-                contact.location is not None and norm(contact.location) == norm(career.location),
-            )
-        )
+        # A label may hold the whole address; the import keeps the city and state.
+        have = norm(contact.location or "").split()
+        checks.append(("location", bool(have) and set(have) <= set(norm(career.location).split())))
     for field, ok in checks:
         if not out.contact.add(ok):
             miss(f"contact {field} lost", f"Contact {field} not read")

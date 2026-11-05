@@ -81,8 +81,8 @@ def reading() -> dict[str, Any]:
         ],
         "skills": [],
         "entries": [
-            {"kind": "education", "lines": [16], "dates": "2012"},
-            {"kind": "activity", "lines": [18], "dates": "2022"},
+            {"kind": "education", "lines": [16], "dates": "2012", "school": "", "degree": ""},
+            {"kind": "activity", "lines": [18], "dates": "2022", "school": "", "degree": ""},
         ],
         "skipped": [{"line": 14, "reason": "page_number"}, {"line": 19, "reason": "references"}],
     }
@@ -229,7 +229,9 @@ def _workstream_reading(subheadings: list[int], experience: list[int]) -> dict[s
             )
         ],
         "skills": [],
-        "entries": [{"kind": "education", "lines": [11], "dates": "2015"}],
+        "entries": [
+            {"kind": "education", "lines": [11], "dates": "2015", "school": "", "degree": ""}
+        ],
         "skipped": [],
     }
 
@@ -376,9 +378,9 @@ def test_entries_listed_under_a_year_take_that_year() -> None:
         "roles": [],
         "skills": [],
         "entries": [
-            {"kind": "activity", "lines": [4], "dates": "2019"},
-            {"kind": "activity", "lines": [5], "dates": "2019"},
-            {"kind": "activity", "lines": [7], "dates": "2017"},
+            {"kind": "activity", "lines": [4], "dates": "2019", "school": "", "degree": ""},
+            {"kind": "activity", "lines": [5], "dates": "2019", "school": "", "degree": ""},
+            {"kind": "activity", "lines": [7], "dates": "2017", "school": "", "degree": ""},
         ],
         "skipped": [],
     }

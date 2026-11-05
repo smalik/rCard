@@ -165,3 +165,16 @@ def test_a_date_range_set_over_three_lines_is_one() -> None:
         "May 2019 to January 2021",
         "Store Manager",
     ]
+
+
+def test_a_bullet_typed_against_its_first_word_is_a_bullet() -> None:
+    from plytos_api.imports.extract import split_bullet
+
+    assert split_bullet("•Grew sales 12%.") == ("Grew sales 12%.", "•")
+    assert split_bullet("-Trained nine cashiers.") == ("Trained nine cashiers.", "-")
+    # A figure or a word that starts with a dash is no bullet.
+    assert split_bullet("-2% shrink")[1] is None
+    assert split_bullet("-based pricing")[1] is None
+    doc = extract("Experience\n•Grew sales 12% in two years.\n".encode(), "resume.txt")
+    [line] = [b for b in doc.blocks if b.is_bullet]
+    assert line.text == "Grew sales 12% in two years."

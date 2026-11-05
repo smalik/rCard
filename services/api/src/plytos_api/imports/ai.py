@@ -118,6 +118,8 @@ class AiEntry(BaseModel):
     kind: str
     lines: list[int]
     dates: str
+    school: str
+    degree: str
 
 
 class AiSkip(BaseModel):
@@ -285,7 +287,12 @@ or "Core Qualifications"), not entries.
 listed apart from the roles) or activity (a talk, publication, board seat, \
 membership, volunteer work that isn't a job, or interest), with all of its lines and \
 its date or date range as written (for entries listed under a year written on a line \
-of its own, that year). kind is one of: {", ".join(ENTRY_KINDS)}.
+of its own, that year). kind is one of: {", ".join(ENTRY_KINDS)}. Schooling is \
+education (a degree, diploma or course of study at a school), even with a paragraph \
+under it. For education, school is the school's name alone, without its city, state \
+or dates, and degree is the degree and field of study as written (for example \
+"Bachelor of Science : Business Administration"), each copied exactly from its lines; \
+"" when it isn't written, and for other entries.
 - skipped: lines with nothing to keep, each with a reason: page_number; page_header \
 (the name or contact details repeated on a later page); decoration (rules or symbols); \
 references ("References available on request"). Never skip a line that says anything \
@@ -878,7 +885,10 @@ def _roles(
         if employment is not None and role.organization is None:
             role.organization = employment.organization
         role.title_first = _title_first(role, own_text)
-        subheadings = lines(ai.subheading_lines)
+        claimed = lines(ai.subheading_lines)
+        # A line called a sub-heading that reads as a bullet or a sentence is one: a
+        # bullet's lead-in isn't a workstream.
+        subheadings = [i for i in claimed if _names_a_group(blocks[i])]
         role.subheading_blocks = subheadings
         role.bullets = [
             Bullet(
@@ -887,7 +897,7 @@ def _roles(
                 bullet_char=blocks[i].bullet_char,
                 group=_group(subheadings, i, blocks),
             )
-            for i in lines(ai.bullet_lines)
+            for i in sorted({*lines(ai.bullet_lines), *(set(claimed) - set(subheadings))})
         ]
         description = lines(ai.description_lines)
         if description:
@@ -950,6 +960,15 @@ def _file_roles(roles: list[Role], employments: list[Employment]) -> list[Employ
     for role in roles:
         role.employment_ref = role.employment_key = names.get(role.employment_ref or "")
     return ordered
+
+
+def _names_a_group(block: Block) -> bool:
+    """Whether a line can head a group of bullets: short, and neither a bullet nor a
+    sentence."""
+    text = block.text.strip()
+    return (
+        not block.is_bullet and len(text.split()) <= 8 and not text.endswith((".", "!", "?", ";"))
+    )
 
 
 def _group(subheadings: list[int], line: int, blocks: dict[int, Block]) -> str | None:
@@ -1032,6 +1051,8 @@ def _entries(found: list[AiEntry], blocks: dict[int, Block], lines: _Claim) -> l
             Entry(
                 text=texts[0],
                 blocks=own,
+                school=verbatim(_given(ai.school), texts),
+                degree=verbatim(_given(ai.degree), texts),
                 dates=_dates(given, texts)
                 or find_range(" ".join(texts))
                 or _dates(given, _year_above(own[0], blocks)),

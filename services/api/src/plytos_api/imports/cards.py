@@ -181,10 +181,12 @@ def propose_cards(
             card.needs_check = [f"Is this from your work at {home.content.framing.headline}?"]
 
     for category, items in parsed.skills.items():
+        # "Languages:" is the group's label as set on the page; its name is "Languages".
+        name = category.strip().rstrip(":").strip() or "Skills"
         add(
             "skill",
-            {"category": category, "skills": items},
-            category if category != "Skills" else "Skills",
+            {"category": name, "skills": items},
+            name,
             parsed.skill_blocks.get(category, []),
             None,
         )
@@ -409,6 +411,11 @@ _DATE_EDGE = re.compile(
 
 def _education_facts(entry: Entry) -> dict[str, FactValue]:
     facts: dict[str, FactValue] = {}
+    # Claude names the school and the degree; the rules find what it didn't.
+    if entry.school:
+        facts["institution"] = entry.school
+    if entry.degree:
+        facts["degree"] = entry.degree
     pieces = [
         p.strip() for p in re.split(r",|\t|\s+[|–—-]\s+", " , ".join([entry.text, *entry.details]))
     ]

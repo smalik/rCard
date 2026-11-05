@@ -230,8 +230,11 @@ _STATE_NAMES = (
     "West Virginia|Wisconsin|Wyoming"
 )
 LOCATION = re.compile(
-    rf"(?:\b[A-Z][A-Za-z.'\-]+(?:\s+[A-Z][A-Za-z.'\-]+){{0,3}},\s*(?:(?:{_US_STATES})\b|"
+    rf"(?:\b[A-Z][A-Za-z.'\-]+(?:\s+[A-Z][A-Za-z.'\-]+){{0,3}}\s*,\s*(?:(?:{_US_STATES})\b|"
     rf"(?:{_STATE_NAMES})\b)(?:\s+\d{{5}}(?:-\d{{4}})?)?)"
+    # With a ZIP code after it, a city and state need no comma: "Springfield IL 62701".
+    rf"|(?:\b[A-Z][A-Za-z.'\-]+(?:\s+[A-Z][A-Za-z.'\-]+){{0,2}}\s+(?:{_US_STATES})"
+    r"\s+\d{5}(?:-\d{4})?\b)"
     r"|\b(?:Remote|Hybrid)\b",
 )
 EMAIL = re.compile(r"[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)+")
@@ -564,13 +567,26 @@ def parse_contact(blocks: list[Block]) -> Contact:
         if contact.location is None:
             m = LOCATION.search(EMAIL.sub(" ", text))
             if m:
-                contact.location = m.group(0).strip()
+                contact.location = _city_state(m.group(0))
         name = _name(text)
         if name is not None:
             names.append((-max(block.font_sizes, default=0.0), block.index, name))
     if names:
         contact.name = sorted(names)[0][2]
     return contact
+
+
+_STREET_WORD = re.compile(
+    r"(?:St|Street|Ave|Avenue|Rd|Road|Blvd|Boulevard|Dr|Drive|Ln|Lane|Way|Ct|Court|Pl|Place|"
+    r"Cir|Circle|Pkwy|Parkway|Ter|Terrace|Hwy|Highway|Trl|Trail|Loop|Apt|Suite|Ste|Unit)\.?,?"
+)
+
+
+def _city_state(found: str) -> str:
+    """A location as found, without the street it may follow on an address line."""
+    words = re.sub(r"\s+,", ",", found.strip()).split()
+    last = max((i for i, w in enumerate(words) if _STREET_WORD.fullmatch(w)), default=-1)
+    return " ".join(words[last + 1 :] if 0 <= last < len(words) - 2 else words)
 
 
 def _name(text: str) -> str | None:

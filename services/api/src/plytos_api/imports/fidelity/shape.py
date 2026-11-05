@@ -68,12 +68,19 @@ def _when(start: str | None, end: str | None) -> str:
     return "-".join(re.sub(r"\d", "9", d) if d else "?" for d in (start, end))
 
 
-def _lines_of(words: str, lines: dict[int, str]) -> list[int]:
+def _lines_of(words: str, lines: dict[int, str], after: int = -1) -> list[int]:
     """The lines a label's words are on: the first that holds their start, and those
-    after it that go on holding them."""
+    after it that go on holding them. Looked for after the line of the item before
+    first, since the same words can be written under more than one job."""
+    return _find_lines(words, lines, after) or _find_lines(words, lines, -1)
+
+
+def _find_lines(words: str, lines: dict[int, str], after: int) -> list[int]:
     want = norm(words)
     found: list[int] = []
     for index, text in lines.items():
+        if index <= after:
+            continue
         have = norm(text)
         if not have:
             continue
@@ -91,10 +98,12 @@ def show(career: Career, reading: ImportResult | None) -> str:
     data = source.read_bytes()
     if file_id(data) != career.key:
         return f"{career.key}: the label is for another file\n"
-    doc = extract(data, source.name)
+    # The reading's own lines when there's a reading (a scan's were read from its
+    # pictures), so the lines its cards name are these.
+    blocks = reading.blocks if reading is not None else extract(data, source.name).blocks
     out = [f"== {career.key} ({source.parent.name})", "", "Lines"]
     lines: dict[int, str] = {}
-    for block in doc.blocks:
+    for block in blocks:
         lines[block.index] = block.text
         marks = "".join(
             m
@@ -107,6 +116,7 @@ def show(career: Career, reading: ImportResult | None) -> str:
             + (_heading(block.text) or skeleton(block.text))
         )
     out += ["", "Label"]
+    last = -1
     for e, employment in enumerate(career.employments, 1):
         when = _when(employment.start, employment.end)
         out.append(f"  E{e} employer {skeleton(employment.employer)} {when}")
@@ -116,8 +126,9 @@ def show(career: Career, reading: ImportResult | None) -> str:
             for group in position.groups:
                 label = f" under {skeleton(group.label)}" if group.label else ""
                 for item in group.items:
-                    words = len(item.split())
-                    out.append(f"      item {words}w{label} on {_lines_of(item, lines)}")
+                    on = _lines_of(item, lines, last)
+                    last = on[-1] if on else last
+                    out.append(f"      item {len(item.split())}w{label} on {on}")
     for school in career.education:
         out.append(
             f"  school {skeleton(school.school)} | degree {skeleton(school.degree)}"
@@ -165,6 +176,11 @@ def show(career: Career, reading: ImportResult | None) -> str:
             + f" on {card.source_blocks}"
             + (f" workstream {skeleton(stream)}" if isinstance(stream, str) else "")
             + f" facts {sorted(k for k in facts if k != 'workstream')}"
+            + "".join(
+                f" | {key} {skeleton(str(facts[key]))}"
+                for key in ("institution", "degree")
+                if card.kind in ("education", "credential") and facts.get(key)
+            )
             + (f" MISS {scored.marks[card.ref]}" if card.ref in scored.marks else "")
         )
     lost = {k: v for k, v in scored.kinds.items() if "lost" in k}

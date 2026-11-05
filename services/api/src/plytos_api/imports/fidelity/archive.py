@@ -155,6 +155,52 @@ def _items(blocks: list[tuple[str, str]]) -> list[str]:
     return found
 
 
+def _label_like(line: str) -> bool:
+    """A line short enough to head a run of bullets, and no sentence."""
+    return 0 < len(line.split()) <= 8 and not line.endswith((".", "!", "?", ";", ","))
+
+
+def groups(element: Any) -> list[Group]:
+    """A job's description as items, under the sub-heading lines that head a run of
+    bullets ("Key Projects" over three bullets): the workstreams it's written in."""
+    seq: list[tuple[str, str]] = []
+    for kind, text in _blocks(element):
+        if kind == "li":
+            item = _clean(text).lstrip(BULLETS).strip()
+            if item:
+                seq.append(("bullet", item))
+            continue
+        for line in text.split("\n"):
+            line = _clean(line)
+            if line[:1] in BULLETS and line.lstrip(BULLETS).strip():
+                seq.append(("bullet", line.lstrip(BULLETS).strip()))
+            elif line:
+                seq.append(("line", line))
+        seq.append(("break", ""))
+    found = [Group(items=[])]
+    prose: list[str] = []
+
+    def flush() -> None:
+        found[-1].items.extend(sentences(" ".join(prose)))
+        prose.clear()
+
+    for n, (kind, text) in enumerate(seq):
+        if kind == "break":
+            flush()
+        elif kind == "bullet":
+            flush()
+            found[-1].items.append(text)
+        elif (
+            _label_like(text) and next((k for k, _ in seq[n + 1 :] if k != "break"), "") == "bullet"
+        ):
+            flush()
+            found.append(Group(label=text.rstrip(" :") or None, items=[]))
+        else:
+            prose.append(text)
+    flush()
+    return [g for g in found if g.items]
+
+
 def lines(element: Any) -> list[str]:
     """Every line of an element's text."""
     return [
@@ -306,7 +352,7 @@ def _job(job: Any) -> Employment | None:
     employer = _field_text(job, "COMP")
     where = ", ".join(t for t in (_field_text(job, "JCIT"), _field_text(job, "JSTA")) if t)
     description = field(job, "JDES")
-    found = items(description) if description is not None else []
+    found = groups(description) if description is not None else []
     return Employment(
         employer=employer,
         location=where or None,
@@ -315,7 +361,7 @@ def _job(job: Any) -> Employment | None:
                 title=title,
                 start=date(_field_text(job, "JSTD")),
                 end=date(_field_text(job, "EDDT")),
-                groups=[Group(items=found)] if found else [],
+                groups=found,
             )
         ],
     )

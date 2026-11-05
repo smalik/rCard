@@ -91,6 +91,9 @@ _SYMBOL_BULLETS = {
     "o": "◦",
 }
 _LEADING_BULLET = re.compile(rf"^\s*([{re.escape(_BULLET_GLYPHS)}-])\s+(?=\S)")
+# A bullet typed hard against its first word ("•Managed", "-Trained"): only glyphs
+# that start no word, and a dash only before a capital ("-2%" is a figure).
+_TIGHT_BULLET = re.compile(r"^\s*(?:([•●▪■◦►▸▶➢➤✓✔❖◆∙])(?=[\w“\"‘'(])|(-)(?=[A-Z][a-z]))")
 
 
 class UnsupportedFileError(ValueError):
@@ -185,7 +188,10 @@ def split_bullet(text: str) -> tuple[str, str | None]:
     """Splits a typed bullet off the front of a line."""
     m = _LEADING_BULLET.match(text)
     if not m:
-        return text, None
+        tight = _TIGHT_BULLET.match(text)
+        if not tight:
+            return text, None
+        return text[tight.end() :], tight.group(1) or tight.group(2)
     glyph = m.group(1)
     return text[m.end() :], _SYMBOL_BULLETS.get(glyph, glyph)
 
