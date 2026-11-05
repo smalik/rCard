@@ -19,7 +19,7 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import { ArrowRightLeft, Check, CornerDownRight, Pencil, Undo2, X } from "lucide-react";
+import { ArrowRightLeft, Check, ChevronDown, CornerDownRight, Layers, Pencil, Undo2, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import {
@@ -29,7 +29,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { contentFor, parentRef, type Proposal, type Review } from "@/lib/imports";
+import { contentFor, type MatchChoice, parentRef, type Proposal, type Review } from "@/lib/imports";
 import {
   canMoveUnder,
   groupQuestions,
@@ -69,6 +69,9 @@ type Props = {
   onPick: (ref: string) => void;
   onPickHeading: (block: number) => void;
   onAnswer: (question: Question, choice: number) => void;
+  // For a line that's already one of the person's cards: what keeping does.
+  matchChoice: (ref: string) => MatchChoice;
+  onChooseMatch: (ref: string, choice: MatchChoice) => void;
   actions: RowActions;
   // Shown under the picked line on a phone: where it came from in the file.
   peek?: (ref: string) => ReactNode;
@@ -133,6 +136,53 @@ function Mark({
       </span>
       Looks right
     </label>
+  );
+}
+
+// -- a line that's already one of the person's cards -----------------------------
+
+const MATCH_OPTIONS: Record<MatchChoice, string> = {
+  update: "Save as its next version",
+  keep: "Keep mine as it is",
+  separate: "Make a separate card",
+};
+
+// What keeping a line does to the card of theirs it stands for, when it says
+// something that card doesn't, and a way to change that. Earlier wording always
+// stays in the card's history.
+function MatchLine({
+  match,
+  chosen,
+  busy,
+  onChoose,
+}: {
+  match: { headline: string };
+  chosen: MatchChoice;
+  busy: boolean;
+  onChoose: (choice: MatchChoice) => void;
+}) {
+  const options: MatchChoice[] = ["update", "keep", "separate"];
+  const said =
+    chosen === "separate" ? "Becomes a new card" : chosen === "keep" ? "Your card stays as it is" : "Updates your card";
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <PaperButton disabled={busy} className="ml-3 h-7 px-1.5 text-[12px]">
+          <Layers /> {said} <ChevronDown />
+        </PaperButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-w-[min(22rem,90vw)]">
+        <DropdownMenuLabel className="font-normal text-muted-foreground">
+          It&apos;s your card “{match.headline}”. Earlier wording stays in its history.
+        </DropdownMenuLabel>
+        {options.map((option) => (
+          <DropdownMenuItem key={option} onSelect={() => onChoose(option)}>
+            <Check className={cn("size-4", option !== chosen && "opacity-0")} />
+            {MATCH_OPTIONS[option]}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -378,6 +428,7 @@ function Row({
   canDrop,
   onPick,
   onPickLabel,
+  match,
   actions,
   peek,
   before,
@@ -391,6 +442,8 @@ function Row({
   canDrop: boolean;
   onPick: () => void;
   onPickLabel: (block: number) => void;
+  // What keeping this line does to the card of the person's it stands for.
+  match?: ReactNode;
   actions: RowActions;
   peek?: ReactNode;
   // Questions asked at this line, shown above it.
@@ -463,6 +516,7 @@ function Row({
           </span>
         </button>
       )}
+      {!kept && !dropped && editing === null && match}
       {editing === "dates" && (
         <DatesEditor
           dates={datesOf(contentFor(card, review.progress))}
@@ -537,7 +591,9 @@ function Group({
   const open = groupQuestions(group, asked).filter((q) => q.answered === null);
   const byRef = new Map(review.cards.map((c) => [c.ref, c]));
   const askedAt = new Map<string, Question[]>();
-  for (const q of groupQuestions(group, asked)) askedAt.set(q.ref, [...(askedAt.get(q.ref) ?? []), q]);
+  for (const q of asked) askedAt.set(q.ref, [...(askedAt.get(q.ref) ?? []), q]);
+  const rows = new Set(group.rows.map((r) => r.ref));
+  const openHere = open.some((q) => rows.has(q.ref));
   const allDropped = group.rows.every((r) => r.state === "dropped");
 
   return (
@@ -579,6 +635,19 @@ function Group({
                 canDrop={canDrop}
                 onPick={() => props.onPick(row.ref)}
                 onPickLabel={props.onPickHeading}
+                match={
+                  // A line the person's card already says word for word changes
+                  // nothing, so only the ones that would change it say so.
+                  review.matches[row.ref] &&
+                  !review.matches[row.ref]!.same && (
+                    <MatchLine
+                      match={review.matches[row.ref]!}
+                      chosen={props.matchChoice(row.ref)}
+                      busy={props.actions.busy}
+                      onChoose={(choice) => props.onChooseMatch(row.ref, choice)}
+                    />
+                  )
+                }
                 actions={props.actions}
                 peek={props.peek?.(row.ref)}
               />
@@ -601,7 +670,8 @@ function Group({
             />
             {!marked && open.length > 0 && (
               <p className="text-[12px] text-paper-soft">
-                Answer above, or mark it to go with our pick{open.length > 1 ? "s" : ""}.
+                {openHere ? "Answer above" : "Answer the question about it"}, or mark it to go with our pick
+                {open.length > 1 ? "s" : ""}.
               </p>
             )}
           </>

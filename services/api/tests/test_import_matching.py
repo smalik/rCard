@@ -122,6 +122,22 @@ def test_the_same_resume_again_adds_nothing(make_user, open_: Open) -> None:
         assert {versions(s, card_id) for card_id in kept.values()} == {1}
 
 
+def test_dates_the_person_fixed_count_when_matching(make_user, open_: Open) -> None:
+    user = make_user()
+    with open_(user) as s:
+        first_id, first = bring_in(s, title_first_text())
+        approve_all(s, first_id, first)
+
+        again_id, again = bring_in(s, title_first_text())
+        assert "card-1" in s.imports.matches(again_id, s.cards)
+        # The person says this stint at Contoso Bank was an earlier one: it no
+        # longer stands for the stint kept before.
+        stint = again.cards[0].content
+        earlier = {**stint.facts, "start": "1990-01", "end": "1992-06"}
+        s.imports.fix(again_id, "card-1", stint.model_copy(update={"facts": earlier}))
+        assert "card-1" not in s.imports.matches(again_id, s.cards)
+
+
 def test_an_updated_resume_adds_versions_and_only_new_lines_become_cards(
     make_user, open_: Open
 ) -> None:

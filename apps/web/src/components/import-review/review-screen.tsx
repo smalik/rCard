@@ -33,6 +33,7 @@ import {
   type CardMatch,
   contentFor,
   dateSpan,
+  type MatchChoice,
   parentRef,
   plural,
   type Progress,
@@ -129,6 +130,8 @@ export function ReviewScreen({ initial, file }: { initial: Review; file: ResumeF
   const [toast, setToast] = useState<Toast | null>(null);
   const [kept, setKept] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // For lines that are already the person's cards: what keeping does to them.
+  const [matchChoices, setMatchChoices] = useState<Record<string, MatchChoice>>({});
 
   const id = review.id;
   const base = `/import/${encodeURIComponent(id)}`;
@@ -345,7 +348,7 @@ export function ReviewScreen({ initial, file }: { initial: Review; file: ResumeF
       const after = rebuild(now, file).flatMap((s) => s.groups);
       for (const group of after.filter((g) => keys.has(g.key) && !isSettled(g, now))) {
         setBusy(`Keeping ${group.name}…`);
-        const request = keepRequest(group.group, current, NO_CHOICES);
+        const request = keepRequest(group.group, current, { ...NO_CHOICES, choice: matchChoices });
         if (request.keep.length + request.leave_out.length + request.later.length === 0) continue;
         current = await post(`${base}/keep`, request, current);
         if (!current) return;
@@ -474,6 +477,8 @@ export function ReviewScreen({ initial, file }: { initial: Review; file: ResumeF
       onPick={pickRow}
       onPickHeading={(block) => setPick({ side: "heading", block })}
       onAnswer={answer}
+      matchChoice={(ref) => matchChoices[ref] ?? "update"}
+      onChooseMatch={(ref, choice) => setMatchChoices((c) => ({ ...c, [ref]: choice }))}
       actions={actions}
       peek={peek}
     />

@@ -178,12 +178,13 @@ export function toResumeFile(raw: unknown): ResumeFile {
   };
 }
 
-// Whether the file can be shown as pictures of its pages, each line lit up
-// where it sits. Otherwise it's shown line by line.
+// Whether the file can be shown as pictures of its pages, each typed line lit
+// up where it sits. A scanned page shows too, with what was read from it
+// listed under it. A PDF read before lines kept their places is shown line by
+// line.
 export function showsPages(file: ResumeFile): boolean {
   if (file.format !== "pdf" || file.pages.length === 0) return false;
-  const typed = file.lines.filter((l) => !l.picture);
-  return typed.length > 0 && typed.every((l) => l.box !== null);
+  return file.lines.filter((l) => !l.picture).every((l) => l.box !== null);
 }
 
 // -- where each line went ---------------------------------------------------------
@@ -535,6 +536,9 @@ export type Question = {
   key: string;
   // The card it's asked at, in the rebuilt resume.
   ref: string;
+  // Every card it's about. A job holding any of them isn't sure until it's
+  // answered, and marking that job goes with Plytos's pick.
+  refs: string[];
   prompt: string;
   // Why it's asked, in a line.
   why: string | null;
@@ -600,21 +604,26 @@ export function questions(review: Review): Question[] {
       label: c.label,
       answer: { kind: "place", ref: card.ref, parentRef: c.parent_ref },
     }));
-    const moved = card.ref in review.progress.moves;
-    const at = moved
-      ? choices.findIndex(
-          (c) => c.answer.kind === "place" && c.answer.parentRef === (review.progress.moves[card.ref] ?? null),
-        )
-      : -1;
+    let answered: number | null = null;
+    if (card.ref in review.progress.moves) {
+      const to = review.progress.moves[card.ref] ?? null;
+      answered = choices.findIndex((c) => c.answer.kind === "place" && c.answer.parentRef === to);
+      if (answered < 0) {
+        // Moved somewhere Plytos didn't suggest: that's the person's answer.
+        choices.push({ label: placeName(to, review), answer: { kind: "place", ref: card.ref, parentRef: to } });
+        answered = choices.length - 1;
+      }
+    }
     out.push({
       key: `place-${card.ref}`,
       ref: card.ref,
+      refs: [card.ref],
       prompt: placement.question,
       why: placement.reason || null,
       blocks: card.source_blocks,
       choices,
       picked: 0,
-      answered: moved ? (at >= 0 ? at : null) : null,
+      answered,
     });
   }
   for (const index of review.toSettle) {
@@ -627,6 +636,7 @@ export function questions(review: Review): Question[] {
     out.push({
       key: `settle-${index}`,
       ref,
+      refs,
       prompt: settleQuestion(finding),
       why: finding.title,
       blocks: finding.locations.flatMap((l) => (l.block !== null ? [l.block] : [])),
@@ -638,10 +648,11 @@ export function questions(review: Review): Question[] {
   return out;
 }
 
-// The questions asked inside a group, answered or not.
+// The questions about anything in a group, answered or not, wherever they're
+// asked.
 export function groupQuestions(group: RebuiltGroup, all: Question[]): Question[] {
   const refs = new Set(group.rows.map((r) => r.ref));
-  return all.filter((q) => refs.has(q.ref));
+  return all.filter((q) => q.refs.some((ref) => refs.has(ref)));
 }
 
 // Whether Plytos is sure of a group as it stands: nothing in it is asked about

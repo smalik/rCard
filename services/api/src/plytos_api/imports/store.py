@@ -169,7 +169,10 @@ def find_matches(
 ) -> dict[str, CardMatch]:
     """The person's card each proposed card stands for, by ref, as things stand:
     the person's decisions, moves and edits count."""
-    contents = {p.ref: progress.edits.get(p.ref) or p.content for p in result.cards}
+    contents = {
+        p.ref: progress.edits.get(p.ref) or progress.fixes.get(p.ref) or p.content
+        for p in result.cards
+    }
     decided = {ref: Decided(state=d.state, card_id=d.card_id) for ref, d in progress.cards.items()}
     return match_cards(result, decided, progress.moves, contents, cards, reserved)
 

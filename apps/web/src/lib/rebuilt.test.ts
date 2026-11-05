@@ -173,6 +173,12 @@ describe("the file", () => {
     expect(showsPages(file)).toBe(true);
   });
 
+  it("shows a scanned PDF as its pages, with what was read listed under them", () => {
+    const scanned = raw({ boxes: false });
+    for (const block of scanned.result.blocks) Object.assign(block, { where: "image" });
+    expect(showsPages(toResumeFile(scanned))).toBe(true);
+  });
+
   it("shows a file line by line when it can't light lines up on its pages", () => {
     expect(showsPages(toResumeFile(raw({ boxes: false })))).toBe(false);
     expect(showsPages(toResumeFile(raw({ format: "docx", boxes: false })))).toBe(false);
@@ -331,6 +337,26 @@ describe("questions with the answer already picked", () => {
     });
     const asked = questions(toReview(answered));
     expect(asked.map((q) => q.answered)).toEqual([1, 1]);
+  });
+
+  it("counts a place the person chose that Plytos didn't suggest as their answer", () => {
+    const moved = toReview(raw({ progress: { moves: { "card-9": "card-3" } } }));
+    const [placed] = questions(moved);
+    expect(placed!.answered).toBe(2);
+    expect(placed!.choices[2]!.label).toBe("Northwind Logistics › Director of Operations");
+  });
+
+  it("holds back every job a question is about, not just the one it's asked in", () => {
+    // One of the two numbers now sits under Fabrikam; the question is asked at Northwind.
+    const split = raw({ progress: { moves: { "card-6": "card-8", "card-9": "card-8" } } });
+    const review = toReview(split);
+    const asked = questions(review);
+    const [, experience] = rebuild(review, toResumeFile(split));
+    const [northwind, fabrikam] = experience!.groups;
+    expect(asked.find((q) => q.key === "settle-0")!.ref).toBe("card-4");
+    expect(groupQuestions(fabrikam!, asked).map((q) => q.key)).toEqual(["place-card-9", "settle-0"]);
+    expect(isSure(fabrikam!, review, asked)).toBe(false);
+    expect(isSure(northwind!, review, asked)).toBe(false);
   });
 
   it("marks a job looks-right only when nothing in it is asked or guessed", () => {
