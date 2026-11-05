@@ -144,6 +144,15 @@ class ImportView(BaseModel):
 MatchChoice = Literal["update", "keep", "separate"]
 
 
+class KeepCard(BaseModel):
+    """One proposed card to approve along with others (ImportStore.keep_group)."""
+
+    ref: str = Field(pattern=r"^card-[0-9]{1,4}$")
+    # The person's own wording, when they changed it; None keeps the proposal's.
+    content: MainContent | None = None
+    choice: MatchChoice | None = None
+
+
 def find_matches(
     result: ImportResult,
     progress: ImportProgress,
@@ -348,14 +357,7 @@ class ImportStore:
         self, import_id: UUID, ref: str, state: Literal["later", "dropped", "pending"]
     ) -> ImportProgress:
         result, progress = self._load(import_id)
-        _proposal(result, ref)
-        current = progress.cards.get(ref)
-        if current is not None and current.state == "approved":
-            raise ImportConflictError("That card is already approved.")
-        if state == "pending":
-            progress.cards.pop(ref, None)
-        else:
-            progress.cards[ref] = CardDecision(state=state)
+        _decide(result, progress, ref, state)
         self._save_progress(import_id, progress)
         return progress
 
@@ -394,6 +396,59 @@ class ImportStore:
         linked to it as it is ("keep"). Nothing is saved when the import adds
         nothing new. "separate" makes a new card all the same."""
         result, progress = self._load(import_id)
+        card = self._approve(
+            result, progress, ref, content, choice, cards, cards.main_contents(), author
+        )
+        self._save_progress(import_id, progress)
+        return card, progress
+
+    def keep_group(
+        self,
+        import_id: UUID,
+        keep: Sequence[KeepCard],
+        cards: CardRepository,
+        author: Author,
+        leave_out: Sequence[str] = (),
+        later: Sequence[str] = (),
+    ) -> ImportProgress:
+        """Decides a group of proposed cards at once, such as a job and what was
+        done there, the way the person goes through them in the conversation:
+        leaves some out, sets some aside for later, and approves the rest, each
+        under the card it sits under, whatever order they come in.
+
+        All of it or none of it: a card that can't be approved yet (its place
+        isn't answered, or the card above it is undecided) refuses the lot, and
+        the caller's transaction rolls back whatever was saved."""
+        result, progress = self._load(import_id)
+        refs = [k.ref for k in keep] + list(leave_out) + list(later)
+        if len(set(refs)) != len(refs):
+            raise ImportConflictError("Each card can be decided once at a time.")
+        for ref in leave_out:
+            _decide(result, progress, ref, "dropped")
+        for ref in later:
+            _decide(result, progress, ref, "later")
+        contents = cards.main_contents()
+        depth = {k.ref: _depth(result, progress, k.ref) for k in keep}
+        for item in sorted(keep, key=lambda k: depth[k.ref]):
+            self._approve(
+                result, progress, item.ref, item.content, item.choice, cards, contents, author
+            )
+        self._save_progress(import_id, progress)
+        return progress
+
+    def _approve(
+        self,
+        result: ImportResult,
+        progress: ImportProgress,
+        ref: str,
+        content: MainContent | None,
+        choice: MatchChoice | None,
+        cards: CardRepository,
+        contents: dict[UUID, CardText],
+        author: Author,
+    ) -> CardDetail:
+        """Approves one proposed card, recording it in `progress`. The caller saves
+        the progress. `contents` are the person's cards as they were before."""
         proposal = _proposal(result, ref)
         current = progress.cards.get(ref)
         if current is not None and current.state == "approved":
@@ -408,7 +463,7 @@ class ImportStore:
         if choice != "separate":
             # The card it matched as the person saw it: wording they edit on the
             # way to approving goes into that card, and doesn't change which it is.
-            match = find_matches(result, progress, cards.main_contents()).get(ref)
+            match = find_matches(result, progress, contents).get(ref)
         if match is None and choice in ("update", "keep"):
             raise ImportConflictError(
                 "That card doesn't match one of yours any more. Approve it as a new card."
@@ -428,8 +483,7 @@ class ImportStore:
                 cards.save_main_version(match.card_id, head, merged(existing, chosen), author)
                 card = cards.card_detail(match.card_id)
         progress.cards[ref] = CardDecision(state="approved", card_id=card.id)
-        self._save_progress(import_id, progress)
-        return card, progress
+        return card
 
     def matches(self, import_id: UUID, cards: CardRepository) -> dict[str, CardMatch]:
         """The person's cards that this import's proposed cards stand for."""
@@ -589,6 +643,34 @@ def _proposal(result: ImportResult, ref: str) -> ProposedCard:
         if card.ref == ref:
             return card
     raise ImportNotFoundError(ref)
+
+
+def _decide(
+    result: ImportResult,
+    progress: ImportProgress,
+    ref: str,
+    state: Literal["later", "dropped", "pending"],
+) -> None:
+    _proposal(result, ref)
+    current = progress.cards.get(ref)
+    if current is not None and current.state == "approved":
+        raise ImportConflictError("That card is already approved.")
+    if state == "pending":
+        progress.cards.pop(ref, None)
+    else:
+        progress.cards[ref] = CardDecision(state=state)
+
+
+def _depth(result: ImportResult, progress: ImportProgress, ref: str) -> int:
+    """How many cards a proposed card sits under, so parents are approved first."""
+    depth = 0
+    seen = {ref}
+    above = _parent_ref(progress, _proposal(result, ref))
+    while above is not None and above not in seen:
+        seen.add(above)
+        depth += 1
+        above = _parent_ref(progress, _proposal(result, above))
+    return depth
 
 
 def _saved_parent(

@@ -1,12 +1,10 @@
-import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
-import { loadReview } from "../load";
-import { SettleFlow } from "./settle-flow";
-
-export const metadata: Metadata = { title: "Settle what doesn't line up" };
 export const dynamic = "force-dynamic";
 
-export default async function SettlePage({ params }: { params: Promise<{ id: string }> }) {
+// A resume is gone through in the conversation now: the questions first, then
+// each job. Old links land there.
+export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  return <SettleFlow review={await loadReview(id)} />;
+  redirect(`/talk?review=${encodeURIComponent(id)}`);
 }

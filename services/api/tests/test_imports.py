@@ -161,6 +161,18 @@ def test_gap_is_measured_between_roles(messy: ImportResult) -> None:
     assert "Dec 2016" in gap.detail and "Jan 2018" in gap.detail
 
 
+def test_a_gap_reads_as_it_is_said() -> None:
+    assert [audit_module._article(n) for n in (7, 8, 11, 12, 18, 24, 80)] == [
+        "a",
+        "an",
+        "an",
+        "a",
+        "an",
+        "a",
+        "an",
+    ]
+
+
 def test_tidy_pdf_has_nothing_to_fix() -> None:
     result = import_resume(clean_pdf(), "Avery Chen Resume.pdf", today=TODAY)
     assert [f.rule for f in result.findings if f.severity != "note"] == []

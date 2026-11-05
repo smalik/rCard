@@ -18,7 +18,6 @@ import {
   type Proposal,
   type ProposedCard,
   readingShared,
-  resumeNext,
   resumeProgress,
   timeLabel,
   withWording,
@@ -146,31 +145,21 @@ describe("a shared resume", () => {
     to_settle: 2,
   };
 
-  it("leads to the questions, then the cards, then what was read", () => {
-    expect(resumeNext(resume)).toEqual({
-      href: "/import/r1/settle",
-      label: "Answer the questions",
-    });
-    expect(resumeNext({ ...resume, to_settle: 0 }).href).toBe("/import/r1/approve");
-    expect(resumeNext({ ...resume, to_settle: 0, approved: 20, dropped: 6 }).href).toBe(
-      "/import/r1",
-    );
-  });
-
   it("says how far along it is", () => {
     expect(resumeProgress(resume)).toBe("26 cards · 2 questions");
     expect(resumeProgress({ ...resume, approved: 4, to_settle: 1 })).toBe(
       "26 cards · 4 kept · 1 question",
+    );
+    expect(resumeProgress({ ...resume, approved: 20, later: 3, to_settle: 0 })).toBe(
+      "26 cards · 20 kept · 3 set aside",
     );
   });
 
   it("follows a reading that's under way or failed", () => {
     const reading = { ...resume, state: "reading" as const, stage: "structure" as const, cards: 0 };
     expect(resumeProgress(reading)).toBe("Reading it now");
-    expect(resumeNext(reading)).toEqual({ href: "/import/r1", label: "See how it's going" });
     const failed = { ...resume, state: "failed" as const, cards: 0 };
     expect(resumeProgress(failed)).toBe("Couldn't read it");
-    expect(resumeNext(failed).label).toBe("See what went wrong");
   });
 
   it("keeps the conversation waiting while a shared resume is read", () => {

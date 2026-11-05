@@ -261,6 +261,21 @@ export function approveCard(
   );
 }
 
+// Decides a group of proposed cards at once, such as a job and what's under it:
+// keeps some (in the person's words where they changed them), leaves some out,
+// sets some aside. All or nothing. Answers with the import as it now stands.
+export function keepGroup(
+  session: Session,
+  id: string,
+  body: {
+    keep: { ref: string; content: CardContent | null; choice: MatchChoice | null }[];
+    leave_out: string[];
+    later: string[];
+  },
+): Promise<unknown> {
+  return apiFetch<unknown>(`/v1/imports/${encodeURIComponent(id)}/keep`, session, json(body));
+}
+
 // The person's cards that an import's proposed cards stand for, as things stand.
 export function getMatches(session: Session, id: string): Promise<unknown> {
   return apiFetch<unknown>(`/v1/imports/${encodeURIComponent(id)}/matches`, session);

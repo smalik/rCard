@@ -264,23 +264,13 @@ export function monthLabel(value: string): string {
   return month ? `${month} ${match[1]}` : value;
 }
 
-// Where "Go through them" leads: open questions first, then the cards.
-export function resumeNext(resume: ImportSummary): { href: string; label: string } {
-  const id = encodeURIComponent(resume.id);
-  if (resume.state === "reading") return { href: `/import/${id}`, label: "See how it's going" };
-  if (resume.state === "failed") return { href: `/import/${id}`, label: "See what went wrong" };
-  if (resume.to_settle > 0) return { href: `/import/${id}/settle`, label: "Answer the questions" };
-  const left = resume.cards - resume.approved - resume.dropped;
-  if (left > 0) return { href: `/import/${id}/approve`, label: "Go through them" };
-  return { href: `/import/${id}`, label: "See what I read" };
-}
-
 // "26 cards · 4 kept", for the resume card in the thread.
 export function resumeProgress(resume: ImportSummary): string {
   if (resume.state === "reading") return "Reading it now";
   if (resume.state === "failed") return "Couldn't read it";
   const parts = [`${resume.cards} ${resume.cards === 1 ? "card" : "cards"}`];
   if (resume.approved > 0) parts.push(`${resume.approved} kept`);
+  if (resume.later > 0) parts.push(`${resume.later} set aside`);
   if (resume.to_settle > 0) {
     parts.push(`${resume.to_settle} ${resume.to_settle === 1 ? "question" : "questions"}`);
   }

@@ -17,7 +17,7 @@ from plytos_api.db import Database
 from plytos_api.imports.matching import name_key, overlaps
 from plytos_api.imports.model import ImportResult
 from plytos_api.imports.pipeline import import_resume
-from plytos_api.imports.store import ImportConflictError, ImportStore, MatchChoice
+from plytos_api.imports.store import ImportConflictError, ImportStore, KeepCard, MatchChoice
 from plytos_api.keys import Vault
 
 from .resume_samples import title_first_text
@@ -270,3 +270,90 @@ def test_a_change_made_in_another_tab_meanwhile_is_kept(
         assert isinstance(head, MainContent)
         assert head.facts["employment_type"] == "full-time" and head.facts["end"] == "2007-03"
         assert versions(s, kept["card-1"]) == 3
+
+
+# -- going through a job at once ------------------------------------------------
+
+
+def keeping(*refs: str) -> list[KeepCard]:
+    return [KeepCard(ref=ref) for ref in refs]
+
+
+def test_a_job_is_kept_in_one_go_each_card_under_its_own(make_user, open_: Open) -> None:
+    user = make_user()
+    with open_(user) as s:
+        import_id, _ = bring_in(s, title_first_text())
+        # Listed children first: each is still saved after the card it sits under.
+        progress = s.imports.keep_group(
+            import_id,
+            keeping("card-6", "card-4", "card-5", "card-2", "card-1"),
+            s.cards,
+            ME,
+            leave_out=["card-3"],
+            later=["card-7"],
+        )
+        decided = {ref: d.state for ref, d in progress.cards.items()}
+        assert decided == {
+            "card-1": "approved",
+            "card-2": "approved",
+            "card-4": "approved",
+            "card-5": "approved",
+            "card-6": "approved",
+            "card-3": "dropped",
+            "card-7": "later",
+        }
+        saved = {ref: d.card_id for ref, d in progress.cards.items() if d.card_id}
+        assert s.cards.card_detail(saved["card-4"]).parent_id == saved["card-2"]
+        assert s.cards.card_detail(saved["card-6"]).parent_id == saved["card-5"]
+        assert s.cards.card_detail(saved["card-5"]).parent_id == saved["card-1"]
+        assert len(s.cards.list_cards()) == 5
+
+
+def test_a_job_kept_in_another_tab_meanwhile_isnt_kept_twice(make_user, open_: Open) -> None:
+    user = make_user()
+    with open_(user) as s:
+        import_id, _ = bring_in(s, title_first_text())
+        s.imports.keep_group(import_id, keeping("card-1", "card-2"), s.cards, ME)
+        with pytest.raises(ImportConflictError):
+            s.imports.keep_group(import_id, keeping("card-2", "card-3"), s.cards, ME)
+        with pytest.raises(ImportConflictError):
+            s.imports.keep_group(import_id, keeping("card-3"), s.cards, ME, later=["card-3"])
+
+
+def test_a_group_that_cant_all_be_kept_keeps_none_of_it(make_user, open_: Open) -> None:
+    user = make_user()
+    with open_(user) as s:
+        import_id, _ = bring_in(s, title_first_text())
+    # The title's employer is still undecided, so the whole group is refused,
+    # and the transaction it ran in keeps nothing.
+    with pytest.raises(ImportConflictError), open_(user) as s:
+        s.imports.keep_group(import_id, keeping("card-3", "card-2"), s.cards, ME)
+    with open_(user) as s:
+        assert s.cards.list_cards() == []
+        assert s.imports.summary(import_id).approved == 0
+
+
+def test_a_job_brought_in_again_carries_on_as_the_persons_cards(make_user, open_: Open) -> None:
+    user = make_user()
+    with open_(user) as s:
+        first_id, first = bring_in(s, title_first_text())
+        kept = approve_all(s, first_id, first)
+
+        again_id, _ = bring_in(s, updated_text())
+        progress = s.imports.keep_group(
+            again_id,
+            [
+                KeepCard(ref="card-1"),
+                KeepCard(ref="card-2", choice="keep"),
+                KeepCard(ref="card-3"),
+                KeepCard(ref="card-4"),
+            ],
+            s.cards,
+            ME,
+        )
+        saved = {ref: d.card_id for ref, d in progress.cards.items()}
+        assert saved["card-1"] == kept["card-1"] and versions(s, kept["card-1"]) == 2
+        # Kept as it was, though its end moved.
+        assert saved["card-2"] == kept["card-2"] and versions(s, kept["card-2"]) == 1
+        assert saved["card-3"] == kept["card-3"]
+        assert saved["card-4"] not in kept.values()

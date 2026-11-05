@@ -732,6 +732,11 @@ def _months(found: DateRange, today: date) -> tuple[int, int] | None:
     return start, end
 
 
+def _article(number: int) -> str:
+    """'a' or 'an' before a number as it's said: an 8-month gap, an 11-month gap."""
+    return "an" if number in (11, 18) or str(number).startswith("8") else "a"
+
+
 def _ym(ordinal: int) -> str:
     months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     return f"{months[ordinal % 12]} {ordinal // 12}"
@@ -932,7 +937,7 @@ def _date_checks(parsed: ParsedResume, blocks: dict[int, Block], today: date) ->
                 "dates.gap",
                 "note",
                 "dates",
-                f"A {gap}-month gap",
+                f"{_article(gap).capitalize()} {gap}-month gap",
                 f"Between {_role_label(reach[0])} (ended {_ym(reach[1])}) and "
                 f"{_role_label(role)} (started {_ym(start)}). Gaps are common; a short line "
                 "on what you did (study, caregiving, a contract) answers the question "

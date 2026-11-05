@@ -133,9 +133,18 @@ reading until it's done, however long that takes, and then Plytos answers with
 what it found: employers, titles, results, and how many questions need an
 answer first. If the reading fails, Plytos says so and suggests a Word copy or
 pasting the text. Plytos answers once for each time the resume is read, so a
-reading tried again after it failed gets its own answer. The resume card in
-the thread leads to the next step: the questions, then the cards, then what
-was read. Going through the cards still uses the import screens for now.
+reading tried again after it failed gets its own answer.
+
+Once it's read, Plytos goes through it right there, at the end of the thread:
+the questions it isn't sure of, one at a time, then each job as a whole, then
+the rest. The person unticks what they don't want, rewords a line in place, and
+keeps a job with one tap or sets it aside for later. Nothing becomes a card
+until they keep it, and a job is kept all at once (`POST /v1/imports/{id}/keep`).
+When everything has an answer, Plytos offers to make the resume as written.
+This is worked out from the import itself, so it costs nothing and picks up
+where the person left off. The resume card in the thread says where it stands
+and offers the next step. [resume-import.md](resume-import.md) has the
+details.
 
 ## API
 
@@ -170,6 +179,5 @@ was read. Going through the cards still uses the import screens for now.
 ## Next
 
 Check-ins reach people only when they open the app for now. Next come
-notifications (web push, then text messages after carrier registration), moving
-the resume import's card review into the conversation, and then the Scout for
-finding roles to apply to.
+notifications (web push, then text messages after carrier registration), and
+then the Scout for finding roles to apply to.

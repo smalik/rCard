@@ -27,8 +27,6 @@ import {
   fileDetail,
 } from "../../../components/import-parts";
 import {
-  BATCH_SIZE,
-  minutesFor,
   overview,
   plural,
   readerName,
@@ -96,6 +94,7 @@ export default async function ImportOverview({ params }: { params: Promise<{ id:
   if (review === null) return <Reading key={status.id} status={status} />;
   const o = overview(review);
   const base = `/import/${id}`;
+  const talk = `/talk?review=${encodeURIComponent(id)}`;
   const without = o.accomplishments - o.withNumbers;
   const total = review.toSettle.length;
   const settled = settledCount(review);
@@ -197,7 +196,7 @@ export default async function ImportOverview({ params }: { params: Promise<{ id:
             </div>
             <p className="small-copy muted">
               Each title sits under its employer, and each result under the title you earned it
-              in. You&apos;ll approve them in this order.
+              in. You&apos;ll go through them in this order.
             </p>
             <CareerOutline review={review} />
           </section>
@@ -213,7 +212,7 @@ export default async function ImportOverview({ params }: { params: Promise<{ id:
             </div>
             <ul className="check-list">
               <CheckItem
-                href={o.dateQuestions > 0 ? `${base}/settle` : `${base}/audit#dates`}
+                href={o.dateQuestions > 0 ? talk : `${base}/audit#dates`}
                 bar={o.dateQuestions > 0 ? "var(--blue)" : "var(--teal)"}
                 icon={faUser}
                 title="Jobs and dates"
@@ -230,7 +229,7 @@ export default async function ImportOverview({ params }: { params: Promise<{ id:
                   : "The dates line up."}
               </CheckItem>
               <CheckItem
-                href={o.figureQuestions > 0 ? `${base}/settle` : `${base}/audit#numbers`}
+                href={o.figureQuestions > 0 ? talk : `${base}/audit#numbers`}
                 bar={o.figureQuestions > 0 ? "var(--orange)" : "var(--teal)"}
                 icon={faHashtag}
                 title="Numbers"
@@ -245,7 +244,7 @@ export default async function ImportOverview({ params }: { params: Promise<{ id:
                   : "No number says one thing here and another there."}
               </CheckItem>
               <CheckItem
-                href={o.repeatQuestions > 0 ? `${base}/settle` : `${base}/audit#repeats`}
+                href={o.repeatQuestions > 0 ? talk : `${base}/audit#repeats`}
                 bar={o.repeatQuestions > 0 ? "var(--orange)" : "var(--teal)"}
                 icon={faClone}
                 title="Possible repeats"
@@ -305,7 +304,7 @@ export default async function ImportOverview({ params }: { params: Promise<{ id:
             <FannedCards />
             <div className="stack tight">
               <h2 className="label teal wide-track" id="ready">
-                {o.pending > 0 ? "Ready to approve" : "All reviewed"}
+                {o.pending > 0 ? "Ready to go through" : "All reviewed"}
               </h2>
               <p className="ready-count">
                 {o.pending > 0
@@ -313,12 +312,10 @@ export default async function ImportOverview({ params }: { params: Promise<{ id:
                   : plural(o.approved, "card approved", "cards approved")}
               </p>
               <p className="small-copy muted">
-                {o.pending > BATCH_SIZE
-                  ? `Start with the ${BATCH_SIZE} strongest. You can do the rest any time.`
-                  : o.pending > 0
-                    ? "Approve the ones you want. Skip any you don't."
-                    : "Every card from this resume has been approved, skipped or left out."}
-                {o.approved > 0 && o.pending > 0 && ` ${o.approved} approved so far.`}
+                {o.pending > 0
+                  ? "Plytos shows you one job at a time. Keep what's right, leave out the rest."
+                  : "Every card from this resume has been kept, set aside or left out."}
+                {o.approved > 0 && o.pending > 0 && ` ${o.approved} kept so far.`}
               </p>
             </div>
           </section>
@@ -345,21 +342,15 @@ export default async function ImportOverview({ params }: { params: Promise<{ id:
       <div className="dock">
         {o.pending > 0 ? (
           <>
-            <Link className="button primary" href={`${base}/approve`}>
-              Review my cards
+            <Link className="button primary" href={talk}>
+              Go through it with Plytos
               <Icon icon={faArrowRight} size={16} />
             </Link>
             <p className="note">
               <Icon icon={faClock} size={11} />
-              About {plural(minutesFor(Math.min(o.pending, BATCH_SIZE)), "minute")} · you can stop
-              and come back
+              {o.open > 0 ? `${plural(o.open, "question")} first, then` : "One"} job at a time ·
+              you can stop and come back
             </p>
-            {o.open > 0 && (
-              <Link className="text-button teal" href={`${base}/settle`}>
-                Settle the {plural(o.open, "item")} first
-                <Icon icon={faArrowRight} size={14} />
-              </Link>
-            )}
           </>
         ) : (
           <Link className="button primary" href="/cards">

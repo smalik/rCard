@@ -19,7 +19,8 @@ Importing a resume does three things:
 The import is kept, encrypted with the person's own key, so they can work
 through it over several sittings: the original file, exactly as uploaded;
 what was read from it; and their progress. Nothing becomes a card until the
-person approves it, one card at a time.
+person keeps it. They go through it with Plytos in the conversation, a job at
+a time.
 
 ## Formats
 
@@ -69,15 +70,16 @@ The list of card rules is `CARD_RULES` in `imports/audit.py`.
 
 ## Screens
 
-`/import` in the web app (`apps/web/src/app/import`) follows the four steps
-of the Hybrid designs in Figma: Bring in, Check, Approve, and See strengths
-(still to come). Phone first; on a laptop the Check and Approve screens put
-the card and its source side by side.
+`/import` in the web app (`apps/web/src/app/import`) brings a resume in and
+shows what was read. Going through it happens in the conversation (`/talk`),
+the way the rest of Plytos works: Plytos asks, shows what it put together, and
+the person reacts. On a laptop the screens use the extra width; on a phone they
+stack.
 
 1. **Start** (`/import`): upload a Word, PDF or text file, or paste text.
    Photo and voice are shown as coming soon. If an import is still being
    read, or still has cards waiting, the screen offers to pick up where the
-   person left off.
+   person left off. A resume can also be shared from the conversation.
 2. **Reading** (`/import/{id}` until it's read): the browser posts the file to
    `/import/upload`, which passes it to `POST /v1/imports`. The API keeps it
    and answers at once, and the browser moves to the import's own page. That
@@ -87,22 +89,38 @@ the card and its source side by side.
    with the real counts. The person can leave and come back. If the reading
    fails, the page says why in plain words and offers to try again (unless
    the file can't be opened at all), try another way, or delete it.
-3. **Check** (`/import/{id}`): the starting proof (accomplishments with and
-   without numbers), an audit checklist (jobs and dates, numbers, repeats,
-   skills, wording tips, what was left out), the person's file with "View
-   original" and a delete button, and the full audit at `/import/{id}/audit`.
-4. **Settle** (`/import/{id}/settle`): the questions of fact, one open at a
-   time, each with the lines it came from. When a result has two numbers,
-   the person picks the right one, and every proposed card that used the
-   other is rewritten to match. Other questions take "it's right", "I'll fix
-   it on the card" or "later". Answers can change until a card is approved.
-5. **Approve** (`/import/{id}/approve`): ten cards at a sitting, strongest
-   first (results with numbers, then other results, awards and projects,
-   roles, the rest). Each card shows its facts, open questions, the lines it
-   came from, and wording tips. The person approves it, edits it first,
-   leaves it out, or says "Not now", which keeps it as a draft for later.
-   A card that's already one of theirs says so, and approving carries on
-   that card (see "Bringing a resume in again" below).
+3. **What we found** (`/import/{id}`): the starting proof (accomplishments
+   with and without numbers), the career as read, an audit checklist (jobs
+   and dates, numbers, repeats, skills, wording tips, what was left out), the
+   person's file with "View original" and a delete button, and the full audit
+   at `/import/{id}/audit`. "Go through it with Plytos" opens the
+   conversation at `/talk?review={id}`.
+4. **Going through it** (in `/talk`, `components/talk/import-review.tsx`):
+   - First the questions, one at a time, each with the lines it came from and
+     what those lines are part of ("Northwind Logistics › Director",
+     "Summary"). Where a line belongs comes first. When a result has two
+     numbers, the person taps the right one and every proposed card that
+     used the other is rewritten to match. Other questions take "that's
+     right", "I'll fix it on the card" or "not sure yet".
+   - Then each job as a whole: the employer, its titles and their lines, as
+     they'd read on a resume. Every line starts ticked. The person unticks
+     what they don't want, rewords a line in place, and keeps the job with
+     one tap ("Keep this job"), or says "Not now" to come back to it. A line
+     that's already one of their cards says so, with a menu to use their card,
+     update it, or make a separate one (see "Bringing a resume in again").
+   - Then the rest (summary, highlights and awards, projects, education,
+     skills and the like), in one draft the same way.
+   - Then Plytos says what was kept and offers to make the resume as written,
+     go through what was set aside, or see the cards.
+
+   Each answer shows as the person's reply in the thread, and the answers
+   before the last two fold away. The steps are worked out from the import
+   and the person's progress (`lib/review.ts`), so nothing new is stored and
+   no model is asked; after a reload it picks up where they left off. Once
+   nothing is left to decide, the resume's card in the thread says where it
+   stands and offers the next step, such as making the resume. The old
+   `/import/{id}/settle` and `/import/{id}/approve` addresses lead to the
+   conversation.
 
 Every route handler checks the request came from Plytos's own pages. The
 screens get only the lines each card came from; the rest of the text and the
@@ -121,6 +139,7 @@ contact details stay on the server. Nothing goes to browser storage.
 | `POST /v1/imports/{id}/settle` | Answers one question. A chosen number rewrites the proposed cards that use the other |
 | `POST /v1/imports/{id}/cards/{ref}/decision` | Sets a proposed card aside for later, leaves it out, or undoes that |
 | `POST /v1/imports/{id}/cards/{ref}/place` | Answers a placement question: the card it sits under (`parent_ref`, or null for none) |
+| `POST /v1/imports/{id}/keep` | Decides a group of cards at once, all or nothing: `keep` (each a `ref`, with the person's `content` and a match `choice` where they gave one), `leave_out` and `later` (refs). Kept cards are made parents first, so each lands under its own. 409 if any of them was decided meanwhile, and then none is |
 | `POST /v1/imports/{id}/cards/{ref}/approve` | Makes the card, as proposed or in the person's edited words, as an approved card written by the person. For a card that matches one of theirs, `choice` says what happens: `update` (the default) saves it as that card's next version, `keep` links it to theirs as it is, `separate` makes a new card |
 | `GET /v1/imports/{id}/matches` | The person's cards that the proposed cards stand for, by ref, as their decisions stand. `GET /v1/imports/{id}` includes them too |
 | `DELETE /v1/imports/{id}` | Deletes the original file and everything read from it. Approved cards stay |
@@ -145,13 +164,14 @@ as that card, so a new upload adds versions instead of duplicates
   matches nothing.
 - Each of the person's cards is matched at most once per import, the oldest
   first when two would fit. A proposed card the person left out takes none.
-- Matching only proposes. On the Approve screen a matched card says which of
-  theirs it is, and the person picks:
+- Matching only proposes. While going through a job in the conversation, a
+  matched line says it's already in their cards, and its menu says which card
+  and lets the person pick:
   - **Save as next version** (the default): the import's facts and wording
     become the card's next main version, and the card's own facts that the
     import doesn't mention stay. Nothing is saved when the import adds
-    nothing new. Wording the person edits while approving goes into the same
-    card. If the card changed in another tab meanwhile, approving is refused
+    nothing new. Wording the person edits while keeping it goes into the same
+    card. If the card changed in another tab meanwhile, keeping is refused
     and nothing is lost.
   - **Keep mine as it is**: the import links to their card without changing it.
   - **Make a separate card**: as if nothing matched. The cards under it then

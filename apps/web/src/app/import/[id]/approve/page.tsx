@@ -1,12 +1,10 @@
-import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
-import { loadReview } from "../load";
-import { ApproveFlow } from "./approve-flow";
-
-export const metadata: Metadata = { title: "Review your cards" };
 export const dynamic = "force-dynamic";
 
-export default async function ApprovePage({ params }: { params: Promise<{ id: string }> }) {
+// A resume is gone through in the conversation now: the questions first, then
+// each job. Old links land there.
+export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  return <ApproveFlow review={await loadReview(id)} />;
+  redirect(`/talk?review=${encodeURIComponent(id)}`);
 }
