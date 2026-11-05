@@ -1,6 +1,7 @@
 /* Resumes: the list, one resume with its versions, and the document itself.
    The document styles are shared with Talk, which previews proposed resumes. */
-
+/* In the legacy layer: Tailwind utilities (src/app/ui.css) win over these. */
+@layer legacy {
 .resume-row {
   display: grid;
   gap: 2px;
@@ -407,4 +408,5 @@
   .doc-line[data-wording="target"] .doc-line-text {
     background: none;
   }
+}
 }

@@ -1,4 +1,4 @@
-"""Card content, schema version 2.
+"""Card content, schema version 3.
 
 A card has two kinds of content (docs/data-model.md):
 
@@ -13,14 +13,17 @@ per client in between. Each fact lives at one level and the levels below show
 it without copying it. Where a card sits (its parent) is a main-line fact too.
 
 Version 2 added the parent. Version 1 content reads as version 2 with no parent.
+Version 3 added attachments: papers, repositories and links the person shows
+as evidence. Earlier content reads as version 3 with none.
 """
 
 from typing import Annotated, Literal
+from urllib.parse import urlsplit
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 CardKind = Literal[
     "employment",
@@ -69,6 +72,30 @@ class Framing(BaseModel):
     shown_facts: list[FactKey] | None = None
 
 
+AttachmentKind = Literal["paper", "repo", "link"]
+MAX_ATTACHMENTS = 20
+
+
+class Attachment(BaseModel):
+    """Something the person points to as evidence: a paper they wrote, a
+    repository, or any other link. Files they upload come later."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: AttachmentKind = "link"
+    url: str = Field(min_length=1, max_length=2000)
+    title: str = Field(min_length=1, max_length=200)
+    note: str = Field(default="", max_length=500)
+
+    @field_validator("url")
+    @classmethod
+    def _web_address(cls, url: str) -> str:
+        parts = urlsplit(url.strip())
+        if parts.scheme not in ("https", "http") or not parts.netloc:
+            raise ValueError("an attachment must be a web address starting https://")
+        return url.strip()
+
+
 class MainContent(BaseModel):
     """Content of a main-line version: where the card sits, its facts and the
     default framing.
@@ -91,6 +118,7 @@ class MainContent(BaseModel):
     parent: UUID | None = None
     facts: dict[FactKey, FactValue] = Field(default_factory=dict)
     framing: Framing
+    attachments: list[Attachment] = Field(default_factory=list, max_length=MAX_ATTACHMENTS)
 
 
 class VariantContent(BaseModel):

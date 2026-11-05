@@ -1,0 +1,224 @@
+/* The Plytos design system: Tailwind CSS v4 with shadcn tokens.
+
+   Layers, lowest first: Tailwind's theme and reset, then the older
+   hand-written screen styles ("legacy", until those screens are rebuilt),
+   then components and utilities. Utilities always win, so the new components
+   look the same on every screen. */
+@layer theme, base, legacy, components, utilities;
+
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Dark mode follows the device. */
+@custom-variant dark (@media (prefers-color-scheme: dark));
+
+:root {
+  --radius: 0.875rem;
+
+  /* A warm, quiet canvas, white cards, and a deep "felt" green: the table the
+     cards are played on. */
+  --background: #f3f2ee;
+  --foreground: #151617;
+  --card: #ffffff;
+  --card-foreground: #151617;
+  --popover: #ffffff;
+  --popover-foreground: #151617;
+  --primary: #1b6b52;
+  --primary-foreground: #ffffff;
+  --secondary: #ebe9e3;
+  --secondary-foreground: #151617;
+  --muted: #efeee9;
+  --muted-foreground: #6b6a65;
+  --accent: #e6efe9;
+  --accent-foreground: #134d3b;
+  --destructive: #c23b22;
+  --border: #e3e1da;
+  --input: #d9d6ce;
+  --ring: #1b6b52;
+
+  /* Live data: a card that just changed glows amber for a moment. */
+  --live: #d98a00;
+  --live-soft: rgba(217, 138, 0, 0.14);
+
+  /* One color per kind of card, always paired with an icon and a label. */
+  --kind-experience: #1b6b52;
+  --kind-position: #2f6f8f;
+  --kind-education: #3b5b8c;
+  --kind-award: #b7791f;
+  --kind-contact: #46484d;
+  --kind-credential: #0e7490;
+  --kind-skill: #9b4a5c;
+  --kind-project: #5a6b2b;
+  --kind-activity: #c2571a;
+
+  /* Paper-like depth for stacked cards. */
+  --elev-card: 0 1px 0 rgba(21, 22, 23, 0.03), 0 1px 3px rgba(21, 22, 23, 0.06),
+    0 12px 28px -16px rgba(21, 22, 23, 0.22);
+  --elev-lift: 0 2px 4px rgba(21, 22, 23, 0.06), 0 22px 44px -18px rgba(21, 22, 23, 0.32);
+  --elev-sheet: 0 1px 2px rgba(21, 22, 23, 0.05);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0d0e0f;
+    --foreground: #eeede9;
+    --card: #17181a;
+    --card-foreground: #eeede9;
+    --popover: #1c1e20;
+    --popover-foreground: #eeede9;
+    --primary: #46c08f;
+    --primary-foreground: #04281b;
+    --secondary: #232528;
+    --secondary-foreground: #eeede9;
+    --muted: #1f2123;
+    --muted-foreground: #a3a19b;
+    --accent: #15302a;
+    --accent-foreground: #9fe3c4;
+    --destructive: #f0715a;
+    --border: #2a2c2f;
+    --input: #34373a;
+    --ring: #46c08f;
+
+    --live: #ffb224;
+    --live-soft: rgba(255, 178, 36, 0.16);
+
+    --kind-experience: #46c08f;
+    --kind-position: #6cb4d6;
+    --kind-education: #86a7dc;
+    --kind-award: #e0aa4c;
+    --kind-contact: #b9bbc0;
+    --kind-credential: #4cc3dc;
+    --kind-skill: #e08aa0;
+    --kind-project: #a9bf6a;
+    --kind-activity: #f08c4f;
+
+    --elev-card: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 1px 3px rgba(0, 0, 0, 0.5),
+      0 12px 28px -16px rgba(0, 0, 0, 0.8);
+    --elev-lift: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 22px 44px -18px rgba(0, 0, 0, 0.9);
+    --elev-sheet: 0 1px 2px rgba(0, 0, 0, 0.4);
+  }
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui,
+    sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --radius-sm: calc(var(--radius) - 6px);
+  --radius-md: calc(var(--radius) - 4px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-live: var(--live);
+  --color-live-soft: var(--live-soft);
+
+  --color-kind-experience: var(--kind-experience);
+  --color-kind-position: var(--kind-position);
+  --color-kind-education: var(--kind-education);
+  --color-kind-award: var(--kind-award);
+  --color-kind-contact: var(--kind-contact);
+  --color-kind-credential: var(--kind-credential);
+  --color-kind-skill: var(--kind-skill);
+  --color-kind-project: var(--kind-project);
+  --color-kind-activity: var(--kind-activity);
+
+  --shadow-card: var(--elev-card);
+  --shadow-lift: var(--elev-lift);
+  --shadow-sheet: var(--elev-sheet);
+
+  --animate-live-glow: live-glow 2.4s ease-out 1;
+  --animate-live-dot: live-dot 2.4s ease-in-out infinite;
+}
+
+@keyframes live-glow {
+  0% {
+    box-shadow: 0 0 0 0 var(--live-soft);
+  }
+  30% {
+    box-shadow: 0 0 0 6px var(--live-soft);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+@keyframes live-dot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+}
+
+/* A card that turns over to show its back. Both faces sit in one grid cell
+   and share a 3D space; the body's height follows the face in view, and the
+   face turned away hides once it is edge-on. With reduced motion the faces
+   swap without turning. */
+@layer components {
+  .flip-scene {
+    perspective: 1800px;
+  }
+  .flip-body {
+    position: relative;
+    transform-style: preserve-3d;
+    transition:
+      transform 560ms cubic-bezier(0.2, 0.75, 0.25, 1),
+      height 320ms cubic-bezier(0.2, 0.75, 0.25, 1);
+  }
+  .flip-body[data-side="back"] {
+    transform: rotateY(180deg);
+  }
+  .flip-face {
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    transition: visibility 0s linear 0s;
+  }
+  .flip-face[aria-hidden="true"] {
+    visibility: hidden;
+    pointer-events: none;
+    transition-delay: 280ms;
+  }
+  .flip-face[data-face="back"] {
+    transform: rotateY(180deg);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .flip-body,
+    .flip-body[data-side="back"],
+    .flip-face[data-face="back"] {
+      transform: none;
+      transition: none;
+    }
+    .flip-face[aria-hidden="true"] {
+      transition-delay: 0s;
+    }
+  }
+}

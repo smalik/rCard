@@ -1,6 +1,7 @@
 /* Screens for bringing a resume in: Start, Reading, Check, Settle, Approve.
    Phone first; the media queries at the end widen them for laptops. */
-
+/* In the legacy layer: Tailwind utilities (src/app/ui.css) win over these. */
+@layer legacy {
 /* --- Sketch cards (illustrations) ------------------------------------------ */
 
 .sketch-card {
@@ -1676,4 +1677,5 @@ section[id] {
   font-size: 11px;
   line-height: 16px;
   color: var(--ink-60);
+}
 }

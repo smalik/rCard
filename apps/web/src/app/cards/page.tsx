@@ -1,95 +1,53 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { AppHeader, kindStyle, TabBar } from "../../components/hybrid";
-import { ApiError, type CardSummary, listCards } from "../../lib/api";
-import { KIND_LABELS } from "../../lib/cards";
-import { currentSession } from "../../lib/session";
+import { AppShell } from "@/components/app-shell";
+import { type Contact, LibraryScreen } from "@/components/cards/library-screen";
+import { ApiError, getLibrary, getResume, listResumes } from "@/lib/api";
+import type { LibraryCard } from "@/lib/library";
+import type { Session } from "@/lib/session";
+import { currentSession } from "@/lib/session";
 
 export const metadata: Metadata = { title: "Your cards" };
 export const dynamic = "force-dynamic";
 
-function CardRow({ card }: { card: CardSummary }) {
-  return (
-    <li className={`card kind-${kindStyle(card.kind)}`}>
-      <div className="card-top">
-        <span className="chip">{KIND_LABELS[card.kind]}</span>
-        <span className="muted small">v{card.main_version}</span>
-      </div>
-      <p className="card-headline">{card.headline ?? "Redacted"}</p>
-      {card.variants > 0 && (
-        <p className="muted small">
-          {card.variants} {card.variants === 1 ? "variant" : "variants"}
-          {card.variants_behind > 0 && (
-            <span className="attention">
-              {" "}
-              · {card.variants_behind} {card.variants_behind === 1 ? "needs" : "need"} a refresh
-            </span>
-          )}
-        </p>
-      )}
-    </li>
-  );
+// The contact card comes from the top of the resume changed most recently.
+async function latestContact(session: Session): Promise<Contact | null> {
+  const { resumes } = await listResumes(session);
+  const latest = [...resumes].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+  if (!latest) return null;
+  const { resume } = await getResume(session, latest.id);
+  return {
+    resumeId: resume.id,
+    resumeName: resume.name,
+    baseVersionId: resume.head.id,
+    header: resume.content.header,
+  };
 }
 
-export default async function Cards({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
+export default async function Cards() {
   const session = await currentSession();
   if (!session) redirect("/sign-in");
-  const imported = Number((await searchParams).imported ?? "0");
 
-  let cards: CardSummary[] | null = null;
-  let failed = false;
+  let cards: LibraryCard[] | null = null;
+  let contact: Contact | null = null;
   try {
-    cards = await listCards(session);
+    [cards, contact] = await Promise.all([getLibrary(session), latestContact(session)]);
   } catch (error) {
     if (!(error instanceof ApiError)) throw error;
-    failed = true;
   }
 
   return (
-    <main className="screen">
-      <AppHeader />
-      <div className="topbar-row">
-        <h1>Your cards</h1>
-        <Link className="link small" href="/import">
-          Bring in a resume
-        </Link>
-      </div>
-      {Number.isInteger(imported) && imported > 0 && (
-        <p className="panel notice" role="status">
-          Saved {imported} {imported === 1 ? "card" : "cards"} from your resume.
-        </p>
-      )}
-      {failed && (
-        <p className="panel attention" role="alert">
-          Plytos couldn&apos;t load your cards just now. Try again in a moment.
-        </p>
-      )}
-      {cards && cards.length === 0 && (
-        <section className="panel">
-          <h2>No cards yet</h2>
-          <p className="muted">
-            Cards are the building blocks of every resume you send: one role, one accomplishment,
-            one skill at a time. Bringing in your current resume will start your first ones.
+    <AppShell current="/cards">
+      {cards ? (
+        <LibraryScreen initial={cards} contact={contact} />
+      ) : (
+        <main className="mx-auto max-w-xl px-4 pt-10">
+          <p role="alert" className="rounded-2xl border bg-card p-5 text-[15px] shadow-card">
+            Plytos couldn&apos;t load your cards just now. Try again in a moment.
           </p>
-          <Link className="button primary" href="/import">
-            Bring in your resume
-          </Link>
-        </section>
+        </main>
       )}
-      {cards && cards.length > 0 && (
-        <ul className="card-list">
-          {cards.map((card) => (
-            <CardRow key={card.id} card={card} />
-          ))}
-        </ul>
-      )}
-      <TabBar current="/cards" />
-    </main>
+    </AppShell>
   );
 }

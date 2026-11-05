@@ -8,6 +8,7 @@ import {
   type MatchChoice,
   type Progress,
 } from "./imports";
+import type { LibraryCard, LibraryContent } from "./library";
 import type {
   ParentChanges,
   ProposedResume,
@@ -99,6 +100,50 @@ function json(body: unknown): RequestInit {
 
 export function listCards(session: Session): Promise<CardSummary[]> {
   return apiFetch<CardSummary[]>("/v1/cards", session);
+}
+
+// Every card the person keeps, with its content, in their own order.
+export function getLibrary(session: Session): Promise<LibraryCard[]> {
+  return apiFetch<LibraryCard[]>("/v1/library", session);
+}
+
+export async function reorderCards(
+  session: Session,
+  parentId: string | null,
+  cardIds: string[],
+): Promise<void> {
+  await apiRequest(
+    "/v1/cards/reorder",
+    session,
+    json({ parent_id: parentId, card_ids: cardIds }),
+  );
+}
+
+export type CardVersion = {
+  id: string;
+  number: number;
+  author_kind: "person" | "ai" | "reviewer";
+  created_at: string;
+  redacted: boolean;
+};
+
+// Saves the person's edit as the card's next main version, on top of the
+// version they started from.
+export async function saveCardVersion(
+  session: Session,
+  id: string,
+  baseVersionId: string,
+  content: LibraryContent,
+): Promise<void> {
+  await apiRequest(
+    `/v1/cards/${encodeURIComponent(id)}/versions`,
+    session,
+    json({ base_version_id: baseVersionId, content }),
+  );
+}
+
+export function cardHistory(session: Session, id: string): Promise<CardVersion[]> {
+  return apiFetch<CardVersion[]>(`/v1/cards/${encodeURIComponent(id)}/versions`, session);
 }
 
 // Keeps a resume, encrypted with the person's key, to be read in the
