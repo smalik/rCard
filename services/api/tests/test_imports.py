@@ -10,6 +10,7 @@ import zipfile
 from datetime import date
 
 import pytest
+from docx import Document
 
 from plytos_api.cards.model import MainContent
 from plytos_api.imports import audit as audit_module
@@ -72,6 +73,49 @@ def test_two_dates_with_only_a_gap_are_a_range_only_in_order() -> None:
     found = find_range("Lakeshore College 2015  2012")
     assert found is not None and found.separator is None
     assert found.start is not None and found.start.iso() == "2012"
+
+
+def converted_docx(lines: list[str]) -> bytes:
+    """A Word file the way PDF-to-Word converters write one: a paragraph whose lines
+    are joined by line breaks, bullets' marks lost."""
+    document = Document()
+    document.add_paragraph("Pat Lee")
+    document.add_paragraph("Experience")
+    paragraph = document.add_paragraph()
+    for i, line in enumerate(lines):
+        run = paragraph.add_run(line)
+        if i < len(lines) - 1:
+            run.add_break()
+    out = io.BytesIO()
+    document.save(out)
+    return out.getvalue()
+
+
+def test_a_bullet_whose_mark_was_lost_in_conversion_is_still_an_item() -> None:
+    data = converted_docx(
+        [
+            "Store Manager, Fabrikam Retail",
+            "Jan 2018  Dec 2020",
+            " Grew sales 12% in two years by reworking the floor plan",
+            " Trained nine new cashiers",
+            "Fabrikam Outlet, Springfield",
+        ]
+    )
+    blocks = extract(data, "resume.docx").blocks
+    marked = [(b.text, b.is_bullet, b.bullet_char) for b in blocks[2:]]
+    assert marked == [
+        ("Store Manager, Fabrikam Retail", False, None),
+        ("Jan 2018  Dec 2020", False, None),
+        ("Grew sales 12% in two years by reworking the floor plan", True, ""),
+        ("Trained nine new cashiers", True, ""),
+        ("Fabrikam Outlet, Springfield", False, None),
+    ]
+    result = import_resume(data, "resume.docx", today=TODAY, reader=None)
+    items = [c.content.framing.headline for c in result.cards if c.kind == "accomplishment"]
+    assert items == [
+        "Grew sales 12% in two years by reworking the floor plan",
+        "Trained nine new cashiers",
+    ]
 
 
 def test_strip_range_leaves_the_rest_of_the_line() -> None:

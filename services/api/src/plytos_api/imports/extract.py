@@ -94,6 +94,8 @@ _SYMBOL_BULLETS = {
 _LEADING_BULLET = re.compile(rf"^\s*([{re.escape(_BULLET_GLYPHS)}-])\s+(?=\S)")
 # A bullet typed hard against its first word ("•Managed", "-Trained"): only glyphs
 # that start no word, and a dash only before a capital ("-2%" is a figure).
+# One space, where a bullet's mark was, at the start of a line after a line break.
+_LOST_BULLET = re.compile(r" (?=[^\s])")
 _TIGHT_BULLET = re.compile(r"^\s*(?:([•●▪■◦►▸▶➢➤✓✔❖◆∙])(?=[\w“\"‘'(])|(-)(?=[A-Z][a-z]))")
 
 
@@ -378,8 +380,8 @@ class _DocxReader:
                 [link for line in lines for link in line[5]],
             )
             lines = [merged]
-        for text, bold, caps, fonts, sizes, links in lines:
-            text = clean(text)
+        for line, (text, bold, caps, fonts, sizes, links) in enumerate(lines):
+            raw, text = text, clean(text)
             if not text:
                 continue
             is_bullet, bullet_char = bullet is not None, bullet
@@ -387,6 +389,11 @@ class _DocxReader:
                 stripped, typed = split_bullet(text)
                 if typed is not None:
                     text, is_bullet, bullet_char = stripped, True, typed
+                elif line > 0 and _LOST_BULLET.match(raw):
+                    # A PDF turned into Word keeps each bullet's line after a line
+                    # break, and one space where its mark was: an item, with no
+                    # mark written ("" rather than a glyph it doesn't have).
+                    is_bullet, bullet_char = True, ""
             self.blocks.append(
                 Block(
                     index=len(self.blocks),
