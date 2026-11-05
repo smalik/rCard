@@ -505,6 +505,31 @@ def test_a_page_shows_titles_latest_first_and_what_is_left_out(make_user, open_:
         assert "Rolled out warehouse software to 6 sites" in [i.text for i in folded.roles[1].items]
 
 
+def test_a_page_lists_the_cards_outside_the_career_tree_it_leaves_out(
+    make_user, open_: Open
+) -> None:
+    user = make_user()
+    with open_(user) as s:
+        c = career(s.cards)
+        award = card(s.cards, "accomplishment", "Leader of the Year", award="Leader of the Year")
+        skills = card(s.cards, "skill", "Tools", skills=["SQL", "Python"])
+        card(s.cards, "story", "Operations leader", use="summary")
+        content = whole(c)
+        content.context.append(ResumeItem(card=skills))
+
+        page = render(content, s.cards)
+        # On the resume already, under an employment, or the summary: none of them.
+        assert [(i.kind, i.text) for i in page.left_out_context] == [
+            ("accomplishment", "Leader of the Year")
+        ]
+
+        content.context = []
+        page = render(content, s.cards)
+        assert [i.card for i in page.left_out_context] == [skills, c.degree, award]
+        # With no story on the card, the line shows what its facts say.
+        assert [i.detail for i in page.left_out_context] == ["SQL, Python", "B.S.", ""]
+
+
 def test_each_line_shows_the_wording_the_resume_asks_for(make_user, open_: Open) -> None:
     user = make_user()
     with open_(user) as s:

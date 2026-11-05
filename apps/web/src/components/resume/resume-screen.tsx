@@ -1,0 +1,1254 @@
+"use client";
+
+// One resume: the page as it reads, with each line opening the card behind
+// it; editing what shows and in what order, with the cards on file beside
+// it; every version kept, named, brought back or compared; the changes in
+// the resume it was made from; and making a version for a role.
+
+import {
+  ArrowLeftRight,
+  ChevronLeft,
+  CornerDownRight,
+  FileText,
+  History,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Printer,
+  Sparkles,
+} from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { type FormEvent, type ReactNode, useCallback, useMemo, useState } from "react";
+
+import { AccomplishmentSheet } from "@/components/cards/accomplishment";
+import { type CardActions, CardActionsProvider, type CardVersion } from "@/components/cards/actions";
+import { DiffPaper, Paper, type PaperEdits } from "@/components/resume/paper";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Textarea } from "@/components/ui/textarea";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { type LibraryCard, type LibraryContent, relativeTime } from "@/lib/library";
+import { changeCount, compareResumes, diffSummary } from "@/lib/resume-diff";
+import {
+  askText,
+  bringBack,
+  changesLabel,
+  leaveOut,
+  move,
+  moveContextLine,
+  moveLine,
+  type ParentChanges as Changes,
+  type RenderedItem,
+  type RenderedResume,
+  type ResumeContent,
+  type ResumeDetail,
+  type ResumeHeader,
+  resumeFor,
+  type ResumePage,
+  type ResumeSummary,
+  type ResumeVersion,
+  type ResumeVersionPage,
+  sameContent,
+  setFold,
+  setHeader,
+  switchOff,
+  switchOn,
+  switchOnContext,
+  TARGET_MAX,
+  versionAuthor,
+  versionLabel,
+} from "@/lib/resumes";
+import { cn } from "@/lib/utils";
+
+export type Compared = { from: ResumeVersionPage; to: ResumeVersionPage };
+
+type Sent<T> = { ok: true; data: T } | { ok: false; error: string };
+
+async function send<T>(url: string, body?: unknown): Promise<Sent<T>> {
+  try {
+    const response = await fetch(url, {
+      method: body === undefined ? "GET" : "POST",
+      headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      cache: "no-store",
+    });
+    const data = (await response.json().catch(() => null)) as (T & { error?: string }) | null;
+    if (response.ok && data) return { ok: true, data };
+    return { ok: false, error: data?.error ?? "That didn't go through. Try again in a moment." };
+  } catch {
+    return { ok: false, error: "The connection dropped. Check you're online and try again." };
+  }
+}
+
+function When({ iso, now }: { iso: string; now: Date }) {
+  return (
+    <time dateTime={iso} suppressHydrationWarning>
+      {relativeTime(iso, now)}
+    </time>
+  );
+}
+
+const OPENS = new Set(["accomplishment", "project"]);
+
+export function ResumeScreen({
+  initial,
+  library: initialLibrary,
+  family,
+  viewing,
+  compared,
+}: {
+  initial: ResumePage;
+  library: LibraryCard[] | null;
+  // Every resume the person has, for where this one came from and what was made from it.
+  family: ResumeSummary[];
+  viewing: ResumeVersionPage | null;
+  compared: Compared | null;
+}) {
+  const router = useRouter();
+  const [now] = useState(() => new Date());
+  const [current, setCurrent] = useState(initial);
+  const [library, setLibrary] = useState(initialLibrary ?? []);
+  const [draft, setDraft] = useState<ResumeContent | null>(null);
+  const [draftPage, setDraftPage] = useState<RenderedResume | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [editingTop, setEditingTop] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [openCard, setOpenCard] = useState<string | null>(null);
+  const resume = current.resume;
+  const base = `/resumes/${encodeURIComponent(resume.id)}`;
+  const byId = useMemo(() => new Map(library.map((c) => [c.id, c])), [library]);
+
+  const act = useCallback(
+    async <T,>(action: string, body: unknown): Promise<T | null> => {
+      setBusy(true);
+      setError(null);
+      const result = await send<T>(`${base}/${action}`, body);
+      setBusy(false);
+      if (!result.ok) {
+        setError(result.error);
+        return null;
+      }
+      return result.data;
+    },
+    [base],
+  );
+
+  async function change(next: ResumeContent) {
+    setDraft(next);
+    const page = await act<RenderedResume>("preview", { content: next });
+    if (page) setDraftPage(page);
+  }
+
+  function startEditing() {
+    setDraft(structuredClone(resume.content));
+    setDraftPage(current.page);
+    setError(null);
+  }
+
+  function stopEditing() {
+    setDraft(null);
+    setDraftPage(null);
+    setError(null);
+  }
+
+  async function save() {
+    if (!draft) return;
+    const saved = await act<ResumePage>("save", { content: draft, base_version_id: resume.head.id });
+    if (saved) {
+      setCurrent(saved);
+      stopEditing();
+    }
+  }
+
+  async function restore(number: number) {
+    const restored = await act<ResumePage>("restore", { number, base_version_id: resume.head.id });
+    if (restored) {
+      setCurrent(restored);
+      setVersionsOpen(false);
+      if (viewing || compared) router.replace(base);
+    }
+  }
+
+  // The cards behind the lines: opening one shows it as on the cards screen.
+  const saveCard = useCallback(
+    async (card: LibraryCard, content: LibraryContent) => {
+      const response = await fetch(`/cards/${card.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ base_version_id: card.version_id, content }),
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? "That didn't work. Try again in a moment.");
+      }
+      const fresh = await send<LibraryCard[]>("/cards/library");
+      if (fresh.ok) setLibrary(fresh.data);
+      // The page reads the card as it is now.
+      const page = await send<RenderedResume>(`${base}/preview`, { content: resume.content });
+      if (page.ok) setCurrent((c) => ({ ...c, page: page.data }));
+    },
+    [base, resume.content],
+  );
+  const history = useCallback(async (id: string) => {
+    const result = await send<CardVersion[]>(`/cards/${id}/history`);
+    if (!result.ok) throw new Error(result.error);
+    return result.data;
+  }, []);
+  const actions: CardActions = useMemo(
+    () => ({ save: saveCard, reorder: async () => {}, history, fresh: new Set<string>(), now }),
+    [saveCard, history, now],
+  );
+
+  const edits: PaperEdits | undefined = draft
+    ? {
+        busy,
+        switchOff: (card) => change(switchOff(draft, card)),
+        switchOn: (entry, card) => change(switchOn(draft, entry, card)),
+        leaveOut: (entry) => change(leaveOut(draft, entry)),
+        setFold: (entry, fold) => change(setFold(draft, entry, fold)),
+        moveEntry: (entry, by) => change(move(draft, entry, by)),
+        moveLine: (entry, group, card, by) => change(moveLine(draft, entry, group, card, by)),
+        moveContext: (group, card, by) => change(moveContextLine(draft, group, card, by)),
+        editHeader: () => setEditingTop(true),
+      }
+    : undefined;
+
+  const parent = family.find((r) => r.id === resume.parent_id) ?? null;
+  const children = family.filter((r) => r.parent_id === resume.id);
+  const page = draftPage ?? current.page;
+  const drafted = draft !== null && draftPage !== null ? compareResumes(current.page, draftPage) : null;
+  const changed = draft !== null && !sameContent(draft, resume.content);
+
+  const canOpen = (card: string) => OPENS.has(byId.get(card)?.kind ?? "");
+
+  let body: ReactNode;
+  if (compared) {
+    body = <CompareView compared={compared} resume={resume} base={base} now={now} />;
+  } else if (viewing) {
+    body = (
+      <>
+        <Notice tone="quiet">
+          <p>
+            <b className="font-semibold">{versionLabel(viewing.version)}</b>, made{" "}
+            <When iso={viewing.version.created_at} now={now} /> by{" "}
+            {versionAuthor(viewing.version).toLowerCase() === "you"
+              ? "you"
+              : versionAuthor(viewing.version)}
+            . Your resume is at version {resume.head.number}.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button size="sm" disabled={busy} onClick={() => restore(viewing.version.number)}>
+              Bring this version back
+            </Button>
+            <Button size="sm" variant="outline" asChild>
+              <Link href={`${base}?from=${viewing.version.number}`}>
+                <ArrowLeftRight /> Compare with now
+              </Link>
+            </Button>
+            <Button size="sm" variant="ghost" asChild>
+              <Link href={base}>Back to the latest</Link>
+            </Button>
+          </div>
+        </Notice>
+        <div className="mx-auto mt-6 max-w-[860px]">
+          <Paper page={viewing.page} />
+        </div>
+      </>
+    );
+  } else {
+    body = (
+      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-8 print:mt-0 print:block">
+        <Paper
+          page={page}
+          edit={edits}
+          onOpen={draft ? undefined : setOpenCard}
+          canOpen={canOpen}
+        />
+        <aside className="flex min-w-0 flex-col gap-4 print:hidden" aria-label={draft ? "On file" : "About this resume"}>
+          {draft ? (
+            <OnFileRail
+              page={page}
+              busy={busy}
+              onJob={(card) => change(bringBack(draft, card))}
+              onCard={(card) => change(switchOnContext(draft, card))}
+            />
+          ) : (
+            <>
+              <AboutRail
+                resume={resume}
+                parent={parent}
+                madeFrom={children}
+                now={now}
+                onVersions={() => setVersionsOpen(true)}
+              />
+              <MakeVersion base={base} resumeName={resume.name} />
+            </>
+          )}
+        </aside>
+      </div>
+    );
+  }
+
+  return (
+    <TooltipProvider>
+      <CardActionsProvider value={actions}>
+        <main className="mx-auto w-full max-w-6xl px-4 pt-4 sm:px-6 md:pt-8 print:max-w-none print:p-0">
+          <Link
+            href="/resumes"
+            className="-ml-1.5 inline-flex items-center gap-0.5 rounded-full py-1 pr-2 text-[15px] font-medium text-primary print:hidden"
+          >
+            <ChevronLeft className="size-5" /> Resumes
+          </Link>
+          <div className="mt-1 flex flex-wrap items-end justify-between gap-x-4 gap-y-3 print:hidden">
+            <div className="min-w-0">
+              <h1 className="text-[30px] leading-tight font-bold tracking-[-0.025em] md:text-[36px]">
+                {resume.name}
+              </h1>
+              <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[14px] text-muted-foreground">
+                <span>{resumeFor(resume)}</span>
+                {parent && (
+                  <>
+                    <span aria-hidden>·</span>
+                    <span>
+                      made from{" "}
+                      <Link className="font-medium text-foreground/80 hover:underline" href={`/resumes/${parent.id}`}>
+                        {parent.name}
+                      </Link>
+                    </span>
+                  </>
+                )}
+                <span aria-hidden>·</span>
+                <span className="font-mono text-[12.5px] text-foreground/70">v{resume.head.number}</span>
+                <span aria-hidden>·</span>
+                <span>
+                  edited <When iso={resume.updated_at} now={now} />
+                </span>
+              </p>
+            </div>
+            {!draft && !compared && !viewing && (
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => setVersionsOpen(true)}>
+                  <History /> Versions
+                  <span className="font-mono text-[11.5px] text-muted-foreground">{resume.versions.length}</span>
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => window.print()}>
+                  <Printer /> <span className="max-sm:sr-only">Print or PDF</span>
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="icon-sm" aria-label="More for this resume">
+                      <MoreHorizontal />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onSelect={() => setRenaming(true)}>
+                      <Pencil /> Rename
+                    </DropdownMenuItem>
+                    {resume.versions.length > 1 && (
+                      <DropdownMenuItem asChild>
+                        <Link href={`${base}?from=${resume.versions.at(-2)!.number}`}>
+                          <ArrowLeftRight /> Compare with the version before
+                        </Link>
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button size="sm" onClick={startEditing}>
+                  <Pencil /> Edit
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {draft && (
+            <div
+              role="region"
+              aria-label="Editing"
+              className="sticky top-0 z-30 -mx-4 mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-background/85 px-4 py-2.5 backdrop-blur-xl sm:-mx-6 sm:px-6 md:top-14 print:hidden"
+            >
+              <p className="min-w-0 basis-full text-[14px] sm:flex-1 sm:basis-0" aria-live="polite">
+                <b className="font-semibold">Editing</b>
+                <span className="text-muted-foreground">
+                  {" · "}
+                  {busy
+                    ? "Updating the page…"
+                    : drafted && changeCount(drafted) > 0
+                      ? diffSummary(drafted)
+                      : "Leave lines out, bring cards in, or move them."}
+                </span>
+              </p>
+              <div className="ml-auto flex items-center gap-2">
+                <Button variant="ghost" size="sm" disabled={busy} onClick={stopEditing}>
+                  Cancel
+                </Button>
+                <Button size="sm" disabled={busy || !changed} onClick={save}>
+                  Save as version {resume.head.number + 1}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <p role="alert" className="mt-4 rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-[14px] text-destructive">
+              {error}
+            </p>
+          )}
+
+          {resume.parent_changes > 0 && !draft && !compared && !viewing && (
+            <ParentChanges
+              key={resume.head.id}
+              base={base}
+              parentName={parent?.name ?? resume.parent_name ?? "The resume it was made from"}
+              count={resume.parent_changes}
+              headId={resume.head.id}
+              onTaken={setCurrent}
+            />
+          )}
+
+          {body}
+        </main>
+
+        <VersionsSheet
+          open={versionsOpen}
+          onOpenChange={setVersionsOpen}
+          resume={resume}
+          base={base}
+          busy={busy}
+          now={now}
+          onRestore={restore}
+          onNamed={(detail) => setCurrent((c) => ({ ...c, resume: detail }))}
+          act={act}
+        />
+        {draft && (
+          <TopDialog
+            open={editingTop}
+            header={draft.header}
+            onClose={() => setEditingTop(false)}
+            onSave={(header) => {
+              setEditingTop(false);
+              void change(setHeader(draft, header));
+            }}
+          />
+        )}
+        <RenameDialog
+          open={renaming}
+          name={resume.name}
+          busy={busy}
+          onClose={() => setRenaming(false)}
+          onSave={async (name) => {
+            const detail = await act<ResumeDetail>("rename", { name });
+            if (detail) {
+              setCurrent((c) => ({ ...c, resume: detail }));
+              setRenaming(false);
+            }
+          }}
+        />
+        <AccomplishmentSheet
+          card={openCard ? (byId.get(openCard) ?? null) : null}
+          onClose={() => setOpenCard(null)}
+        />
+      </CardActionsProvider>
+    </TooltipProvider>
+  );
+}
+
+// -- around the page -------------------------------------------------------------
+
+function Notice({ tone, children }: { tone: "quiet" | "live"; children: ReactNode }) {
+  return (
+    <section
+      className={cn(
+        "mt-5 rounded-2xl border px-4 py-3.5 text-[14.5px] shadow-sheet sm:px-5 print:hidden",
+        tone === "live" ? "border-live/30 bg-live-soft" : "bg-card",
+      )}
+    >
+      {children}
+    </section>
+  );
+}
+
+function RailCard({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="rounded-2xl border bg-card p-4 shadow-card">
+      <h2 className="text-[12px] font-semibold tracking-[0.04em] text-muted-foreground uppercase">
+        {title}
+      </h2>
+      <div className="mt-3">{children}</div>
+    </section>
+  );
+}
+
+function AboutRail({
+  resume,
+  parent,
+  madeFrom: children,
+  now,
+  onVersions,
+}: {
+  resume: ResumeDetail;
+  parent: ResumeSummary | null;
+  // Resumes made from this one.
+  madeFrom: ResumeSummary[];
+  now: Date;
+  onVersions: () => void;
+}) {
+  const latest = [...resume.versions].reverse().slice(0, 3);
+  return (
+    <RailCard title="Versions">
+      <ol className="flex flex-col">
+        {latest.map((v, i) => (
+          <li key={v.id} className="relative flex gap-3 pb-3 last:pb-0">
+            <span
+              aria-hidden
+              className={cn(
+                "relative z-10 mt-1.5 size-2.5 shrink-0 rounded-full border-2",
+                i === 0 ? "border-primary bg-primary" : "border-muted-foreground/40 bg-card",
+              )}
+            />
+            {i < latest.length - 1 && (
+              <span aria-hidden className="absolute top-3 bottom-0 left-[4px] w-px bg-border" />
+            )}
+            <div className="min-w-0 text-[14px]">
+              <p className="font-medium">
+                {versionLabel(v)}
+                {i === 0 && <Badge variant="accent" className="ml-1.5 align-[1px]">Now</Badge>}
+              </p>
+              <p className="text-[12.5px] text-muted-foreground">
+                {versionAuthor(v)} · <When iso={v.created_at} now={now} />
+                {v.note && ` · ${v.note}`}
+              </p>
+            </div>
+          </li>
+        ))}
+      </ol>
+      <Button variant="outline" size="sm" className="mt-3 w-full" onClick={onVersions}>
+        <History /> All {resume.versions.length} versions and compare
+      </Button>
+      {(parent || children.length > 0) && (
+        <div className="mt-4 border-t pt-3">
+          {parent && (
+            <p className="text-[13px] text-muted-foreground">
+              Made from{" "}
+              <Link href={`/resumes/${parent.id}`} className="font-medium text-foreground hover:underline">
+                {parent.name}
+              </Link>
+            </p>
+          )}
+          {children.length > 0 && (
+            <>
+              <p className="mt-1 text-[13px] text-muted-foreground">Made from this one:</p>
+              <ul className="mt-1 flex flex-col gap-1">
+                {children.map((c) => (
+                  <li key={c.id}>
+                    <Link
+                      href={`/resumes/${c.id}`}
+                      className="flex items-center gap-1.5 rounded-lg px-1 py-0.5 text-[14px] font-medium hover:bg-accent"
+                    >
+                      <CornerDownRight className="size-3.5 text-muted-foreground" />
+                      <span className="truncate">{c.name}</span>
+                      <span className="ml-auto font-mono text-[11.5px] text-muted-foreground">v{c.head_number}</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
+    </RailCard>
+  );
+}
+
+const SECTION_NAMES: Record<string, string> = {
+  skill: "Skills",
+  education: "Education",
+  credential: "Certifications",
+  activity: "Activities",
+  accomplishment: "Highlights and awards",
+  project: "Projects",
+  story: "Stories",
+};
+
+function OnFileRail({
+  page,
+  busy,
+  onJob,
+  onCard,
+}: {
+  page: RenderedResume;
+  busy: boolean;
+  onJob: (card: string) => void;
+  onCard: (card: string) => void;
+}) {
+  const cards = page.left_out_context ?? [];
+  const groups = new Map<string, RenderedItem[]>();
+  for (const c of cards) groups.set(c.kind, [...(groups.get(c.kind) ?? []), c]);
+  const nothing = page.left_out.length === 0 && cards.length === 0;
+  return (
+    <RailCard title="On file, not on this resume">
+      {nothing ? (
+        <p className="text-[14px] text-muted-foreground">
+          Every job and card you have is on this resume. Lines under a job you&apos;ve left out
+          show under that job on the page.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {page.left_out.length > 0 && (
+            <div>
+              <h3 className="text-[13px] font-semibold">Jobs</h3>
+              <ul className="mt-1 flex flex-col">
+                {page.left_out.map((job) => (
+                  <AddRow
+                    key={job.card}
+                    label={job.employer}
+                    detail={job.dates}
+                    busy={busy}
+                    onAdd={() => onJob(job.card)}
+                  />
+                ))}
+              </ul>
+            </div>
+          )}
+          {[...groups.entries()].map(([kind, items]) => (
+            <div key={kind}>
+              <h3 className="text-[13px] font-semibold">{SECTION_NAMES[kind] ?? "More"}</h3>
+              <ul className="mt-1 flex flex-col">
+                {items.map((item) => (
+                  <AddRow
+                    key={item.card}
+                    label={item.text}
+                    detail={item.detail}
+                    busy={busy}
+                    onAdd={() => onCard(item.card)}
+                  />
+                ))}
+              </ul>
+            </div>
+          ))}
+          <p className="text-[12.5px] text-muted-foreground">
+            A job comes in with no lines under it; open &ldquo;more lines on file&rdquo; under it
+            to pick them.
+          </p>
+        </div>
+      )}
+    </RailCard>
+  );
+}
+
+function AddRow({
+  label,
+  detail,
+  busy,
+  onAdd,
+}: {
+  label: string;
+  detail: string;
+  busy: boolean;
+  onAdd: () => void;
+}) {
+  return (
+    <li className="flex items-start gap-2 border-b py-2 last:border-b-0">
+      <div className="min-w-0 flex-1">
+        <p className="text-[14px] leading-snug">{label}</p>
+        {detail && <p className="line-clamp-1 text-[12.5px] text-muted-foreground">{detail}</p>}
+      </div>
+      <Button
+        variant="outline"
+        size="icon-sm"
+        className="size-7"
+        disabled={busy}
+        aria-label={`Add ${label}`}
+        onClick={onAdd}
+      >
+        <Plus />
+      </Button>
+    </li>
+  );
+}
+
+// -- the resume it was made from ------------------------------------------------
+
+function ParentChanges({
+  base,
+  parentName,
+  count,
+  headId,
+  onTaken,
+}: {
+  base: string;
+  parentName: string;
+  count: number;
+  headId: string;
+  onTaken: (page: ResumePage) => void;
+}) {
+  const [reviewed, setReviewed] = useState<Changes | null>(null);
+  const [chosen, setChosen] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const changes = reviewed?.changes ?? null;
+
+  async function review() {
+    setBusy(true);
+    setError(null);
+    const result = await send<Changes>(`${base}/parent-changes`);
+    setBusy(false);
+    if (!result.ok) return setError(result.error);
+    setReviewed(result.data);
+    setChosen(new Set(result.data.changes.map((c) => c.change.key)));
+  }
+
+  async function take(keys: string[]) {
+    setBusy(true);
+    setError(null);
+    const result = await send<ResumePage>(`${base}/take`, {
+      keys,
+      base_version_id: headId,
+      parent_version_id: reviewed?.parent_version_id ?? null,
+    });
+    setBusy(false);
+    if (!result.ok) return setError(result.error);
+    onTaken(result.data);
+  }
+
+  return (
+    <Notice tone="live">
+      <p>
+        <b className="font-semibold">{parentName}</b> has {changesLabel(count)} since this one was
+        made from it. Take the ones you want; this resume keeps its own order.
+      </p>
+      {error && (
+        <p role="alert" className="mt-2 text-[13.5px] text-destructive">
+          {error}
+        </p>
+      )}
+      {changes === null ? (
+        <Button size="sm" variant="outline" className="mt-3" disabled={busy} onClick={review}>
+          See what changed
+        </Button>
+      ) : (
+        <>
+          <ul className="mt-3 flex flex-col gap-1.5">
+            {changes.map(({ change, label }) => (
+              <li key={change.key}>
+                <label className="flex items-start gap-2.5 text-[14px]">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 size-4 accent-[var(--primary)]"
+                    checked={chosen.has(change.key)}
+                    onChange={(e) => {
+                      const next = new Set(chosen);
+                      if (e.target.checked) next.add(change.key);
+                      else next.delete(change.key);
+                      setChosen(next);
+                    }}
+                  />
+                  <span>{label}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button size="sm" disabled={busy || chosen.size === 0} onClick={() => take([...chosen])}>
+              Take {chosen.size === changes.length ? "them" : changesLabel(chosen.size)}
+            </Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => take([])}>
+              Not these
+            </Button>
+          </div>
+        </>
+      )}
+    </Notice>
+  );
+}
+
+// -- versions ---------------------------------------------------------------------
+
+function VersionsSheet({
+  open,
+  onOpenChange,
+  resume,
+  base,
+  busy,
+  now,
+  onRestore,
+  onNamed,
+  act,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  resume: ResumeDetail;
+  base: string;
+  busy: boolean;
+  now: Date;
+  onRestore: (number: number) => void;
+  onNamed: (detail: ResumeDetail) => void;
+  act: <T>(action: string, body: unknown) => Promise<T | null>;
+}) {
+  const versions = [...resume.versions].reverse();
+  const head = resume.head.number;
+  const [naming, setNaming] = useState<number | null>(null);
+  const [name, setName] = useState("");
+
+  async function saveName(event: FormEvent) {
+    event.preventDefault();
+    if (naming === null || !name.trim()) return;
+    const detail = await act<ResumeDetail>("name", { number: naming, name: name.trim() });
+    if (detail) {
+      onNamed(detail);
+      setNaming(null);
+      setName("");
+    }
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent>
+        <SheetHeader>
+          <SheetTitle>Versions</SheetTitle>
+          <SheetDescription>
+            Every change is kept. Name the ones you send, compare any two, or bring one back.
+          </SheetDescription>
+        </SheetHeader>
+
+        {versions.length > 1 && (
+          <ComparePicker versions={versions} base={base} onGo={() => onOpenChange(false)} />
+        )}
+
+        <ol className="flex flex-col overflow-y-auto px-5 pb-6">
+          {versions.map((v, i) => (
+            <li key={v.id} className="relative flex gap-3 pt-3">
+              <span
+                aria-hidden
+                className={cn(
+                  "relative z-10 mt-1.5 size-2.5 shrink-0 rounded-full border-2",
+                  v.number === head ? "border-primary bg-primary" : "border-muted-foreground/40 bg-popover",
+                )}
+              />
+              {i < versions.length - 1 && (
+                <span aria-hidden className="absolute top-6 -bottom-3 left-[4px] w-px bg-border" />
+              )}
+              <div className="min-w-0 flex-1 border-b pb-3">
+                <p className="text-[15px] font-medium">
+                  {versionLabel(v)}
+                  {v.number === head && <Badge variant="accent" className="ml-1.5 align-[1px]">Now</Badge>}
+                </p>
+                <p className="text-[13px] text-muted-foreground">
+                  {versionAuthor(v)} · <When iso={v.created_at} now={now} />
+                  {v.note && ` · ${v.note}`}
+                </p>
+                <div className="mt-1.5 -ml-2.5 flex flex-wrap gap-0.5">
+                  {v.number !== head && !v.redacted && (
+                    <>
+                      <Button variant="ghost" size="sm" asChild>
+                        <Link href={`${base}?v=${v.number}`} onClick={() => onOpenChange(false)}>
+                          See it
+                        </Link>
+                      </Button>
+                      <Button variant="ghost" size="sm" asChild>
+                        <Link href={`${base}?from=${v.number}`} onClick={() => onOpenChange(false)}>
+                          Compare with now
+                        </Link>
+                      </Button>
+                      <Button variant="ghost" size="sm" disabled={busy} onClick={() => onRestore(v.number)}>
+                        Bring back
+                      </Button>
+                    </>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => {
+                      setNaming(v.number);
+                      setName(v.names[0] ?? "");
+                    }}
+                  >
+                    {v.names.length ? "Rename" : "Name it"}
+                  </Button>
+                </div>
+                {naming === v.number && (
+                  <form className="mt-2 flex gap-2" onSubmit={saveName}>
+                    <Label htmlFor={`name-${v.number}`} className="sr-only">
+                      Name for version {v.number}
+                    </Label>
+                    <Input
+                      id={`name-${v.number}`}
+                      autoFocus
+                      value={name}
+                      maxLength={120}
+                      placeholder="Sent to Contoso"
+                      onChange={(e) => setName(e.target.value)}
+                    />
+                    <Button size="sm" type="submit" className="h-9" disabled={busy || !name.trim()}>
+                      Save
+                    </Button>
+                  </form>
+                )}
+              </div>
+            </li>
+          ))}
+        </ol>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+// Mounts each time the sheet opens, so it starts from the latest two versions.
+function ComparePicker({
+  versions,
+  base,
+  onGo,
+}: {
+  versions: ResumeVersion[];
+  base: string;
+  onGo: () => void;
+}) {
+  const router = useRouter();
+  const [from, setFrom] = useState(String(versions[1]!.number));
+  const [to, setTo] = useState(String(versions[0]!.number));
+  return (
+    <form
+      className="mx-5 flex flex-wrap items-end gap-2 rounded-2xl border bg-card p-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onGo();
+        router.push(`${base}?from=${from}&to=${to}`);
+      }}
+    >
+      <VersionPick label="Compare" value={from} onChange={setFrom} versions={versions} />
+      <VersionPick label="with" value={to} onChange={setTo} versions={versions} />
+      <Button size="sm" type="submit" disabled={from === to}>
+        <ArrowLeftRight /> Compare
+      </Button>
+    </form>
+  );
+}
+
+function VersionPick({
+  label,
+  value,
+  onChange,
+  versions,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  versions: ResumeVersion[];
+}) {
+  return (
+    <label className="flex min-w-0 flex-1 basis-[140px] flex-col gap-1 text-[12px] font-medium text-muted-foreground sm:max-w-[280px]">
+      {label}
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-9 rounded-xl border bg-background px-2.5 text-[14px] text-foreground"
+      >
+        {versions.map((v) => (
+          <option key={v.id} value={v.number}>
+            {versionLabel(v)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function CompareView({
+  compared,
+  resume,
+  base,
+  now,
+}: {
+  compared: Compared;
+  resume: ResumeDetail;
+  base: string;
+  now: Date;
+}) {
+  const router = useRouter();
+  const diff = useMemo(() => compareResumes(compared.from.page, compared.to.page), [compared]);
+  const summary = diffSummary(diff);
+  const versions = [...resume.versions].reverse();
+  const go = (from: number, to: number) => router.push(`${base}?from=${from}&to=${to}`);
+  return (
+    <>
+      <Notice tone="quiet">
+        <div className="flex flex-wrap items-end gap-2">
+          <VersionPick
+            label="Comparing"
+            value={String(compared.from.version.number)}
+            onChange={(v) => go(Number(v), compared.to.version.number)}
+            versions={versions}
+          />
+          <VersionPick
+            label="with"
+            value={String(compared.to.version.number)}
+            onChange={(v) => go(compared.from.version.number, Number(v))}
+            versions={versions}
+          />
+          <Button size="sm" variant="ghost" asChild>
+            <Link href={base}>Done</Link>
+          </Button>
+        </div>
+        <p className="mt-3 text-[14px]" role="status">
+          <b className="font-semibold">{summary ?? "These two read the same."}</b>{" "}
+          <span className="text-muted-foreground">
+            From version {compared.from.version.number} (<When iso={compared.from.version.created_at} now={now} />) to
+            version {compared.to.version.number} (<When iso={compared.to.version.created_at} now={now} />).
+            Both read your cards as they are now.
+          </span>
+        </p>
+        <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12.5px] text-muted-foreground" aria-hidden>
+          <span className="rounded-[4px] bg-paper-added px-1.5 text-paper-ink">Added</span>
+          <span className="rounded-[4px] bg-paper-removed/[0.08] px-1.5 text-paper-removed line-through">
+            Left out
+          </span>
+          <span>Reworded lines show what they read before</span>
+        </p>
+      </Notice>
+      <div className="mx-auto mt-6 max-w-[860px]">
+        <DiffPaper diff={diff} header={compared.to.page.header} />
+      </div>
+    </>
+  );
+}
+
+// -- making a version for a role ----------------------------------------------------
+
+function MakeVersion({ base, resumeName }: { base: string; resumeName: string }) {
+  const router = useRouter();
+  const [forWhom, setForWhom] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ready = forWhom.trim().length > 0;
+
+  async function ask(event?: FormEvent) {
+    event?.preventDefault();
+    if (!ready) return;
+    setBusy(true);
+    setError(null);
+    const result = await send(`${base}/ask`, { text: askText(resumeName, forWhom) });
+    if (!result.ok) {
+      setBusy(false);
+      return setError(result.error);
+    }
+    router.push("/talk");
+  }
+
+  async function copy() {
+    if (!ready) return;
+    setBusy(true);
+    setError(null);
+    const result = await send<ResumePage>(`${base}/copy`, { target: forWhom });
+    if (!result.ok) {
+      setBusy(false);
+      return setError(result.error);
+    }
+    router.push(`/resumes/${encodeURIComponent(result.data.resume.id)}`);
+  }
+
+  return (
+    <RailCard title="Make a version for a role">
+      <form onSubmit={ask} className="flex flex-col gap-2.5">
+        <p className="text-[13.5px] text-muted-foreground">
+          Plytos picks the jobs and lines that fit and words them for it. This resume stays as it
+          is.
+        </p>
+        <Label htmlFor="for-whom" className="mt-1 text-[13px]">
+          Who is it for?
+        </Label>
+        <Input
+          id="for-whom"
+          value={forWhom}
+          maxLength={TARGET_MAX}
+          placeholder="Operations roles at fintech companies"
+          onChange={(e) => setForWhom(e.target.value)}
+        />
+        {error && (
+          <p role="alert" className="text-[13px] text-destructive">
+            {error}
+          </p>
+        )}
+        <Button type="submit" disabled={busy || !ready}>
+          <Sparkles /> Ask Plytos
+        </Button>
+        <Button type="button" variant="ghost" size="sm" disabled={busy || !ready} onClick={copy}>
+          <FileText /> Copy it and change it myself
+        </Button>
+      </form>
+    </RailCard>
+  );
+}
+
+// -- dialogs -----------------------------------------------------------------------
+
+function TopDialog({
+  open,
+  header,
+  onClose,
+  onSave,
+}: {
+  open: boolean;
+  header: ResumeHeader;
+  onClose: () => void;
+  onSave: (header: ResumeHeader) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        {open && <TopForm header={header} onClose={onClose} onSave={onSave} />}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+const TOP_FIELDS: { key: Exclude<keyof ResumeHeader, "links" | "summary">; label: string; max: number }[] = [
+  { key: "name", label: "Name", max: 120 },
+  { key: "headline", label: "Headline", max: 200 },
+  { key: "email", label: "Email", max: 200 },
+  { key: "phone", label: "Phone", max: 60 },
+  { key: "location", label: "Location", max: 120 },
+];
+
+function TopForm({
+  header,
+  onClose,
+  onSave,
+}: {
+  header: ResumeHeader;
+  onClose: () => void;
+  onSave: (header: ResumeHeader) => void;
+}) {
+  const [value, setValue] = useState(header);
+  const [links, setLinks] = useState(header.links.join("\n"));
+  return (
+    <form
+      className="grid gap-4"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSave({
+          ...value,
+          links: links
+            .split("\n")
+            .map((l) => l.trim())
+            .filter(Boolean)
+            .slice(0, 5),
+        });
+      }}
+    >
+      <DialogHeader>
+        <DialogTitle>The top of the page</DialogTitle>
+        <DialogDescription>
+          Changes show on the page now and are kept when you save the version.
+        </DialogDescription>
+      </DialogHeader>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {TOP_FIELDS.map((f) => (
+          <div key={f.key} className={cn("grid gap-1.5", f.key === "headline" && "sm:col-span-2")}>
+            <Label htmlFor={`top-${f.key}`}>{f.label}</Label>
+            <Input
+              id={`top-${f.key}`}
+              value={value[f.key]}
+              maxLength={f.max}
+              onChange={(e) => setValue({ ...value, [f.key]: e.target.value })}
+            />
+          </div>
+        ))}
+        <div className="grid gap-1.5 sm:col-span-2">
+          <Label htmlFor="top-links">Links, one per line</Label>
+          <Textarea id="top-links" rows={2} value={links} onChange={(e) => setLinks(e.target.value)} />
+        </div>
+        <div className="grid gap-1.5 sm:col-span-2">
+          <Label htmlFor="top-summary">Summary</Label>
+          <Textarea
+            id="top-summary"
+            rows={4}
+            maxLength={1500}
+            value={value.summary}
+            onChange={(e) => setValue({ ...value, summary: e.target.value })}
+          />
+        </div>
+      </div>
+      <DialogFooter>
+        <Button type="button" variant="ghost" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button type="submit">Use these</Button>
+      </DialogFooter>
+    </form>
+  );
+}
+
+function RenameDialog({
+  open,
+  name,
+  busy,
+  onClose,
+  onSave,
+}: {
+  open: boolean;
+  name: string;
+  busy: boolean;
+  onClose: () => void;
+  onSave: (name: string) => void;
+}) {
+  const [value, setValue] = useState(name);
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (o) setValue(name);
+        else onClose();
+      }}
+    >
+      <DialogContent>
+        <form
+          className="grid gap-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (value.trim()) onSave(value.trim());
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Rename this resume</DialogTitle>
+            <DialogDescription>Only you see its name.</DialogDescription>
+          </DialogHeader>
+          <Input
+            aria-label="Name"
+            autoFocus
+            value={value}
+            maxLength={120}
+            onChange={(e) => setValue(e.target.value)}
+          />
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={busy || !value.trim()}>
+              Rename
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}

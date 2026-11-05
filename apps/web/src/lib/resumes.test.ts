@@ -9,6 +9,8 @@ import {
   leaveOut,
   lineParts,
   move,
+  moveContextLine,
+  moveLine,
   type NewResume,
   proposalSize,
   type ResumeContent,
@@ -17,8 +19,10 @@ import {
   type ResumeVersion,
   sameContent,
   setFold,
+  setHeader,
   switchOff,
   switchOn,
+  switchOnContext,
   versionAuthor,
   versionLabel,
 } from "./resumes";
@@ -179,5 +183,49 @@ describe("checking what the browser sends", () => {
     expect(cleanLine("   ", 20)).toBeNull();
     expect(cleanLine("x".repeat(21), 20)).toBeNull();
     expect(cleanLine(5, 20)).toBeNull();
+  });
+});
+
+describe("arranging lines", () => {
+  it("moves a line among the lines shown with it, leaving the rest in place", () => {
+    const start: ResumeContent = {
+      header: HEADER,
+      entries: [
+        {
+          card: "northwind",
+          // late and forecast show under Director; rollout under Senior Manager.
+          items: [{ card: "late" }, { card: "rollout" }, { card: "forecast", wording: "main" }],
+        },
+      ],
+      context: [],
+    };
+    const next = moveLine(start, "northwind", ["late", "forecast"], "forecast", -1);
+    expect(next.entries[0]!.items).toEqual([
+      { card: "forecast", wording: "main" },
+      { card: "rollout" },
+      { card: "late" },
+    ]);
+    expect(start.entries[0]!.items[0]!.card).toBe("late");
+    // Off either end, or a line it doesn't hold: nothing moves.
+    expect(moveLine(start, "northwind", ["late", "forecast"], "late", -1)).toEqual(start);
+    expect(moveLine(start, "northwind", ["late", "gone"], "late", 1)).toEqual(start);
+  });
+
+  it("moves a line within its section, and brings a card in at the end", () => {
+    const start: ResumeContent = {
+      header: HEADER,
+      entries: [],
+      context: [{ card: "degree" }, { card: "tools" }, { card: "cert" }],
+    };
+    const next = moveContextLine(start, ["degree", "cert"], "cert", -1);
+    expect(next.context.map((i) => i.card)).toEqual(["cert", "tools", "degree"]);
+    const added = switchOnContext(start, "award");
+    expect(added.context.at(-1)).toEqual({ card: "award", wording: "auto" });
+    expect(switchOnContext(added, "award").context).toHaveLength(4);
+  });
+
+  it("sets the top, dropping empty links", () => {
+    const next = setHeader(content(), { ...HEADER, links: ["https://example.com", " "] });
+    expect(next.header.links).toEqual(["https://example.com"]);
   });
 });

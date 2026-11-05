@@ -96,6 +96,9 @@ export type RenderedResume = {
   sections: RenderedSection[];
   // Employments in the library this resume leaves out.
   left_out: { card: string; employer: string; dates: string }[];
+  // Cards outside the career tree, such as a degree, that it leaves out.
+  // Older API answers may not carry it.
+  left_out_context?: RenderedItem[];
   // Lines whose card is gone, so they can't show.
   missing: number;
 };
@@ -190,6 +193,61 @@ export function move(content: ResumeContent, entry: string, by: -1 | 1): ResumeC
   if (at < 0 || to < 0 || to >= next.entries.length) return next;
   const [moved] = next.entries.splice(at, 1);
   next.entries.splice(to, 0, moved!);
+  return next;
+}
+
+// Brings a card outside the career tree in, at the end of its section.
+export function switchOnContext(content: ResumeContent, item: string): ResumeContent {
+  const next = copy(content);
+  if (!next.context.some((i) => i.card === item)) next.context.push({ card: item, wording: "auto" });
+  return next;
+}
+
+// Moves one line up or down among the lines shown with it (`group`, in the
+// order they show), keeping every other line where it was. Lines sit in the
+// content in one list per employment (or one for context); only the places
+// the group holds in that list change hands.
+function reorderIn(items: ResumeItem[], group: string[], item: string, by: -1 | 1): ResumeItem[] {
+  const at = group.indexOf(item);
+  const to = at + by;
+  if (at < 0 || to < 0 || to >= group.length) return items;
+  const order = [...group];
+  [order[at], order[to]] = [order[to]!, order[at]!];
+  const byCard = new Map(items.map((i) => [i.card, i]));
+  const members = new Set(group);
+  let next = 0;
+  return items.map((i) => (members.has(i.card) ? byCard.get(order[next++]!)! : i));
+}
+
+export function moveLine(
+  content: ResumeContent,
+  entry: string,
+  group: string[],
+  item: string,
+  by: -1 | 1,
+): ResumeContent {
+  const next = copy(content);
+  const target = next.entries.find((e) => e.card === entry);
+  if (!target || !group.every((card) => target.items.some((i) => i.card === card))) return next;
+  target.items = reorderIn(target.items, group, item, by);
+  return next;
+}
+
+export function moveContextLine(
+  content: ResumeContent,
+  group: string[],
+  item: string,
+  by: -1 | 1,
+): ResumeContent {
+  const next = copy(content);
+  if (!group.every((card) => next.context.some((i) => i.card === card))) return next;
+  next.context = reorderIn(next.context, group, item, by);
+  return next;
+}
+
+export function setHeader(content: ResumeContent, header: ResumeHeader): ResumeContent {
+  const next = copy(content);
+  next.header = { ...header, links: header.links.filter((l) => l.trim()).slice(0, 5) };
   return next;
 }
 

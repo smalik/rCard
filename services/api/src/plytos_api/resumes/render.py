@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from plytos_api.cards.model import FactValue, Framing
 from plytos_api.cards.repository import CardRepository, CardText
 from plytos_api.resumes.model import (
+    CONTEXT_KINDS,
     ENTRY_KINDS,
     ITEM_KINDS,
     ResumeChange,
@@ -92,6 +93,9 @@ class RenderedResume(BaseModel):
     sections: list[RenderedSection]
     # Employments in the library this resume leaves out.
     left_out: list[LeftOut]
+    # Cards outside the career tree, such as a degree or a skills list, that
+    # this resume leaves out, so the person can bring them in.
+    left_out_context: list[RenderedItem] = []
     # Items whose card is gone (archived), so they can't show.
     missing: int
 
@@ -187,7 +191,7 @@ def render(
             card=item.card,
             kind=card.kind,
             text=framing.headline,
-            detail=framing.body,
+            detail=framing.body or _detail_from_facts(card),
             wording=whose,  # type: ignore[arg-type]
             date=month(card.content.facts.get("date")),
         )
@@ -225,13 +229,43 @@ def render(
         if card.kind in ENTRY_KINDS and card_id not in on_resume
     ]
     left_out.sort(key=lambda e: e.employer.lower())
+
+    in_context = {i.card for i in content.context}
+    order = list(SECTION_LABELS)
+    left_out_context = [
+        view
+        for card_id, card in library.items()
+        if card.kind in CONTEXT_KINDS
+        and card.parent_id is None
+        and card_id not in in_context
+        # The summary shows in the header, not as a line.
+        and card.content.facts.get("use") != "summary"
+        and (view := item_view(ResumeItem(card=card_id))) is not None
+    ]
+    left_out_context.sort(
+        key=lambda v: (order.index(v.kind) if v.kind in order else len(order), v.text.lower())
+    )
     return RenderedResume(
         header=content.header,
         entries=entries,
         sections=list(sections.values()),
         left_out=left_out,
+        left_out_context=left_out_context,
         missing=missing,
     )
+
+
+def _detail_from_facts(card: CardText) -> str:
+    """What a line shows under it when its card has no story: a skills
+    card's skills, a degree and field, a certification's issuer."""
+    facts = card.content.facts
+    if card.kind == "skill":
+        return _text(facts.get("skills"))
+    if card.kind == "education":
+        return ", ".join(p for p in (_text(facts.get("degree")), _text(facts.get("field"))) if p)
+    if card.kind == "credential":
+        return _text(facts.get("issuer"))
+    return ""
 
 
 def _employer(card: CardText) -> str:

@@ -148,6 +148,18 @@ they want, and passes on the rest; either way it catches up. Versions for a
 target come from the Assembler in the conversation (see
 [agents.md](agents.md)) or by hand, as a copy.
 
+**A page is read, not stored.** `resumes/render.py` turns content into what
+the page shows, reading each card as it is now. The page also lists what's
+on file but left out: employments, the lines under each, and cards outside
+the career tree (`left_out_context`), so the person can bring any of them
+back without restoring an old version. A line whose card has no story shows
+what its facts say: a skills card's skills, a degree and field, a
+certification's issuer. Because every version is read against today's cards,
+comparing two versions (in the web app, `lib/resume-diff.ts`) shows what the
+person chose differently: lines brought in or left out, wording, order, and
+the top of the page. Changes to the cards themselves are in each card's own
+history.
+
 ## Open design point
 
 Backups of the main database also contain wrapped data keys, so a key deleted
