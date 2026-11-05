@@ -12,7 +12,7 @@ same card can't silently overwrite each other.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
@@ -33,11 +33,21 @@ from plytos_api.cards.model import (
     VariantContent,
     may_sit_under,
 )
-from plytos_api.cards.rules import facts_changed, unsupported_claims
+from plytos_api.cards.rules import (
+    SUMMARIZER_REF,
+    facts_changed,
+    honest_marks,
+    unsupported_claims,
+)
 from plytos_api.ids import uuid7
 from plytos_api.keys import UserCipher
 
 CardStatus = Literal["draft", "approved"]
+
+# Kinds whose changes can change what a job's headline and stories sum up:
+# what was done, whenever it changes, and the job and its titles when made.
+_SUMMED_UP = frozenset({"accomplishment", "project"})
+_HOLDERS = frozenset({"employment", "position", "engagement"})
 
 
 class CardNotFoundError(Exception):
@@ -135,6 +145,9 @@ class LibraryCard(BaseModel):
     updated_at: datetime
     variants: int
     variants_behind: int
+    # A job Plytos is about to sum up, or summing up now: its headline and
+    # stories may change in a moment.
+    writing: bool = False
 
 
 class CardOrderError(Exception):
@@ -196,10 +209,20 @@ def target_aad(target_id: UUID) -> bytes:
 
 
 class CardRepository:
-    def __init__(self, conn: psycopg.Connection, user_id: UUID, cipher: UserCipher) -> None:
+    def __init__(
+        self,
+        conn: psycopg.Connection,
+        user_id: UUID,
+        cipher: UserCipher,
+        *,
+        on_job_changed: Callable[[UUID], None] | None = None,
+    ) -> None:
         self._conn = conn
         self._user_id = user_id
         self._cipher = cipher
+        # Told the employment whenever what its headline and stories sum up
+        # may have changed, so they can be written again.
+        self._on_job_changed = on_job_changed
 
     # -- cards and main line -------------------------------------------------
 
@@ -212,6 +235,7 @@ class CardRepository:
         status: CardStatus = "draft",
     ) -> CardDetail:
         self._check_parent(kind, content.parent)
+        content = honest_marks(None, content, by_summarizer=False)
         card_id = uuid7()
         line_id = uuid7()
         self._conn.execute(
@@ -226,6 +250,8 @@ class CardRepository:
         line = _Line(line_id, card_id, None, None, "current")
         self._append(line, None, content, None, author)
         self._event(author, "card.created", "card", card_id)
+        if kind in _SUMMED_UP or kind in _HOLDERS:
+            self._job_changed(card_id)
         return self.card_detail(card_id)
 
     def save_main_version(
@@ -239,6 +265,8 @@ class CardRepository:
         moved = content.parent != sits_under
         if moved:
             self._check_parent(kind, content.parent)
+        by_summarizer = author.kind == "ai" and author.ref == SUMMARIZER_REF
+        content = honest_marks(before, content, by_summarizer=by_summarizer)
         version = self._append(line, parent, content, None, author)
         if moved:
             # The version above records the move; this keeps the clear mirror in step.
@@ -258,7 +286,31 @@ class CardRepository:
             behind = [r[0] for r in rows]
             for line_id in behind:
                 self._event(author, "variant.marked_behind", "card_line", line_id)
+        if kind in _SUMMED_UP and not by_summarizer:
+            self._job_changed(card_id)
+            if moved and sits_under is not None:
+                self._job_changed(sits_under)
         return SaveResult(version=version, variants_marked_behind=behind)
+
+    def employment_of(self, card_id: UUID) -> UUID | None:
+        """The employment a card sits under, or is, if any."""
+        row = self._conn.execute(
+            "with recursive up (id, kind, parent_id, depth) as ("
+            "  select id, kind, parent_id, 0 from plytos.card where id = %s"
+            "  union all"
+            "  select c.id, c.kind, c.parent_id, up.depth + 1 from plytos.card c"
+            "  join up on c.id = up.parent_id where up.depth < 8"
+            ") select id from up where kind = 'employment' order by depth limit 1",
+            (card_id,),
+        ).fetchone()
+        return row[0] if row else None
+
+    def _job_changed(self, card_id: UUID) -> None:
+        if self._on_job_changed is None:
+            return
+        employment = self.employment_of(card_id)
+        if employment is not None:
+            self._on_job_changed(employment)
 
     # -- targets and variants ------------------------------------------------
 

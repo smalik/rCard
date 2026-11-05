@@ -1,4 +1,4 @@
-"""Card content, schema version 3.
+"""Card content, schema version 4.
 
 A card has two kinds of content (docs/data-model.md):
 
@@ -15,6 +15,9 @@ it without copying it. Where a card sits (its parent) is a main-line fact too.
 Version 2 added the parent. Version 1 content reads as version 2 with no parent.
 Version 3 added attachments: papers, repositories and links the person shows
 as evidence. Earlier content reads as version 3 with none.
+Version 4 added `plytos_wrote` to framing: the parts Plytos wrote itself, such
+as an employment's headline or a title's story summed up from the
+accomplishments under it. Earlier content reads as version 4 with none.
 """
 
 from typing import Annotated, Literal
@@ -23,7 +26,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 CardKind = Literal[
     "employment",
@@ -63,6 +66,9 @@ def may_sit_under(kind: str, parent_kind: str) -> bool:
     return parent_kind in PARENT_KINDS.get(kind, frozenset())
 
 
+WrittenPart = Literal["headline", "body"]
+
+
 class Framing(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -70,6 +76,10 @@ class Framing(BaseModel):
     body: str = Field(default="", max_length=5000)
     # Fact keys to show, in order. None shows every fact.
     shown_facts: list[FactKey] | None = None
+    # The parts Plytos wrote and nobody has changed since. Plytos rewrites
+    # these when what they sum up changes; the person's own words it leaves
+    # alone. Only Plytos sets this; a person's edit clears the part it touches.
+    plytos_wrote: list[WrittenPart] = Field(default_factory=list, max_length=2)
 
 
 AttachmentKind = Literal["paper", "repo", "link"]

@@ -28,6 +28,7 @@ from pydantic import BaseModel
 
 from plytos_api.cards.model import MainContent
 from plytos_api.cards.repository import CardText
+from plytos_api.cards.rules import has_headline
 from plytos_api.imports.model import ImportResult, ProposedCard
 
 
@@ -144,13 +145,25 @@ def overlaps(a: MainContent, b: MainContent) -> bool:
 def merged(existing: MainContent, chosen: MainContent) -> MainContent:
     """The next version of an existing card from what the import read: its own
     facts kept, the import's facts and wording on top, and where it sits and
-    what's attached to it unchanged."""
-    return MainContent(
+    what's attached to it unchanged. Words on the card that the import has
+    nothing for stay, as they were and by whoever wrote them: a job's headline
+    the import only has as the employer's name, and a story or detail the
+    import has no words for."""
+    after = MainContent(
         parent=existing.parent,
         facts={**existing.facts, **chosen.facts},
         framing=chosen.framing,
         attachments=existing.attachments,
     )
+    kept: dict[str, str] = {}
+    if has_headline(existing) and not has_headline(after):
+        kept["headline"] = existing.framing.headline
+    if existing.framing.body.strip() and not chosen.framing.body.strip():
+        kept["body"] = existing.framing.body
+    if kept:
+        marks = [p for p in existing.framing.plytos_wrote if p in kept]
+        after.framing = chosen.framing.model_copy(update={**kept, "plytos_wrote": marks})
+    return after
 
 
 def unchanged(existing: MainContent, chosen: MainContent) -> bool:

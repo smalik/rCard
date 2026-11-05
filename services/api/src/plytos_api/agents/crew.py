@@ -7,6 +7,7 @@ from plytos_api.agents.check_in import CheckIn
 from plytos_api.agents.listener import Listener
 from plytos_api.agents.runtime import Agent
 from plytos_api.agents.stitcher import Stitcher
+from plytos_api.agents.summarizer import Summarizer
 from plytos_api.agents.thinking import thinker_for
 from plytos_api.config import Settings
 
@@ -24,5 +25,6 @@ def crew(settings: Settings) -> dict[str, Agent]:
         Stitcher(thinker),
         CheckIn(thinker),
         Assembler(thinker),
+        Summarizer(thinker),
     ]
     return {a.name: a for a in agents}

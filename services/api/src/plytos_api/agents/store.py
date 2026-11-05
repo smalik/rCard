@@ -33,6 +33,7 @@ from plytos_api.agents.model import (
     TidbitView,
     TriggerKind,
 )
+from plytos_api.agents.thinking import Usage
 from plytos_api.cards.model import MainContent, VariantContent
 from plytos_api.cards.repository import (
     Author,
@@ -556,6 +557,38 @@ class AgentStore:
             " do update set run_after = excluded.run_after",
             (uuid7(), self._user_id, agent, trigger_kind, dedupe_key, at),
         )
+
+    def record_run(
+        self, agent: AgentName, trigger_kind: TriggerKind, trigger_id: UUID | None, usage: Usage
+    ) -> None:
+        """Records a run done straight away, outside the queue (the person asked
+        and waited), so what it cost is counted like any other run."""
+        self._conn.execute(
+            "insert into plytos.agent_run (id, owner_id, agent, trigger_kind, trigger_id, state,"
+            " attempts, model, input_tokens, output_tokens, finished_at)"
+            " values (%s, %s, %s, %s, %s, 'done', 1, %s, %s, %s, now())",
+            (
+                uuid7(),
+                self._user_id,
+                agent,
+                trigger_kind,
+                trigger_id,
+                usage.model,
+                usage.input_tokens,
+                usage.output_tokens,
+            ),
+        )
+
+    def runs_about(self, agent: AgentName, *, waiting: bool) -> set[UUID]:
+        """What an agent's runs were about (their trigger ids): only runs queued
+        or running now when `waiting`, or every run ever otherwise."""
+        rows = self._conn.execute(
+            "select distinct trigger_id from plytos.agent_run"
+            " where agent = %s and trigger_id is not null"
+            " and (not %s or state in ('queued', 'running'))",
+            (agent, waiting),
+        ).fetchall()
+        return {r[0] for r in rows}
 
     def run(self, run_id: UUID) -> RunView:
         row = self._conn.execute(
