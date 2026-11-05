@@ -37,8 +37,10 @@ from plytos_api.cards.repository import (
     Author,
     CardDetail,
     CardNotFoundError,
+    CardOrderError,
     CardRepository,
     CardSummary,
+    LibraryCard,
     ParentError,
     SaveResult,
     StaleHeadError,
@@ -97,6 +99,12 @@ SECURITY_HEADERS = {
 class CreateCard(BaseModel):
     kind: CardKind
     content: MainContent
+
+
+class Reorder(BaseModel):
+    # The card they sit under, or None for the top of the tree.
+    parent_id: UUID | None = None
+    card_ids: list[UUID] = Field(min_length=1, max_length=500)
 
 
 class SaveMainVersion(BaseModel):
@@ -328,6 +336,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def not_found(_: Request, __: CardNotFoundError) -> JSONResponse:
         return JSONResponse({"detail": "Not found"}, status_code=status.HTTP_404_NOT_FOUND)
 
+    @app.exception_handler(CardOrderError)
+    async def card_order(_: Request, exc: CardOrderError) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=status.HTTP_409_CONFLICT)
+
     @app.exception_handler(StaleHeadError)
     async def stale(_: Request, exc: StaleHeadError) -> JSONResponse:
         return JSONResponse(
@@ -414,6 +426,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def list_cards(user_id: User) -> list[CardSummary]:
         with db.as_user(user_id) as conn:
             return repo(conn, user_id).list_cards()
+
+    @app.get("/v1/library")
+    def library(user_id: User) -> list[LibraryCard]:
+        with db.as_user(user_id) as conn:
+            return repo(conn, user_id).library()
+
+    @app.post("/v1/cards/reorder", status_code=status.HTTP_204_NO_CONTENT)
+    def reorder(body: Reorder, user_id: User) -> None:
+        with db.as_user(user_id) as conn:
+            repo(conn, user_id).reorder(body.parent_id, body.card_ids, person(user_id))
 
     @app.post("/v1/cards", status_code=status.HTTP_201_CREATED)
     def create_card(body: CreateCard, user_id: User) -> CardDetail:

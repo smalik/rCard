@@ -11,6 +11,9 @@ import "@fontsource/instrument-sans/700.css";
 import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
 import "@fontsource/ibm-plex-mono/600.css";
+import "@fontsource-variable/inter";
+// The design system first: it sets the cascade layers the older styles join.
+import "./ui.css";
 import "./globals.css";
 
 export const metadata: Metadata = {

@@ -144,6 +144,66 @@ def test_card_flow_over_http(client: TestClient) -> None:
     assert client.get("/v1/cards", headers=stranger).json() == []
 
 
+def test_the_library_keeps_attachments_and_the_persons_order(client: TestClient) -> None:
+    me = as_user("api-library")
+
+    def card(kind: str, headline: str, parent: str | None = None, **extra: Any) -> str:
+        content = {"parent": parent, "facts": {}, "framing": {"headline": headline}, **extra}
+        made = client.post("/v1/cards", json={"kind": kind, "content": content}, headers=me)
+        assert made.status_code == 201, made.text
+        return str(made.json()["id"])
+
+    job = card("employment", "Contoso Bank", facts={"employer": "Contoso Bank"})
+    title = card("position", "ETL Developer", job, facts={"title": "ETL Developer"})
+    paper = {"kind": "paper", "url": "https://example.org/loads.pdf", "title": "Nightly loads"}
+    first = card("accomplishment", "Built nightly loads", title, attachments=[paper])
+    second = card("accomplishment", "Cut load time by 40%", title)
+
+    library = client.get("/v1/library", headers=me).json()
+    by_id = {c["id"]: c for c in library}
+    assert by_id[first]["content"]["attachments"] == [paper | {"note": ""}]
+    assert by_id[second]["content"]["attachments"] == []
+    assert by_id[first]["version"] == 1 and by_id[first]["version_author"] == "person"
+    detail = client.get(f"/v1/cards/{first}", headers=me).json()
+    assert by_id[first]["version_id"] == detail["main"]["head"]["id"]
+    under = [c["id"] for c in library if c["parent_id"] == title]
+    assert under == [first, second]
+
+    moved = client.post(
+        "/v1/cards/reorder", json={"parent_id": title, "card_ids": [second, first]}, headers=me
+    )
+    assert moved.status_code == 204, moved.text
+    library = client.get("/v1/library", headers=me).json()
+    assert [c["id"] for c in library if c["parent_id"] == title] == [second, first]
+
+    # A card that sits elsewhere, or someone else's, can't be ordered here.
+    wrong = client.post(
+        "/v1/cards/reorder", json={"parent_id": title, "card_ids": [second, job]}, headers=me
+    )
+    assert wrong.status_code == 409
+    stranger = as_user("someone-else-library")
+    theirs = client.post(
+        "/v1/cards/reorder",
+        json={"parent_id": title, "card_ids": [first, second]},
+        headers=stranger,
+    )
+    assert theirs.status_code == 409
+    assert client.get("/v1/library", headers=stranger).json() == []
+    library = client.get("/v1/library", headers=me).json()
+    assert [c["id"] for c in library if c["parent_id"] == title] == [second, first]
+
+    script = {"kind": "link", "url": "javascript:alert(1)", "title": "Nope"}
+    refused = client.post(
+        "/v1/cards",
+        json={
+            "kind": "accomplishment",
+            "content": {"framing": {"headline": "x"}, "attachments": [script]},
+        },
+        headers=me,
+    )
+    assert refused.status_code == 422
+
+
 def test_unknown_parent_target_is_not_found(client: TestClient) -> None:
     response = client.post(
         "/v1/targets",

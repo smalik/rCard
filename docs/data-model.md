@@ -52,6 +52,22 @@ history shows where it used to sit. Variants can't move a card. A trigger
 refuses a parent of the wrong kind, and a composite foreign key refuses a
 parent that belongs to someone else.
 
+**The order is the person's.** Siblings show in the order the person put
+them in: `card.sort_key` ([`0010_card_order.sql`](../services/api/migrations/0010_card_order.sql)),
+in clear like `parent_id` because it holds no text. Cards never placed sort
+after placed ones, oldest first. `POST /v1/cards/reorder` places the cards
+under one parent (`parent_id`, or none for the top of the tree) in the order
+given (`card_ids`), and refuses (409) any card that isn't the person's or
+doesn't sit there now; siblings left out keep their places. Reordering is
+not a new version: it changes where a card shows, not what it says. Each
+resume keeps its own order in its content.
+
+**Evidence is attached on the main line.** Main versions carry `attachments`
+(schema version 3): up to 20 papers, repositories or links, each a web
+address (http or https only), a title and an optional note, encrypted with
+the rest of the content. Variants can't add or change them. Versions saved
+before schema 3 read as having none, so their hashes still verify.
+
 **Facts live only on the main line.** Main versions hold `facts` (employer,
 client, agency, title, dates, numbers, scope, skills, evidence) and default
 `framing`. Variant versions hold `framing` only, so a variant can't change or
@@ -72,6 +88,11 @@ records the main version it's based on.
 **Behind.** When a main save changes facts, every current variant is marked
 `behind`. Saving the variant again, against the latest main, makes it current.
 Reworded main versions leave variants alone.
+
+**The library is one read.** `GET /v1/library` returns every card that isn't
+archived, with its main version's content, version number, author and time,
+its `parent_id` and `sort_key`, and how many variants it has and how many
+are behind. The cards screen polls it to stay live.
 
 **Edits never overwrite each other.** A save names the version it started
 from. If the line's head has moved, the save fails with a conflict (HTTP 409)

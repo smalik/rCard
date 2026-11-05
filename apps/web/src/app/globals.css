@@ -1,7 +1,8 @@
 /* Plytos "Hybrid" look: warm paper, ink, and four card colors.
    Mobile first: every rule targets a phone, and the media queries at the end
    widen layouts for laptops. Screen-specific styles live beside their pages. */
-
+/* In the legacy layer: Tailwind utilities (src/app/ui.css) win over these. */
+@layer legacy {
 :root {
   --paper: #fbf6ee;
   --sand: #f1e8da;
@@ -888,4 +889,5 @@ a {
 
 .tab[aria-current="page"] .icon {
   color: var(--orange);
+}
 }

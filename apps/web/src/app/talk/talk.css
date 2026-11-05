@@ -1,6 +1,7 @@
 /* The conversation. Mobile first: the thread fills the phone, the composer
    and tabs sit at the bottom, and wider screens get a centered column. */
-
+/* In the legacy layer: Tailwind utilities (src/app/ui.css) win over these. */
+@layer legacy {
 .talk {
   width: 100%;
   max-width: 560px;
@@ -623,4 +624,5 @@
   font-size: 13px;
   line-height: 19px;
   color: var(--ink-60);
+}
 }

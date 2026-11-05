@@ -143,11 +143,13 @@ def overlaps(a: MainContent, b: MainContent) -> bool:
 
 def merged(existing: MainContent, chosen: MainContent) -> MainContent:
     """The next version of an existing card from what the import read: its own
-    facts kept, the import's facts and wording on top, and where it sits unchanged."""
+    facts kept, the import's facts and wording on top, and where it sits and
+    what's attached to it unchanged."""
     return MainContent(
         parent=existing.parent,
         facts={**existing.facts, **chosen.facts},
         framing=chosen.framing,
+        attachments=existing.attachments,
     )
 
 

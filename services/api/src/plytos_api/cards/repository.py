@@ -116,6 +116,31 @@ class CardSummary(BaseModel):
     variants_behind: int
 
 
+class LibraryCard(BaseModel):
+    """One card as the library shows it: where it sits, its current main
+    content, and how fresh it is. Content is None once redacted."""
+
+    id: UUID
+    kind: CardKind
+    status: str
+    parent_id: UUID | None
+    # The person's own order among the card's siblings; None sorts last.
+    sort_key: int | None
+    created_at: datetime
+    content: MainContent | None
+    # The main line's head: what an edit saves on top of.
+    version_id: UUID
+    version: int
+    version_author: AuthorKind
+    updated_at: datetime
+    variants: int
+    variants_behind: int
+
+
+class CardOrderError(Exception):
+    """The cards to order aren't exactly the person's cards under one parent."""
+
+
 @dataclass(frozen=True)
 class CardText:
     """A card's kind, place and current main content."""
@@ -348,6 +373,64 @@ class CardRepository:
                 )
             )
         return summaries
+
+    def library(self) -> list[LibraryCard]:
+        """Every card the person keeps, with its current main content, in one
+        query, ordered as the person placed them among their siblings."""
+        rows = self._conn.execute(
+            "select c.id, c.kind, c.status, c.parent_id, c.sort_key, c.created_at,"
+            "  v.id, v.number, v.author_kind, v.created_at, v.content_ciphertext,"
+            "  (select count(*) from plytos.card_line x"
+            "    where x.card_id = c.id and x.target_id is not null),"
+            "  (select count(*) from plytos.card_line x"
+            "    where x.card_id = c.id and x.state = 'behind')"
+            " from plytos.card c"
+            " join plytos.card_line l on l.card_id = c.id and l.target_id is null"
+            " join plytos.card_version v on v.id = l.head_version_id"
+            " where c.status <> 'archived'"
+            " order by c.sort_key nulls last, c.created_at"
+        ).fetchall()
+        return [
+            LibraryCard(
+                id=r[0],
+                kind=r[1],
+                status=r[2],
+                parent_id=r[3],
+                sort_key=r[4],
+                created_at=r[5],
+                content=None
+                if r[10] is None
+                else MainContent.model_validate_json(
+                    self._cipher.decrypt(bytes(r[10]), version_aad(r[6]))
+                ),
+                version_id=r[6],
+                version=r[7],
+                version_author=r[8],
+                updated_at=r[9],
+                variants=r[11],
+                variants_behind=r[12],
+            )
+            for r in rows
+        ]
+
+    def reorder(self, parent_id: UUID | None, card_ids: Sequence[UUID], author: Author) -> None:
+        """Puts some of the person's cards under one parent (or at the top of
+        the tree) in the given order, each named once. Siblings left out keep
+        their places."""
+        rows = self._conn.execute(
+            "select id from plytos.card"
+            " where parent_id is not distinct from %s and status <> 'archived'"
+            "   and id = any(%s)",
+            (parent_id, list(card_ids)),
+        ).fetchall()
+        if len(set(card_ids)) != len(card_ids) or {r[0] for r in rows} != set(card_ids):
+            raise CardOrderError("Those cards don't all sit in that place any more.")
+        for position, card_id in enumerate(card_ids):
+            self._conn.execute(
+                "update plytos.card set sort_key = %s where id = %s", (position, card_id)
+            )
+        if card_ids:
+            self._event(author, "cards.reordered", "card", card_ids[0])
 
     def main_contents(self) -> dict[UUID, CardText]:
         """Every card's kind, place and current main content, in one query. For
