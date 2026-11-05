@@ -224,6 +224,16 @@ RUN_TOGETHER = [
         "Lakeshore College",
     ),
     ("Lakeshore College Springfield , IL", None, "Lakeshore College"),
+    (
+        "Lincoln High School 2008 High School Diploma",
+        "High School Diploma",
+        "Lincoln High School",
+    ),
+    (
+        "Bachelor of Science : Nursing The Ohio State University - Columbus , OH",
+        "Bachelor of Science : Nursing",
+        "The Ohio State University",
+    ),
 ]
 
 
@@ -238,10 +248,23 @@ def test_a_school_line_run_together_is_cut_where_the_school_begins(
 
 
 def test_a_school_named_on_its_own_is_left_whole() -> None:
-    for line in ("University of Phoenix School of Business", "State University"):
+    for line in (
+        "University of Phoenix School of Business",
+        "State University",
+        "The Ohio State University",
+        "Fashion Institute of Technology",
+    ):
         result = read(f"Pat Lee\nEducation\n{line}\n")
         [card] = [c for c in result.cards if c.kind == "education"]
         assert card.content.facts == {"institution": line}
+
+
+def test_a_school_written_apart_from_its_degree_keeps_its_whole_name() -> None:
+    for school in ("Culinary Institute of America", "Art Institute of Pittsburgh"):
+        result = read(f"Pat Lee\nEducation\nBachelor of Fine Arts, {school}, 2010\n")
+        [card] = [c for c in result.cards if c.kind == "education"]
+        assert card.content.facts["institution"] == school
+        assert card.content.facts["degree"] == "Bachelor of Fine Arts"
 
 
 def test_accomplishments_with_a_colon_inside_a_job_stay_in_the_job() -> None:

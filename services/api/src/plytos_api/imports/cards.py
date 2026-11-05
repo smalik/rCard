@@ -449,12 +449,14 @@ _NAME_JOINS = frozenset({"of", "the", "at", "and", "&", "for", "de", "-"})
 _MID_DATE = re.compile(rf"\s(?:{_MONTH}\s+)?(?:19|20)\d{{2}}\s", re.I)
 
 
-def _school_line(piece: str, then: str) -> tuple[str, str] | None:
+def _school_line(piece: str, then: str, *, degree_elsewhere: bool) -> tuple[str, str] | None:
     """A school's line run together with what was studied there, as (studied, school):
     "Bachelor of Science : Nursing 2015 Lakeshore College", "High School Diploma
     Washington High School", "Accounting Lakeshore College City" (before ", State").
-    None when the piece is only a school, or has none."""
-    cut = _cut_school_line(piece, then)
+    None when the piece is only a school, or has none. With the degree written in
+    another piece ("Bachelor of Science, Culinary Institute of America, 2015"), the
+    piece is taken for the school's whole name unless a degree or colon is in it."""
+    cut = _cut_school_line(piece, then, degree_elsewhere=degree_elsewhere)
     if cut is None:
         return None
     studied, school = _DATE_EDGE.sub("", cut[0]).strip(" :,-"), cut[1]
@@ -464,16 +466,28 @@ def _school_line(piece: str, then: str) -> tuple[str, str] | None:
     return studied, school
 
 
-def _cut_school_line(piece: str, then: str) -> tuple[str, str] | None:
-    anchors = list(_SCHOOL.finditer(piece))
+def _schools_named(text: str) -> list[re.Match[str]]:
+    """The school words of a line, leaving out the "School" of a degree ("High School
+    Diploma")."""
+    taken = [m.span() for m in _SCHOOL_DEGREE.finditer(text)]
+    return [m for m in _SCHOOL.finditer(text) if not any(a <= m.start() < b for a, b in taken)]
+
+
+_SCHOOL_DEGREE = re.compile(
+    r"\bHigh School (?:Diploma|Graduate|Equivalen\w*|Degree|Certificate)\b", re.I
+)
+
+
+def _cut_school_line(piece: str, then: str, *, degree_elsewhere: bool) -> tuple[str, str] | None:
+    anchors = _schools_named(piece)
     if not anchors:
         return None
     mid = _MID_DATE.search(piece)
     if mid is not None:
         left, right = piece[: mid.start()].strip(" :,"), piece[mid.end() :].strip(" :,")
-        if _SCHOOL.search(right) and not _SCHOOL.search(left):
+        if _schools_named(right) and not _schools_named(left):
             return (left, right) if left else None
-        if _SCHOOL.search(left) and not _SCHOOL.search(right):
+        if _schools_named(left) and not _schools_named(right):
             return (right, left) if right else None
     anchor = anchors[-1]
     words = [(m.start(), m.end(), m.group()) for m in re.finditer(r"[^\s:]+|:", piece)]
@@ -508,8 +522,15 @@ def _cut_school_line(piece: str, then: str) -> tuple[str, str] | None:
         while start > 0 and not stops(start - 1, studied_ok=not named):
             start -= 1
             named = named or words[start][2].lower() not in _STUDIED
-    while start < at and words[start][2].lower() in _NAME_JOINS:
-        start += 1
+    while start < at and words[start][2] in _NAME_JOINS:
+        start += 1  # "of", not "The": "The Ohio State University"
+    front = piece[: words[start][0]]
+    # Only subject words before the school: "Business Administration Lakeshore
+    # College", but not "Culinary Institute of America" where the degree is written
+    # apart, nor one word that may be the name's own.
+    subject_only = start > 0 and not (_DEGREE.search(front) or ":" in front)
+    if subject_only and (degree_elsewhere or len(front.split()) < 2):
+        start = 0
     end = len(words)
     after = words[at + 1 :]
     if after and after[0][2].lower() not in _NAME_JOINS:
@@ -543,7 +564,12 @@ def _education_facts(entry: Entry) -> dict[str, FactValue]:
         piece = _DATE_EDGE.sub("", piece).strip()
         if not piece:
             continue
-        run_together = None if entry.school else _school_line(piece, _next(pieces, i))
+        elsewhere = any(_DEGREE.search(p) for j, p in enumerate(pieces) if j != i)
+        run_together = (
+            None
+            if entry.school
+            else _school_line(piece, _next(pieces, i), degree_elsewhere=elsewhere)
+        )
         if run_together is not None and "institution" not in facts:
             studied, facts["institution"] = run_together
             if studied and not entry.degree:
