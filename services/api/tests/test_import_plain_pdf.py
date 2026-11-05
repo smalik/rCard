@@ -296,3 +296,17 @@ def test_a_dated_title_line_is_not_divided_when_its_employer_follows() -> None:
         if c.kind in ("position", "engagement") and c.parent_ref == by.ref
     ]
     assert jobs == [("Senior Engineer Health Services", "Contoso Systems")]
+
+
+def test_an_undated_title_line_under_a_job_is_not_divided() -> None:
+    result = read(
+        "Pat Lee\nExperience\nFlight Attendant, Fabrikam Air, October 2015 to Current\n"
+        "• Served 180 passengers a flight.\nLead Purser International Cargo Services\n"
+        "• Led a crew of nine.\n"
+    )
+    names = [
+        c.content.facts.get("title") or c.content.facts.get("client")
+        for c in result.cards
+        if c.kind in ("position", "engagement")
+    ]
+    assert "Lead Purser International Cargo Services" in names

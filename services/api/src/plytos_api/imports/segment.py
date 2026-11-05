@@ -1014,8 +1014,9 @@ def _parse_header(header: list[Block]) -> tuple[Role, str | None]:
     if len(pieces) == 1:
         piece = pieces[0][1]
         # Only a line of its own, under its dates: a dated title line ("Benefits
-        # Specialist Health Services  2009 - 2012") usually has its employer below it.
-        run_together = None if pieces[0][0] in dated else _run_together(piece)
+        # Specialist Health Services  2009 - 2012") usually has its employer below it,
+        # and an undated one is a title of the job above it.
+        run_together = _run_together(piece) if dated and pieces[0][0] not in dated else None
         if run_together is not None:
             role.title, role.organization, role.title_first = run_together
             # Nothing between them on the page: a guess the person should see.
