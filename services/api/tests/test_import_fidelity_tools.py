@@ -299,3 +299,19 @@ def test_a_tight_budget_waits_for_room_instead_of_skipping(tmp_path: Path) -> No
     # With nothing running and no room, it says no at once.
     path.write_text(json.dumps({"spent_usd": 0.09, "most_per_resume_usd": 0.04}))
     assert not Ledger(path, budget=0.10).may_start()
+
+
+def test_a_phone_written_another_countrys_way_is_found_on_a_contact_line() -> None:
+    from plytos_api.imports.model import Block
+    from plytos_api.imports.segment import parse_contact
+
+    def phones(text: str) -> list[str]:
+        return parse_contact([Block(index=0, text=text)]).phones
+
+    assert phones("Phone: (555) 555 55 55") == ["(555) 555 55 55"]
+    assert phones("Mobile: +919845012345 • Pune") == ["+919845012345"]
+    assert phones("+44 20 7946 0958") == ["+44 20 7946 0958"]
+    assert phones("Call 312-555-0142 or 312-555-0143") == ["312-555-0142", "312-555-0143"]
+    # Years, ZIP codes and street numbers aren't phones.
+    for text in ["2015 2016 2017", "Springfield, IL 62704-1234", "Jan 2019 - Present"]:
+        assert phones(text) == [], text

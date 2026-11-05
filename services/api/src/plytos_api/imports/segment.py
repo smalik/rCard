@@ -544,6 +544,28 @@ def _strip_inline(text: str) -> str:
 
 # --- Contact ------------------------------------------------------------------
 
+# A number written another way than 555-555-5555: "+44 20 7946 0958", "(0161) 496 0000",
+# "98450 12345". Looked for only on lines already taken for contact details.
+_NUMBER_RUN = re.compile(r"(?<![\w+])\+?\s?\(?\d[\d\s().\-]{6,22}\d(?![\w])")
+_YEAR = re.compile(r"(?:19|20)\d\d")
+
+
+def _phones_written_otherwise(text: str) -> list[str]:
+    found = []
+    for m in _NUMBER_RUN.finditer(text):
+        run = m.group(0).strip()
+        groups = re.findall(r"\d+", run)
+        digits = sum(len(g) for g in groups)
+        if not 10 <= digits <= 15 or find_range(run) is not None:
+            continue
+        # Each part a few figures long, unless it's one long run after a "+".
+        if any(len(g) > 5 for g in groups) and not (run.startswith("+") and len(groups) == 1):
+            continue
+        if all(_YEAR.fullmatch(g) for g in groups):
+            continue
+        found.append(run)
+    return found
+
 
 def parse_contact(blocks: list[Block]) -> Contact:
     contact = Contact(blocks=[b.index for b in blocks])
@@ -553,7 +575,7 @@ def parse_contact(blocks: list[Block]) -> Contact:
         for email in EMAIL.findall(text):
             if email not in contact.emails:
                 contact.emails.append(email)
-        for phone in PHONE.findall(text):
+        for phone in PHONE.findall(text) or _phones_written_otherwise(text):
             if phone.strip() not in contact.phones:
                 contact.phones.append(phone.strip())
         for link in [*block.links, *LINK.findall(text)]:
