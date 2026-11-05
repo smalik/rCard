@@ -63,6 +63,11 @@ def _heading(text: str) -> str | None:
     return f"[{kind} heading: {normalize_heading(text)}]" if kind else None
 
 
+def _when(start: str | None, end: str | None) -> str:
+    """A label's dates by their form only: "2019-03" is "9999-99"."""
+    return "-".join(re.sub(r"\d", "9", d) if d else "?" for d in (start, end))
+
+
 def _lines_of(words: str, lines: dict[int, str]) -> list[int]:
     """The lines a label's words are on: the first that holds their start, and those
     after it that go on holding them."""
@@ -103,12 +108,11 @@ def show(career: Career, reading: ImportResult | None) -> str:
         )
     out += ["", "Label"]
     for e, employment in enumerate(career.employments, 1):
-        out.append(
-            f"  E{e} employer {skeleton(employment.employer)} {employment.start}-{employment.end}"
-        )
+        when = _when(employment.start, employment.end)
+        out.append(f"  E{e} employer {skeleton(employment.employer)} {when}")
         for t, position in enumerate(employment.positions, 1):
             title = skeleton(position.title or "")
-            out.append(f"    T{e}.{t} {title} {position.start}-{position.end}")
+            out.append(f"    T{e}.{t} {title} {_when(position.start, position.end)}")
             for group in position.groups:
                 label = f" under {skeleton(group.label)}" if group.label else ""
                 for item in group.items:
@@ -117,7 +121,7 @@ def show(career: Career, reading: ImportResult | None) -> str:
     for school in career.education:
         out.append(
             f"  school {skeleton(school.school)} | degree {skeleton(school.degree)}"
-            f" | field {skeleton(school.field)} | {school.year}"
+            f" | field {skeleton(school.field)} | {_when(school.year, None)}"
         )
     if reading is None:
         return "\n".join(out) + "\n"
