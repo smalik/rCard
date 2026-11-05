@@ -3,7 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import type { ResumePage } from "../../lib/resumes";
+import { Button } from "@/components/ui/button";
+import type { ResumePage } from "@/lib/resumes";
 
 // Sets up the person's resume as they wrote it, from a file's kept cards.
 export function MakeResume({ importId }: { importId: string }) {
@@ -36,15 +37,15 @@ export function MakeResume({ importId }: { importId: string }) {
   }
 
   return (
-    <>
+    <div className="flex flex-col items-start gap-2 sm:items-end">
       {error && (
-        <p className="attention small" role="alert">
+        <p role="alert" className="text-[13px] text-destructive">
           {error}
         </p>
       )}
-      <button className="button primary" type="button" disabled={busy} onClick={make}>
+      <Button disabled={busy} onClick={make}>
         {busy ? "Setting it up…" : "Set up my resume"}
-      </button>
-    </>
+      </Button>
+    </div>
   );
 }

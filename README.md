@@ -14,7 +14,7 @@ career, and recombine cards for each application.
 
 | Path | What it is |
 | --- | --- |
-| `apps/web` | Next.js web app for phone, tablet and laptop, installable on phones. The only public entry point. Rebuilt screens use Tailwind and shadcn components (`src/components/ui`); the card primitives are in `src/components/cards` |
+| `apps/web` | Next.js web app for phone, tablet and laptop, installable on phones. The only public entry point. Rebuilt screens use Tailwind and shadcn components (`src/components/ui`); the card primitives are in `src/components/cards` and the resume page in `src/components/resume` |
 | `services/api` | Python API (FastAPI, Postgres). Private: only the web app's server calls it |
 | `services/api/migrations` | The Postgres schema, as plain SQL applied in order |
 | `infra/terraform` | Google Cloud setup: Cloud Run, Cloud SQL, KMS, Storage, deploy identity |

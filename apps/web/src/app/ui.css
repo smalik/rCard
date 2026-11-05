@@ -51,6 +51,16 @@
   --kind-project: #5a6b2b;
   --kind-activity: #c2571a;
 
+  /* A resume reads on paper: white in light mode, softened in dark, and
+     black on white when printed. */
+  --paper: #ffffff;
+  --paper-ink: #1b1b1a;
+  --paper-soft: #64625d;
+  --paper-rule: #dcd9d1;
+  --paper-accent: #1b6b52;
+  --paper-added: #e3f3ea;
+  --paper-removed: #b4321b;
+
   /* Paper-like depth for stacked cards. */
   --elev-card: 0 1px 0 rgba(21, 22, 23, 0.03), 0 1px 3px rgba(21, 22, 23, 0.06),
     0 12px 28px -16px rgba(21, 22, 23, 0.22);
@@ -96,6 +106,25 @@
       0 12px 28px -16px rgba(0, 0, 0, 0.8);
     --elev-lift: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 22px 44px -18px rgba(0, 0, 0, 0.9);
     --elev-sheet: 0 1px 2px rgba(0, 0, 0, 0.4);
+
+    --paper: #f6f5f1;
+    --paper-ink: #1b1b1a;
+    --paper-soft: #5d5b56;
+    --paper-rule: #d4d1c8;
+    --paper-added: #d9efe2;
+  }
+}
+
+@page {
+  margin: 0.6in 0.65in;
+}
+
+@media print {
+  :root {
+    --paper: #ffffff;
+    --paper-ink: #000000;
+    --paper-soft: #3d3d3d;
+    --paper-rule: #b8b8b8;
   }
 }
 
@@ -130,6 +159,14 @@
   --color-ring: var(--ring);
   --color-live: var(--live);
   --color-live-soft: var(--live-soft);
+
+  --color-paper: var(--paper);
+  --color-paper-ink: var(--paper-ink);
+  --color-paper-soft: var(--paper-soft);
+  --color-paper-rule: var(--paper-rule);
+  --color-paper-accent: var(--paper-accent);
+  --color-paper-added: var(--paper-added);
+  --color-paper-removed: var(--paper-removed);
 
   --color-kind-experience: var(--kind-experience);
   --color-kind-position: var(--kind-position);
