@@ -502,6 +502,12 @@ function DiffLineView({ line, bullet, dated }: { line: DiffLine; bullet: boolean
           </p>
         )}
         {line.detail && !removed && <p className="text-[12.5px] text-paper-soft">{line.detail}</p>}
+        {line.wasDetail !== null && (
+          <p className="mt-0.5 text-[12px] text-paper-soft">
+            <span className="font-medium">Detail reworded.</span> It read:{" "}
+            <span className="line-through decoration-paper-soft/60">{line.wasDetail || "nothing"}</span>
+          </p>
+        )}
       </div>
     </li>
   );

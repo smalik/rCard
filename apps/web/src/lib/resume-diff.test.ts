@@ -170,6 +170,15 @@ describe("compareResumes", () => {
     expect(diffSummary(diff)).toBe("The top changed");
   });
 
+  it("notices a detail worded differently under the same line", () => {
+    const degree = (detail: string) => ({ ...item("degree", "University of Wisconsin", "education"), detail });
+    const a = page([], [{ kind: "education", label: "Education", items: [degree("B.S., Industrial Engineering")] }]);
+    const b = page([], [{ kind: "education", label: "Education", items: [degree("B.S. with honors")] }]);
+    const [only] = compareResumes(a, b).sections[0]!.lines;
+    expect(only).toMatchObject({ was: null, wasDetail: "B.S., Industrial Engineering" });
+    expect(diffSummary(compareResumes(a, b))).toBe("1 reworded");
+  });
+
   it("compares sections line by line", () => {
     const after = page(before.entries, [
       { kind: "education", label: "Education", items: [] },

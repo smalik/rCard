@@ -22,8 +22,10 @@ export type DiffLine = {
   date: string;
   wording: RenderedItem["wording"];
   presence: Presence;
-  // The text it read before, when only the wording changed.
+  // What it read before, when only the wording changed: the line, and the
+  // detail shown under it.
   was: string | null;
+  wasDetail: string | null;
   moved: boolean;
 };
 
@@ -129,22 +131,19 @@ export function steady(before: string[], after: string[]): Set<string> {
 
 // -- lines ---------------------------------------------------------------------
 
-function shown(item: RenderedItem): string {
-  return lineParts(item).text;
-}
-
 function line(item: RenderedItem, presence: Presence, was: RenderedItem | null): DiffLine {
-  const now = shown(item);
-  const before = was ? shown(was) : null;
+  const now = lineParts(item);
+  const before = was && presence === "same" ? lineParts(was) : null;
   return {
     card: item.card,
     kind: item.kind,
-    text: now,
-    detail: lineParts(item).detail,
+    text: now.text,
+    detail: now.detail,
     date: item.date,
     wording: item.wording,
     presence,
-    was: presence === "same" && before !== null && before !== now ? before : null,
+    was: before && before.text !== now.text ? before.text : null,
+    wasDetail: before && before.detail !== now.detail ? before.detail : null,
     moved: false,
   };
 }
@@ -301,7 +300,7 @@ export function compareResumes(before: RenderedResume, after: RenderedResume): R
   const counts: DiffCounts = {
     added: all.filter((l) => l.presence === "added").length,
     removed: all.filter((l) => l.presence === "removed").length,
-    reworded: all.filter((l) => l.was !== null).length,
+    reworded: all.filter((l) => l.was !== null || l.wasDetail !== null).length,
     moved: all.filter((l) => l.moved).length + entries.filter((e) => e.moved).length,
     jobsAdded: entries.filter((e) => e.presence === "added").length,
     jobsRemoved: entries.filter((e) => e.presence === "removed").length,
