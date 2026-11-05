@@ -109,6 +109,12 @@ def find_range(text: str) -> DateRange | None:
     return None
 
 
+def only_dates(text: str) -> bool:
+    """Whether the text is nothing but dates: a range, or a date on its own."""
+    rest = _SINGLE.sub(" ", _RANGE.sub(" ", text))
+    return bool(text.strip()) and re.search(r"[^\W_]", rest) is None
+
+
 def strip_range(text: str, found: DateRange) -> str:
     """The line with its date range removed, tidied of leftover separators."""
     rest = text.replace(found.raw, " ")

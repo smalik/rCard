@@ -125,11 +125,11 @@ def propose_cards(
             for run in _wrapped(lines):
                 lead = bullets[run[0][0]]
                 extra: dict[str, FactValue] = {"workstream": lead.group} if lead.group else {}
-                if len(run) == 1:
+                if len(run) == 1 and lead.bullet_char is not None:
                     pieces = [(lead.text, [lead.block])]
                 else:
-                    # A bullet that wraps onto lines of its own, with no bullet mark to
-                    # tell where the next begins: a card per sentence, not per line.
+                    # A bullet that wraps onto lines of its own, or a paragraph, with no
+                    # bullet mark to tell where the next begins: a card per sentence.
                     pieces = _sentences_over(run, shortest=3)
                 for text, spanned in pieces:
                     add(

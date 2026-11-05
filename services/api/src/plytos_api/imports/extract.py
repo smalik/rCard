@@ -15,7 +15,7 @@ import re
 import zipfile
 from collections import Counter
 from collections.abc import Iterable, Iterator
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 import docx
 import pdfplumber
@@ -25,6 +25,7 @@ from docx.text.run import Run
 from lxml import etree
 from PIL import Image
 
+from plytos_api.imports.dates import find_range, only_dates
 from plytos_api.imports.model import (
     Block,
     DocFormat,
@@ -626,6 +627,7 @@ def _app_pages(app_xml: bytes) -> int | None:
 def _read_pdf(data: bytes, filename: str) -> ExtractedDocument:
     blocks: list[Block] = []
     bullet_x: dict[int, tuple[float, float]] = {}
+    flow: dict[int, _Flow] = {}
     images = 0
     columns = 1
     pictures: list[Picture] = []
@@ -665,13 +667,23 @@ def _read_pdf(data: bytes, filename: str) -> ExtractedDocument:
                 regions = [words]
             tops: list[tuple[int, float]] = []  # (block, top) of each line on this page
             for region in regions:
-                for line in _pdf_lines(region):
+                lines = list(_pdf_lines(region))
+                # The region's right margin: where the longest line of running text
+                # stops. Dates set against a tab stop can reach past it.
+                running = [
+                    line
+                    for line in lines
+                    if "\t" not in line["text"] and not _ends_on_date(line["text"])
+                ] or lines
+                right = max(float(w["x1"]) for line in running for w in line["words"])
+                for line in lines:
                     count = len(blocks)
-                    _add_pdf_line(blocks, line, number, bullet_x)
+                    _add_pdf_line(blocks, line, number, bullet_x, flow, right)
                     if len(blocks) > count:
                         tops.append((blocks[-1].index, line["top"]))
             for img in page.images:
                 _pdf_picture(page, img, words, number, before, tops, pictures, kept)
+    _mark_running_lines(blocks)
     facts = _facts(
         "pdf",
         filename,
@@ -684,6 +696,35 @@ def _read_pdf(data: bytes, filename: str) -> ExtractedDocument:
         pictures=pictures,
     )
     return ExtractedDocument(facts=facts, blocks=blocks, images=kept)
+
+
+def _mark_running_lines(blocks: list[Block]) -> None:
+    """Marks a line repeated at the top or foot of the pages, as a running header or
+    footer is, the way a Word file marks its own. Otherwise a header printed again at
+    the top of page 2 reads as part of whatever section it lands in."""
+    pages = sorted({b.page for b in blocks if b.page is not None})
+    if len(pages) < 2:
+        return
+    by_page = {page: [b for b in blocks if b.page == page] for page in pages}
+
+    def key(block: Block) -> str:
+        # "Page 1 of 2" and "Page 2 of 2" are the same line.
+        return re.sub(r"\d+", "#", block.text.strip().lower())
+
+    marks: list[tuple[Literal["header", "footer"], slice]] = [
+        ("header", slice(0, 2)),
+        ("footer", slice(-2, None)),
+    ]
+    for where, ends in marks:
+        seen: dict[str, set[int]] = {}
+        for page, on_page in by_page.items():
+            for block in on_page[ends]:
+                seen.setdefault(key(block), set()).add(page)
+        repeated = {k for k, on in seen.items() if len(on) >= 2}
+        for on_page in by_page.values():
+            for block in on_page[ends]:
+                if key(block) in repeated and block.where == "body":
+                    block.where = where
 
 
 def _pdf_picture(
@@ -769,33 +810,60 @@ def _cluster_lines(words: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     return [sorted(line, key=lambda w: float(w["x0"])) for line in lines]
 
 
+# The narrowest clear strip, in points, that can part two columns. The gaps between
+# words can line up down a few lines of a paragraph, but they're narrower than this.
+_GUTTER = 8.0
+
+
 def _gutter(words: list[dict[str, Any]], width: float) -> float | None:
     """The x of an empty vertical strip that splits the page into two columns.
 
-    Right-aligned dates also leave a strip empty, so both sides must carry a
-    real share of the words before the page counts as two columns.
+    A strip only counts when it's wider than a gap between words, and when there are
+    columns on both sides of it: lines of more than dates, each side's starting at
+    one left edge, and a fair share of the words. Dates set against the right margin
+    leave a strip clear too, and a column of them is no column of text.
     """
     lines = _cluster_lines(words)
     if len(lines) < 12:
         return None
-    total = len(words)
-    best: tuple[float, float] | None = None
+    half = _GUTTER / 2
+    scored: list[tuple[float, float]] = []
     for x in range(int(width * 0.2), int(width * 0.8), 2):
         crossing = sum(
-            1 for line in lines if any(float(w["x0"]) < x < float(w["x1"]) for w in line)
+            1
+            for line in lines
+            if any(float(w["x0"]) < x + half and float(w["x1"]) > x - half for w in line)
         )
         if crossing > len(lines) * 0.1:
             continue
-        left_words = sum(1 for w in words if float(w["x1"]) <= x)
-        right_words = sum(1 for w in words if float(w["x0"]) >= x)
-        left_lines = sum(1 for line in lines if any(float(w["x1"]) <= x for w in line))
-        right_lines = sum(1 for line in lines if any(float(w["x0"]) >= x for w in line))
-        if min(left_words, right_words) < total * 0.2 or min(left_lines, right_lines) < 6:
+        sides = [
+            _column_text([[w for w in line if float(w["x1"]) <= x] for line in lines]),
+            _column_text([[w for w in line if float(w["x0"]) >= x] for line in lines]),
+        ]
+        if any(len(side) < 6 or _aligned(side) < 6 for side in sides):
             continue
-        score = min(left_words, right_words) - crossing * 10
-        if best is None or score > best[1]:
-            best = (float(x), float(score))
-    return best[0] if best else None
+        counts = [sum(len(part) for part in side) for side in sides]
+        if min(counts) < len(words) * 0.08:
+            continue
+        scored.append((float(x), float(min(counts) - crossing * 10)))
+    if not scored:
+        return None
+    # The middle of the clearest strip, so the fewest words sit across it.
+    top = max(score for _, score in scored)
+    clearest = [x for x, score in scored if score == top]
+    return clearest[len(clearest) // 2]
+
+
+def _column_text(parts: list[list[dict[str, Any]]]) -> list[list[dict[str, Any]]]:
+    """One side's piece of each line, leaving out empty pieces and ones that are only
+    dates."""
+    return [p for p in parts if p and not only_dates(" ".join(str(w["text"]) for w in p))]
+
+
+def _aligned(parts: list[list[dict[str, Any]]]) -> int:
+    """How many of the pieces start at the most common left edge, give or take 2 points."""
+    starts = Counter(round(float(p[0]["x0"])) for p in parts)
+    return max(sum(n for s, n in starts.items() if abs(s - edge) <= 2) for edge in starts)
 
 
 def _split_columns(words: list[dict[str, Any]], gutter: float) -> list[list[dict[str, Any]]]:
@@ -827,16 +895,54 @@ def _pdf_lines(words: list[dict[str, Any]]) -> Iterator[dict[str, Any]]:
         }
 
 
+class _Flow(NamedTuple):
+    """Where a plain PDF line sat, to tell whether the next line carries it on."""
+
+    x0: float
+    x1: float
+    bottom: float
+    fonts: tuple[str, ...]
+    size: float
+    # Text set apart on the line, such as dates against the right margin.
+    spaced: bool
+
+
+def _wraps_from(above: _Flow, line: dict[str, Any], text: str, right: float) -> bool:
+    """Whether a line is the one above carried on: it starts at the same left edge
+    just below, in the same type, and its first word wouldn't have fit at the end of
+    the line above, so the line above was full. A line that ends a sentence or on a
+    date, or one that starts "Label:", stands on its own."""
+    words = line["words"]
+    first = words[0]
+    size = float(first["size"])
+    fonts = tuple(sorted({str(w["fontname"]) for w in words}))
+    if (
+        above.spaced
+        or "\t" in line["text"]
+        or abs(above.x0 - line["x0"]) > 2
+        or line["top"] - above.bottom > size * 0.9
+        or fonts != above.fonts
+        or abs(size - above.size) > 0.1
+    ):
+        return False
+    room = right - above.x1
+    fits = float(first["x1"]) - float(first["x0"]) + size * 0.25 <= room + 1
+    return not fits and not re.match(r"^\S+(?:\s+\S+){0,2}:\s", text)
+
+
 def _add_pdf_line(
     blocks: list[Block],
     line: dict[str, Any],
     page: int,
     bullet_x: dict[int, tuple[float, float]],
+    flow: dict[int, _Flow],
+    right: float,
 ) -> None:
-    """Adds a PDF line as a block, or joins it to the bullet it wraps from.
+    """Adds a PDF line as a block, or joins it to the bullet or the line it wraps from.
 
     bullet_x maps a bullet block's index to the x where its text starts and
-    the bottom of its last line, so wrapped lines can be found.
+    the bottom of its last line, so wrapped lines can be found. flow does the same
+    for plain lines, which carry on only from a line that filled the column.
     """
     words = line["words"]
     text = clean(line["text"])
@@ -852,6 +958,20 @@ def _add_pdf_line(
             prev.text = f"{prev.text} {text}"
             bullet_x[prev.index] = (text_x, line["bottom"])
             return
+    line_x1 = max(float(w["x1"]) for w in words)
+    if (
+        glyph is None
+        and prev is not None
+        and prev.page == page
+        and prev.index in flow
+        and not prev.text.rstrip().endswith((".", "!", "?"))
+        and not _ends_on_date(prev.text)
+        and _wraps_from(flow[prev.index], line, text, right)
+    ):
+        prev.text = f"{prev.text} {text}"
+        above = flow[prev.index]
+        flow[prev.index] = above._replace(x1=line_x1, bottom=float(line["bottom"]))
+        return
     block = Block(
         index=len(blocks),
         text=stripped if glyph is not None else text,
@@ -866,7 +986,21 @@ def _add_pdf_line(
     if glyph is not None:
         text_x = float(words[1]["x0"]) if len(words) > 1 else line["x0"]
         bullet_x[block.index] = (text_x, line["bottom"])
+    else:
+        flow[block.index] = _Flow(
+            x0=float(line["x0"]),
+            x1=line_x1,
+            bottom=float(line["bottom"]),
+            fonts=tuple(sorted(set(raw_fonts))),
+            size=float(words[0]["size"]),
+            spaced="\t" in line["text"],
+        )
     blocks.append(block)
+
+
+def _ends_on_date(text: str) -> bool:
+    found = find_range(text)
+    return found is not None and text.rstrip(" )").endswith(found.raw.rstrip(" )"))
 
 
 # --- Plain text ---------------------------------------------------------------
