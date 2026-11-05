@@ -168,6 +168,12 @@ class Place(BaseModel):
     parent_ref: str | None = Field(default=None, pattern=r"^card-[0-9]{1,4}$")
 
 
+class Fix(BaseModel):
+    # The card's words and dates as the person corrected them, or None to take
+    # the correction back.
+    content: MainContent | None = None
+
+
 class Approve(BaseModel):
     content: MainContent | None = None
     # For a card that matches one of the person's: "update" saves it as that
@@ -724,6 +730,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         employer a title was at."""
         with db.as_user(user_id) as conn:
             return imports(conn, user_id).place(import_id, ref, body.parent_ref)
+
+    @app.post("/v1/imports/{import_id}/cards/{ref}/fix")
+    def fix(import_id: UUID, ref: CardRef, body: Fix, user_id: User) -> ImportProgress:
+        """Records the person's correction to a proposed card before it's approved,
+        or takes it back."""
+        with db.as_user(user_id) as conn:
+            return imports(conn, user_id).fix(import_id, ref, body.content)
 
     @app.post("/v1/imports/{import_id}/cards/{ref}/approve", status_code=status.HTTP_201_CREATED)
     def approve(import_id: UUID, ref: CardRef, body: Approve, user_id: User) -> Approved:

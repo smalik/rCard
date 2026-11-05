@@ -82,6 +82,14 @@ class ImportProgress(BaseModel):
     # Where the person says a card belongs, by card ref: the proposed card it
     # sits under, or None for the top of the tree.
     moves: dict[str, str | None] = Field(default_factory=dict)
+    # The person's own corrections to a proposed card while checking the import
+    # (its words or dates), by card ref. They win over the import's reading; a
+    # number picked in answer to a question still applies on top.
+    fixes: dict[str, MainContent] = Field(default_factory=dict)
+    # How many corrections of each kind the person made ("wording", "dates",
+    # "facts", "moved"): numbers only, never what was corrected, so how well
+    # imports read can be measured without keeping anyone's words.
+    corrections: dict[str, int] = Field(default_factory=dict)
 
 
 class ImportFile(BaseModel):
@@ -376,7 +384,31 @@ class ImportStore:
                 raise ImportConflictError("That card can't sit there.")
         elif proposal.kind in ("position", "engagement"):
             raise ImportConflictError("A title needs an employer.")
+        if parent_ref != _parent_ref(progress, proposal) and proposal.placement is None:
+            _count(progress, "moved")
         progress.moves[ref] = parent_ref
+        self._save_progress(import_id, progress)
+        return progress
+
+    def fix(self, import_id: UUID, ref: str, content: MainContent | None) -> ImportProgress:
+        """Records the person's correction to a proposed card's words or dates, or
+        takes it back (None), before the card is approved."""
+        result, progress = self._load(import_id)
+        proposal = _proposal(result, ref)
+        current = progress.cards.get(ref)
+        if current is not None and current.state == "approved":
+            raise ImportConflictError("That card is already approved. Change it on the card.")
+        if content is None:
+            progress.fixes.pop(ref, None)
+        else:
+            before = progress.edits.get(ref) or progress.fixes.get(ref) or proposal.content
+            kind = _correction(before, content)
+            if kind is None:
+                return progress
+            # It sits under whatever card it sits under; a correction can't move it.
+            progress.fixes[ref] = content.model_copy(update={"parent": None})
+            _count(progress, kind)
+        _rebuild_edits(result, progress)
         self._save_progress(import_id, progress)
         return progress
 
@@ -474,7 +506,7 @@ class ImportStore:
             raise ImportConflictError("That card is already approved.")
         if proposal.placement is not None and ref not in progress.moves:
             raise ImportConflictError(f"{proposal.placement.question} Answer that first.")
-        chosen = content or progress.edits.get(ref) or proposal.content
+        chosen = content or progress.edits.get(ref) or progress.fixes.get(ref) or proposal.content
         # It sits under the saved card of its nearest approved parent.
         chosen = chosen.model_copy(update={"parent": _saved_parent(result, progress, proposal)})
 
@@ -739,6 +771,24 @@ def _rebuild_edits(result: ImportResult, progress: ImportProgress) -> None:
             settlement.changed = _use_figure(result.cards, finding, settlement.value, progress)
 
 
+def _count(progress: ImportProgress, kind: str) -> None:
+    progress.corrections[kind] = progress.corrections.get(kind, 0) + 1
+
+
+_DATE_FACTS = ("start", "end")
+
+
+def _correction(before: MainContent, after: MainContent) -> str | None:
+    """What kind of correction the person made, or None when nothing changed."""
+    if before.framing != after.framing:
+        return "wording"
+    if any(before.facts.get(k) != after.facts.get(k) for k in _DATE_FACTS):
+        return "dates"
+    if before.facts != after.facts:
+        return "facts"
+    return None
+
+
 def _use_figure(
     cards: list[ProposedCard], finding: Finding, value: str, progress: ImportProgress
 ) -> list[str]:
@@ -751,7 +801,7 @@ def _use_figure(
         for card in cards:
             if loc.block not in card.source_blocks:
                 continue
-            content = progress.edits.get(card.ref) or card.content
+            content = progress.edits.get(card.ref) or progress.fixes.get(card.ref) or card.content
             text = content.framing.headline + " " + content.framing.body
             if quoted[:40] not in text and content.framing.headline[:40] not in quoted:
                 continue  # another sentence from the same line
