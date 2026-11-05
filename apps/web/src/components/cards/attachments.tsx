@@ -175,6 +175,9 @@ function AddAttachment({
 
   function submit(event: FormEvent) {
     event.preventDefault();
+    // The dialog is portaled out of the card's form in the page, but React
+    // still bubbles its submit to that form, which would save the card.
+    event.stopPropagation();
     const address = url.trim();
     if (!isWebAddress(address)) {
       setError("Paste a web address that starts with https://");

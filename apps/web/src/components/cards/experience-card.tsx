@@ -21,6 +21,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  bySortKey,
   cardDates,
   type EngagementView,
   type ExperienceView,
@@ -49,7 +50,10 @@ function blocksOf(view: ExperienceView): Block[] {
     items: p.items,
     within: p.engagements.map(clientBlock),
   });
-  return [...view.positions.map(fromPosition), ...view.engagements.map(clientBlock)];
+  // Titles and clients share one order, so a client can sit above a title.
+  return [...view.positions.map(fromPosition), ...view.engagements.map(clientBlock)].sort((a, b) =>
+    bySortKey(a.card, b.card),
+  );
 }
 
 function allBlocks(blocks: Block[]): Block[] {

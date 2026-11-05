@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { type CardKind, KIND_LABELS } from "@/lib/cards";
 import { cardDates, fact, headline, type LibraryCard, listFact } from "@/lib/library";
 import type { ResumeHeader } from "@/lib/resumes";
 
@@ -33,6 +34,7 @@ function FactCard({
   sub,
   fields,
   extra,
+  title,
   className,
 }: {
   card: LibraryCard;
@@ -41,6 +43,8 @@ function FactCard({
   sub?: string;
   fields: (typeof FIELDS)[keyof typeof FIELDS];
   extra?: ReactNode;
+  // Overrides the purpose's label at the top of the card.
+  title?: string;
   className?: string;
 }) {
   const { now, fresh } = useCardActions();
@@ -49,7 +53,8 @@ function FactCard({
   return (
     <StrengthCard
       purpose={purpose}
-      label={`${purpose}: ${name}`}
+      title={title}
+      label={`${title ?? purpose}: ${name}`}
       live={live(card)}
       now={now}
       fresh={fresh.has(card.id)}
@@ -156,6 +161,31 @@ export function ActivityCard({ card, className }: { card: LibraryCard; className
       name={fact(card, "name") || headline(card)}
       sub={role || undefined}
       fields={FIELDS.activity}
+      className={className}
+    />
+  );
+}
+
+const OTHER_FIELDS: Partial<Record<CardKind, (typeof FIELDS)[keyof typeof FIELDS]>> = {
+  employment: FIELDS.employment,
+  role: FIELDS.employment,
+  position: FIELDS.position,
+  engagement: FIELDS.engagement,
+  accomplishment: FIELDS.accomplishment,
+  project: FIELDS.project,
+};
+
+/** A card the other sections don't show, such as the summary from a resume,
+ * a title whose employer was left out, or work under a project. */
+export function OtherCard({ card, className }: { card: LibraryCard; className?: string }) {
+  const summary = card.kind === "story" && fact(card, "use") === "summary";
+  return (
+    <FactCard
+      card={card}
+      purpose="highlight"
+      title={summary ? "Summary" : KIND_LABELS[card.kind]}
+      name={headline(card)}
+      fields={OTHER_FIELDS[card.kind] ?? []}
       className={className}
     />
   );

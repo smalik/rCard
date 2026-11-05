@@ -110,6 +110,31 @@ describe("buildLibrary", () => {
   });
 });
 
+describe("cards the sections don't show", () => {
+  it("are kept apart, so nothing is hidden", () => {
+    const summary = card("story", "Operations leader", { use: "summary" });
+    const orphan = card("position", "Director");
+    const underOrphan = card("accomplishment", "Cut costs", {}, { parent_id: orphan.id });
+    const employer = card("employment", "Northwind");
+    const title = card("position", "Analyst", {}, { parent_id: employer.id });
+    const project = card("project", "Routing benchmark", {}, { parent_id: title.id });
+    const underProject = card("accomplishment", "38 carriers joined", {}, { parent_id: project.id });
+
+    const view = buildLibrary([summary, orphan, underOrphan, employer, title, project, underProject]);
+
+    expect(view.other.map((c) => c.id)).toEqual([summary.id, orphan.id, underOrphan.id, underProject.id]);
+    expect(view.experience[0]!.positions[0]!.items.map((c) => c.id)).toEqual([project.id]);
+  });
+
+  it("is empty when everything has a place", () => {
+    const employer = card("employment", "Northwind");
+    const title = card("position", "Analyst", {}, { parent_id: employer.id });
+    const client = card("engagement", "Fabrikam", {}, { parent_id: employer.id });
+    const won = card("accomplishment", "Won", {}, { parent_id: client.id });
+    expect(buildLibrary([employer, title, client, won]).other).toEqual([]);
+  });
+});
+
 describe("dates", () => {
   it("reads months, years and open ends", () => {
     expect(formatDate("2005-06")).toBe("Jun 2005");

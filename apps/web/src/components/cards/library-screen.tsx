@@ -12,6 +12,7 @@ import {
   ContactCard,
   CredentialCard,
   EducationCard,
+  OtherCard,
   ProjectCard,
   SkillsCard,
 } from "@/components/cards/section-cards";
@@ -194,6 +195,7 @@ export function LibraryScreen({
     { id: "projects", purpose: "project" as const, title: "Projects", cards: view.projects },
     { id: "activities", purpose: "activity" as const, title: "Activities", cards: view.activities },
     { id: "highlights", purpose: "highlight" as const, title: "Highlights", cards: view.highlights },
+    { id: "other", purpose: "highlight" as const, title: "More cards", cards: view.other },
   ].filter((s) => s.cards.length > 0);
 
   const card = (id: string, card: LibraryCard) => {
@@ -210,6 +212,8 @@ export function LibraryScreen({
         return <ProjectCard key={card.id} card={card} />;
       case "activities":
         return <ActivityCard key={card.id} card={card} />;
+      case "other":
+        return <OtherCard key={card.id} card={card} />;
       default:
         return <AccomplishmentCard key={card.id} card={card} />;
     }

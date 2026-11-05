@@ -10,14 +10,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { FactValue } from "@/lib/cards";
-import { type Attachment, type LibraryCard, relativeTime } from "@/lib/library";
+import { type Attachment, type LibraryCard, type LibraryContent, relativeTime } from "@/lib/library";
 import { cn } from "@/lib/utils";
 
 export type Field = {
   key: string;
   label: string;
   placeholder?: string;
-  // A list fact, edited as comma-separated text.
+  // A list fact, edited one item per line, since items such as "1,200" can
+  // hold commas.
   list?: boolean;
   // Half width on wider cards, for dates and short values.
   half?: boolean;
@@ -25,7 +26,7 @@ export type Field = {
 
 function asText(value: FactValue | undefined, list?: boolean): string {
   if (value === undefined) return "";
-  if (Array.isArray(value)) return value.join(list ? ", " : " ");
+  if (Array.isArray(value)) return value.join(list ? "\n" : " ");
   return String(value);
 }
 
@@ -34,9 +35,76 @@ function fromText(text: string, list?: boolean): FactValue | undefined {
   if (!trimmed) return undefined;
   if (!list) return trimmed;
   return trimmed
-    .split(",")
+    .split("\n")
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+type Draft = {
+  facts: Record<string, string>;
+  headline: string;
+  body: string;
+  attachments: Attachment[];
+};
+
+function draftOf(card: LibraryCard, fields: Field[]): Draft {
+  const content = card.content;
+  return {
+    facts: Object.fromEntries(fields.map((f) => [f.key, asText(content?.facts[f.key], f.list)])),
+    headline: content?.framing.headline ?? "",
+    body: content?.framing.body ?? "",
+    attachments: content?.attachments ?? [],
+  };
+}
+
+/** The content a draft would save over `base`. A fact whose text wasn't
+ * touched keeps its value exactly as stored. */
+function contentOf(
+  draft: Draft,
+  base: LibraryCard,
+  fields: Field[],
+  headlineFrom: string | undefined,
+): LibraryContent | null {
+  const content = base.content;
+  if (!content) return null;
+  const facts: Record<string, FactValue> = { ...content.facts };
+  for (const f of fields) {
+    const text = draft.facts[f.key] ?? "";
+    if (text === asText(content.facts[f.key], f.list)) continue;
+    const value = fromText(text, f.list);
+    if (value === undefined) delete facts[f.key];
+    else facts[f.key] = value;
+  }
+  const followed = headlineFrom ? facts[headlineFrom] : undefined;
+  return {
+    ...content,
+    facts,
+    framing: {
+      ...content.framing,
+      headline: typeof followed === "string" && followed ? followed : draft.headline.trim(),
+      body: draft.body.trim(),
+    },
+    attachments: draft.attachments,
+  };
+}
+
+// JSON with object keys sorted, so the same facts compare equal in any order.
+function stable(value: unknown): string {
+  return JSON.stringify(value, (_, v: unknown) =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v).sort(([x], [y]) => x.localeCompare(y)))
+      : v,
+  );
+}
+
+function sameContent(a: LibraryContent | null, b: LibraryContent | null): boolean {
+  if (!a || !b) return a === b;
+  return (
+    stable(a.facts) === stable(b.facts) &&
+    a.framing.headline === b.framing.headline &&
+    a.framing.body === b.framing.body &&
+    stable(a.attachments) === stable(b.attachments)
+  );
 }
 
 const AUTHORS = { person: "You", ai: "Plytos", reviewer: "A reviewer" } as const;
@@ -62,13 +130,10 @@ export function CardBack({
   story?: { label: string; placeholder: string };
 }) {
   const { save, history, now } = useCardActions();
-  const content = card.content;
-  const [facts, setFacts] = useState(() =>
-    Object.fromEntries(fields.map((f) => [f.key, asText(content?.facts[f.key], f.list)])),
-  );
-  const [headline, setHeadline] = useState(content?.framing.headline ?? "");
-  const [body, setBody] = useState(content?.framing.body ?? "");
-  const [attachments, setAttachments] = useState<Attachment[]>(content?.attachments ?? []);
+  // The version the edits started from. Saving names it, so a change made
+  // meanwhile elsewhere (another tab, an import) is refused, not overwritten.
+  const [base, setBase] = useState(card);
+  const [draft, setDraft] = useState(() => draftOf(card, fields));
   const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
   const [error, setError] = useState<string | null>(null);
   const [versions, setVersions] = useState<CardVersion[] | null>(null);
@@ -85,37 +150,35 @@ export function CardBack({
     };
   }, [id, head, history]);
 
-  if (!content) {
+  const next = contentOf(draft, base, fields, headlineFrom);
+  const dirty = !sameContent(next, base.content);
+
+  // When the card moves on, follow it unless there are edits to keep. Our own
+  // save comes back as the very content we sent, so that is followed too.
+  if (card.version_id !== base.version_id && (!dirty || sameContent(next, card.content))) {
+    setBase(card);
+    setDraft(draftOf(card, fields));
+  }
+  const movedOn = card.version_id !== base.version_id;
+
+  const content = base.content;
+  if (!content || !next) {
     return <p className="text-[14px] text-muted-foreground">This card&apos;s text was removed.</p>;
   }
+  const nextHeadline = next.framing.headline;
 
-  const nextFacts: Record<string, FactValue> = { ...content.facts };
-  for (const f of fields) {
-    const value = fromText(facts[f.key] ?? "", f.list);
-    if (value === undefined) delete nextFacts[f.key];
-    else nextFacts[f.key] = value;
+  function edit(change: Partial<Draft>) {
+    setState("idle");
+    setDraft({ ...draft, ...change });
   }
-  const followed = headlineFrom ? nextFacts[headlineFrom] : undefined;
-  const nextHeadline =
-    typeof followed === "string" && followed ? followed : headline.trim();
-  const dirty =
-    JSON.stringify(nextFacts) !== JSON.stringify(content.facts) ||
-    nextHeadline !== content.framing.headline ||
-    body.trim() !== content.framing.body ||
-    JSON.stringify(attachments) !== JSON.stringify(content.attachments);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!content || !dirty || !nextHeadline) return;
+    if (!next || !dirty || !nextHeadline) return;
     setState("saving");
     setError(null);
     try {
-      await save(card, {
-        ...content,
-        facts: nextFacts,
-        framing: { ...content.framing, headline: nextHeadline, body: body.trim() },
-        attachments,
-      });
+      await save(base, next);
       setState("saved");
     } catch (e) {
       setState("idle");
@@ -125,21 +188,53 @@ export function CardBack({
 
   return (
     <form className="flex flex-col gap-5" onSubmit={submit}>
+      {movedOn && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-live-soft px-3 py-2 text-[13px]"
+        >
+          <span>This card changed somewhere else while you were editing it.</span>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setBase(card);
+              setDraft(draftOf(card, fields));
+              setState("idle");
+              setError(null);
+            }}
+          >
+            Load the latest
+          </Button>
+        </div>
+      )}
       {fields.length > 0 && (
         <fieldset className="grid grid-cols-2 gap-x-3 gap-y-3">
           <legend className="sr-only">Facts</legend>
           {fields.map((f) => (
             <div key={f.key} className={cn("grid gap-1.5", f.half ? "col-span-1" : "col-span-2")}>
-              <Label htmlFor={`${card.id}-${f.key}`}>{f.label}</Label>
-              <Input
-                id={`${card.id}-${f.key}`}
-                value={facts[f.key] ?? ""}
-                placeholder={f.placeholder}
-                onChange={(e) => {
-                  setState("idle");
-                  setFacts({ ...facts, [f.key]: e.target.value });
-                }}
-              />
+              <Label htmlFor={`${card.id}-${f.key}`}>
+                {f.label}
+                {f.list && <span className="font-normal text-muted-foreground">, one per line</span>}
+              </Label>
+              {f.list ? (
+                <Textarea
+                  id={`${card.id}-${f.key}`}
+                  value={draft.facts[f.key] ?? ""}
+                  placeholder={f.placeholder?.split(", ").join("\n")}
+                  rows={2}
+                  className="min-h-0"
+                  onChange={(e) => edit({ facts: { ...draft.facts, [f.key]: e.target.value } })}
+                />
+              ) : (
+                <Input
+                  id={`${card.id}-${f.key}`}
+                  value={draft.facts[f.key] ?? ""}
+                  placeholder={f.placeholder}
+                  onChange={(e) => edit({ facts: { ...draft.facts, [f.key]: e.target.value } })}
+                />
+              )}
             </div>
           ))}
         </fieldset>
@@ -153,45 +248,36 @@ export function CardBack({
             {/* One line of text that wraps as it grows; Return saves. */}
             <Textarea
               id={`${card.id}-headline`}
-              value={headline}
+              value={draft.headline}
               maxLength={200}
               rows={1}
               className="min-h-0 font-medium"
-              aria-invalid={!headline.trim()}
+              aria-invalid={!draft.headline.trim()}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
                   e.currentTarget.form?.requestSubmit();
                 }
               }}
-              onChange={(e) => {
-                setState("idle");
-                setHeadline(e.target.value.replace(/\s*\n\s*/g, " "));
-              }}
+              onChange={(e) => edit({ headline: e.target.value.replace(/\s*\n\s*/g, " ") })}
             />
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor={`${card.id}-body`}>{story.label}</Label>
             <Textarea
               id={`${card.id}-body`}
-              value={body}
+              value={draft.body}
               maxLength={5000}
               placeholder={story.placeholder}
-              onChange={(e) => {
-                setState("idle");
-                setBody(e.target.value);
-              }}
+              onChange={(e) => edit({ body: e.target.value })}
             />
           </div>
         </fieldset>
       )}
 
       <AttachmentEditor
-        attachments={attachments}
-        onChange={(next) => {
-          setState("idle");
-          setAttachments(next);
-        }}
+        attachments={draft.attachments}
+        onChange={(attachments) => edit({ attachments })}
       />
 
       <div className="flex items-center gap-3">

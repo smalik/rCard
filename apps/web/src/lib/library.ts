@@ -61,6 +61,9 @@ export type LibraryView = {
   activities: LibraryCard[];
   // Accomplishments that sit on no job yet.
   highlights: LibraryCard[];
+  // Every card none of the above shows, such as a summary, a title whose
+  // employer was left out, or work under a project, so nothing kept is hidden.
+  other: LibraryCard[];
 };
 
 const ITEM_KINDS: ReadonlySet<CardKind> = new Set(["accomplishment", "project"]);
@@ -98,6 +101,7 @@ export function buildLibrary(cards: readonly LibraryCard[]): LibraryView {
     projects: [],
     activities: [],
     highlights: [],
+    other: [],
   };
   const top = cards.filter((c) => c.parent_id === null).sort(bySortKey);
   for (const card of top) {
@@ -137,6 +141,31 @@ export function buildLibrary(cards: readonly LibraryCard[]): LibraryView {
         break;
     }
   }
+
+  const shown = new Set<string>();
+  for (const job of view.experience) {
+    shown.add(job.card.id);
+    const engagements = [...job.engagements, ...job.positions.flatMap((p) => p.engagements)];
+    for (const c of [
+      ...job.positions.flatMap((p) => [p.card, ...p.items]),
+      ...engagements.flatMap((e) => [e.card, ...e.items]),
+      ...job.items,
+    ]) {
+      shown.add(c.id);
+    }
+  }
+  for (const list of [
+    view.education,
+    view.awards,
+    view.credentials,
+    view.skills,
+    view.projects,
+    view.activities,
+    view.highlights,
+  ]) {
+    for (const c of list) shown.add(c.id);
+  }
+  view.other = [...cards].filter((c) => !shown.has(c.id)).sort(bySortKey);
   return view;
 }
 
