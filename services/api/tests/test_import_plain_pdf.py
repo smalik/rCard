@@ -268,3 +268,16 @@ def test_a_title_and_employer_run_together_are_told_apart() -> None:
     ]
     # Joined by "of", the words are one name, whichever it is.
     assert "Director of Health Services" in jobs[2]
+
+
+def test_an_employer_line_with_a_place_no_rule_knows_is_still_the_employer() -> None:
+    for place in ["Toronto, Ontario", "Springfield"]:
+        result = read(
+            f"Pat Lee\nExperience\nFabrikam Retail, {place}\tMar 2016 – Present\n"
+            "Sales Associate\tMar 2016 – Present\n• Greeted customers.\n"
+        )
+        [employment] = [c for c in result.cards if c.kind == "employment"]
+        assert employment.content.facts.get("employer") == "Fabrikam Retail"
+        assert employment.content.facts.get("location") == place
+        titles = [c.content.facts.get("title") for c in result.cards if c.kind == "position"]
+        assert titles == ["Sales Associate"]

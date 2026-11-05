@@ -57,6 +57,7 @@ from plytos_api.imports.model import (
 )
 from plytos_api.imports.segment import (
     HEADINGS,
+    TITLE_WORDS,
     _strip_inline,
     is_marking,
     normalize_heading,
@@ -925,7 +926,44 @@ def _roles(
             role.organization = role.organization or parent.organization
             # Client work sits in the employment of the agency job it was done in.
             role.employment_ref = role.employment_key = parent.employment_ref
-    return roles
+    return _fold_subheadings(roles, blocks)
+
+
+def _fold_subheadings(roles: list[Role], blocks: dict[int, Block]) -> list[Role]:
+    """A short undated line inside a dated title, read as another title of the same
+    employment ("Planning & Process Improvement" over some bullets), is a workstream
+    of the title above it: its bullets stay with that title, under its name. A title
+    ends on a word like Manager or Lead; a workstream doesn't."""
+    parents = {r.parent_ref for r in roles if r.parent_ref}
+    kept: list[Role] = []
+    above: dict[str, Role] = {}  # the last title kept in each employment
+    for role in roles:
+        home = above.get(role.employment_ref or "")
+        line = role.header_blocks[0] if len(role.header_blocks) == 1 else None
+        words = (role.title or "").split()
+        if (
+            home is not None
+            and line is not None
+            and not role.client
+            and role.ref not in parents
+            and role.dates is None
+            and home.dates is not None
+            and role.bullets
+            and not role.description
+            and role.title is not None
+            and _norm(blocks[line].text) == _norm(role.title)
+            and _names_a_group(blocks[line])
+            and words[-1].strip(",.():").lower() not in TITLE_WORDS
+            and role.organization in (None, home.organization)
+        ):
+            label = _norm(blocks[line].text).rstrip(":")
+            home.subheading_blocks += [line, *role.subheading_blocks]
+            home.bullets += [b.model_copy(update={"group": b.group or label}) for b in role.bullets]
+            continue
+        if not role.client:
+            above[role.employment_ref or ""] = role
+        kept.append(role)
+    return kept
 
 
 def _file_roles(roles: list[Role], employments: list[Employment]) -> list[Employment]:

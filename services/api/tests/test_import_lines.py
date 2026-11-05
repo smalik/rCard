@@ -398,3 +398,53 @@ def test_entries_listed_under_a_year_take_that_year() -> None:
     # The year lines head the entries under them.
     assert result.lines is not None
     assert result.lines.guessed == [] and {3, 6} <= set(result.lines.headings)
+
+
+def test_a_workstream_read_as_another_title_is_folded_back() -> None:
+    # The second label read as a title of its own, undated, under the same employer.
+    found = _workstream_reading([4], [3, 4, 5, 6, 7, 8, 9])
+    found["roles"][0]["bullet_lines"] = [5, 6]
+    found["roles"].append(_role(title="Workforce Strategies", header_lines=[7], bullet_lines=[8]))
+    found["employments"] = [
+        {
+            "employer": "Contoso Motors",
+            "location": "Plano, TX",
+            "dates": "",
+            "header_lines": [],
+            "description_lines": [],
+        }
+    ]
+    found["roles"][0]["employment"] = 0
+    result = _import_workstreams(found)
+    _all_lines_placed(result)
+    assert [c.content.facts.get("title") for c in result.cards if c.kind == "position"] == [
+        "Consultant"
+    ]
+    assert _workstreams(result) == {
+        5: "Enterprise AI",
+        6: "Enterprise AI",
+        8: "Workforce Strategies",
+    }
+
+
+def test_an_undated_title_under_a_dated_one_stays_a_title() -> None:
+    text = "\n".join(
+        [
+            "Casey Morgan",
+            "casey.morgan@example.com | 555-0100",
+            "EXPERIENCE",
+            "Consultant, Contoso Motors, Plano, TX\tAug 2025 – Present",
+            "• Built a document search assistant used by 400 analysts.",
+            "Senior Consultant",
+            "• Modeled staffing needs for 6 plants.",
+        ]
+    )
+    found = _workstream_reading([], [3, 4, 5, 6])
+    found["sections"] = found["sections"][:2]
+    found["contact_lines"] = [0, 1]
+    found["entries"] = []
+    found["roles"][0].update(subheading_lines=[], bullet_lines=[4])
+    found["roles"].append(_role(title="Senior Consultant", header_lines=[5], bullet_lines=[6]))
+    result = import_resume(text.encode(), "casey.txt", today=TODAY, reader=FakeReader(found))
+    titles = [c.content.facts.get("title") for c in result.cards if c.kind == "position"]
+    assert titles == ["Consultant", "Senior Consultant"]

@@ -765,6 +765,28 @@ def parse_roles(blocks: list[Block], section: SectionKind, *, start: int = 0) ->
                 parents[id(role)] = parent
                 result.append(role)
                 continue
+        # An employer line with its place and tenure, read as a title and employer
+        # because no word marks either ("Fabrikam Retail, Toronto, Ontario  2016 -
+        # Present"), over a dated title within that tenure: the line names the
+        # employer first, then where it is.
+        if (
+            prev is not None
+            and len(prev.header_blocks) == 1
+            and prev.title is not None
+            and prev.organization is not None
+            and _score(prev.title) <= 0
+            and not prev.bullets
+            and not prev.description
+            and role.title is not None
+            and role.organization is None
+            and _within(role.dates, prev.dates)
+            and prev.dates is not None
+        ):
+            pieces = _pieces(strip_range(prev.header_text or "", prev.dates))
+            if len(pieces) >= 2:
+                prev.organization, prev.title = pieces[0], None
+                prev.location = prev.location or ", ".join(pieces[1:])
+                prev.confidence = "high"
         # An employer line with its tenure over a title within it, when the employer's
         # name has no word that marks it as one: "Tailspin Freight, Milwaukee, WI
         # 2014 - 2018" over "Operations Manager 2015 - 2018". Two jobs in a row don't
