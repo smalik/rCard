@@ -267,12 +267,13 @@ def _sections(c: Career, s: Style) -> dict[str, list[Line]]:
     skills += [("text", f"{g.category}: {', '.join(g.items)}", None) for g in c.skills]
     education: list[Line] = [("heading", "EDUCATION", None)]
     for school in c.education:
+        studied = " ".join(p for p in (school.degree, school.field) if p)
         if s.header == "web_print":
-            education += [("text", f"{school.degree} : {school.field} , {school.year}", None)]
+            line = " : ".join(p for p in (school.degree, school.field) if p)
+            education += [("text", f"{line} , {school.year}" if school.year else line, None)]
             education += [("text", school.school, None)]
         else:
-            line = f"{school.degree} {school.field}, {school.school}, {school.year}"
-            education += [("text", line, None)]
+            education += [("text", _place(studied, school.school, school.year), None)]
     summary: list[Line] = (
         [("heading", "SUMMARY", None), ("text", c.summary, None)]
         if s.summary == "section" and c.summary
@@ -290,7 +291,7 @@ def _sections(c: Career, s: Style) -> dict[str, list[Line]]:
     awards: list[Line] = []
     if c.awards:
         awards = [("heading", "AWARDS", None)]
-        awards += [("text", f"{a.name}, {a.issuer}, {a.year}", None) for a in c.awards]
+        awards += [("text", _place(a.name, a.issuer, a.year), None) for a in c.awards]
     talks: list[Line] = []
     if c.talks:
         talks = [("heading", "TALKS", None)]

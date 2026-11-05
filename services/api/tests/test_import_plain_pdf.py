@@ -310,3 +310,49 @@ def test_an_undated_title_line_under_a_job_is_not_divided() -> None:
         if c.kind in ("position", "engagement")
     ]
     assert "Lead Purser International Cargo Services" in names
+
+
+def test_a_client_named_with_inc_is_a_client_not_a_sentence() -> None:
+    result = read(
+        "Pat Lee\nExperience\nConsultant, Contoso Ltd, 2019 - 2021\nAcme Widget Company Inc.\n"
+        "• Mapped freight for 120 suppliers.\n"
+    )
+    clients = [c.content.facts.get("client") for c in result.cards if c.kind == "engagement"]
+    assert clients == ["Acme Widget Company Inc."]
+
+
+def test_two_nested_titles_stay_two_titles() -> None:
+    result = read(
+        "Pat Lee\nExperience\nSenior Software Engineer 2019 - Present\n"
+        "Team Lead 2021 - Present\n• Led a team of six.\n"
+    )
+    titles = [c.content.facts.get("title") for c in result.cards if c.kind == "position"]
+    assert titles == ["Senior Software Engineer", "Team Lead"]
+
+
+def test_only_page_numbers_make_lines_alike_across_pages() -> None:
+    from plytos_api.imports.extract import _mark_running_lines
+    from plytos_api.imports.model import Block
+
+    lines = [
+        (1, "Pat Lee"),
+        (1, "2019 - 2021"),
+        (1, "Grew sales 12%."),
+        (1, "Page 1 of 2"),
+        (2, "Pat Lee"),
+        (2, "2016 - 2018"),
+        (2, "Grew sales 15%."),
+        (2, "Page 2 of 2"),
+    ]
+    blocks = [Block(index=i, text=t, page=p) for i, (p, t) in enumerate(lines)]
+    _mark_running_lines(blocks)
+    assert [b.where for b in blocks] == [
+        "header",
+        "body",
+        "body",
+        "footer",
+        "header",
+        "body",
+        "body",
+        "footer",
+    ]

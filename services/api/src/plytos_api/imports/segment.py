@@ -659,6 +659,10 @@ def _carries_on(group: _Group, block: Block) -> bool:
     return text[0].islower() and not lines[-1].text.rstrip().endswith((".", "!", "?", ":"))
 
 
+# A full stop that ends a company's name, not a sentence: "Acme Widget Company Inc."
+_NAME_STOP = re.compile(r"\b(?:inc|co|corp|ltd|llc|llp|plc|l\.l\.c|l\.p|n\.a)\.$", re.IGNORECASE)
+
+
 def _opens_description(group: _Group, block: Block) -> bool:
     """A short sentence under a dated title and employer, before its bullets: what the
     job was ("Ran a store of 40 people."), not more of its heading."""
@@ -668,6 +672,7 @@ def _opens_description(group: _Group, block: Block) -> bool:
         and not group.bullets
         and len(text.split()) >= 4
         and text.endswith((".", "!"))
+        and not _NAME_STOP.search(text)
         and find_range(text) is None
     )
 
@@ -817,6 +822,9 @@ def parse_roles(blocks: list[Block], section: SectionKind, *, start: int = 0) ->
             prev is not None
             and prev.organization is None
             and prev.title is not None
+            # "Senior Software Engineer 2019 - Present" over "Team Lead 2021 - Present"
+            # is two titles: a line with title words is no employer.
+            and _score(prev.title) <= 0
             and not prev.bullets
             and not prev.description
             and role.title is not None

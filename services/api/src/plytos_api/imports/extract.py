@@ -757,6 +757,16 @@ def _read_pdf(data: bytes, filename: str) -> ExtractedDocument:
     return ExtractedDocument(facts=facts, blocks=blocks, images=kept)
 
 
+# A page's number, where a running header or footer writes it: "Page 2 of 3", a
+# number alone ("2", "- 2 -", "2/3"), or one set off at the end ("Pat Lee | 2").
+_PAGE_NUMBER = re.compile(
+    r"\bpage\s*\d+(?:\s*(?:of|/)\s*\d+)?\b"
+    r"|^[-–—\s]*\d{1,3}(?:\s*(?:of|/)\s*\d{1,3})?[-–—\s]*$"
+    r"|\s*[|—–·•-]\s*\d{1,3}\s*$",
+    re.IGNORECASE,
+)
+
+
 def _mark_running_lines(blocks: list[Block]) -> None:
     """Marks a line repeated at the top or foot of the pages, as a running header or
     footer is, the way a Word file marks its own. Otherwise a header printed again at
@@ -767,8 +777,9 @@ def _mark_running_lines(blocks: list[Block]) -> None:
     by_page = {page: [b for b in blocks if b.page == page] for page in pages}
 
     def key(block: Block) -> str:
-        # "Page 1 of 2" and "Page 2 of 2" are the same line.
-        return re.sub(r"\d+", "#", block.text.strip().lower())
+        # "Page 1 of 2" and "Page 2 of 2" are the same line; "2019 - 2021" and
+        # "2016 - 2018" aren't.
+        return _PAGE_NUMBER.sub(" # ", block.text.strip().lower()).strip()
 
     marks: list[tuple[Literal["header", "footer"], slice]] = [
         ("header", slice(0, 2)),

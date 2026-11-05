@@ -15,7 +15,7 @@ from plytos_api.imports.fidelity.run import TODAY
 from plytos_api.imports.fidelity.score import score
 from plytos_api.imports.fidelity.shape import show, skeleton
 from plytos_api.imports.fidelity.tape import TapedReader
-from plytos_api.imports.fidelity.truth import MORGAN, Career, School, SkillGroup
+from plytos_api.imports.fidelity.truth import MORGAN, Award, Career, School, SkillGroup
 from plytos_api.imports.pipeline import import_resume
 from tests.test_import_fidelity_real import Cards, job
 from tests.test_import_usage import _client, _reply
@@ -229,6 +229,8 @@ def test_a_label_without_a_place_dates_or_title_is_written_without_them() -> Non
                 positions=[Position(title="", groups=[Group(items=["Opened the store"])])],
             ),
         ],
+        education=[School(school="Lakeshore College", degree="Bachelor of Science")],
+        awards=[Award(name="Service Award")],
     )
     for layout in WORD:
         text = "\n".join(b.text for b in extract(layout.render(career), "resume.docx").blocks)
