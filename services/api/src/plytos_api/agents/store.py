@@ -590,6 +590,20 @@ class AgentStore:
         ).fetchall()
         return {r[0] for r in rows}
 
+    def runs_in_hand(self, agent: AgentName, *, within_seconds: int) -> set[UUID]:
+        """What an agent is working on, or will be shortly: runs going under a
+        live lease, or queued and due no more than `within_seconds` ago. A run
+        nobody picked up by then doesn't count, so where no worker runs a job
+        doesn't look busy forever."""
+        rows = self._conn.execute(
+            "select distinct trigger_id from plytos.agent_run"
+            " where agent = %s and trigger_id is not null and ("
+            "  (state = 'running' and locked_until > now())"
+            "  or (state = 'queued' and run_after > now() - make_interval(secs => %s)))",
+            (agent, within_seconds),
+        ).fetchall()
+        return {r[0] for r in rows}
+
     def run(self, run_id: UUID) -> RunView:
         row = self._conn.execute(
             sql.SQL("select {} from plytos.agent_run where id = %s").format(_RUN_COLUMNS), (run_id,)
