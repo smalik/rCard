@@ -123,9 +123,27 @@ def show(career: Career, reading: ImportResult | None) -> str:
             f"  school {skeleton(school.school)} | degree {skeleton(school.degree)}"
             f" | field {skeleton(school.field)} | {_when(school.year, None)}"
         )
+    for skills in career.skills:
+        out.append(f"  skills {skeleton(skills.category)}: {len(skills.items)} of them")
+    if career.location:
+        out.append(f"  location {skeleton(career.location)}")
     if reading is None:
         return "\n".join(out) + "\n"
     scored = score(career, None, reading, kind="?", name="?")
+    found = reading.contact
+    out += [
+        "",
+        f"Contact on {found.blocks}: location "
+        + (skeleton(found.location) if found.location else "none"),
+    ]
+    for card in reading.cards:
+        if card.kind == "skill":
+            listed = card.content.facts.get("skills")
+            category = card.content.facts.get("category")
+            out.append(
+                f"  skills {skeleton(category) if isinstance(category, str) else '-'}: "
+                f"{len(listed) if isinstance(listed, list) else 0} of them"
+            )
     out += ["", f"Reading ({100 * scored.fidelity:.0f}%)"]
     number = {c.ref: n for n, c in enumerate(reading.cards, 1)}
     by_ref = {c.ref: c for c in reading.cards}
