@@ -17,7 +17,7 @@ from plytos_api.imports.model import (
     ProposedCard,
     Role,
 )
-from plytos_api.imports.segment import _DEGREE, _SCHOOL, sentences
+from plytos_api.imports.segment import _DEGREE, _SCHOOL, is_generic_label, sentences
 
 _HEADLINE_MAX = 200
 _BODY_MAX = 5000
@@ -125,7 +125,8 @@ def propose_cards(
             lines = [(b.block, b.text, b.bullet_char is not None) for b in role.bullets]
             for run in _wrapped(lines):
                 lead = bullets[run[0][0]]
-                extra: dict[str, FactValue] = {"workstream": lead.group} if lead.group else {}
+                stream = None if is_generic_label(lead.group) else lead.group
+                extra: dict[str, FactValue] = {"workstream": stream} if stream else {}
                 if len(run) == 1 and lead.bullet_char is not None:
                     pieces = [(lead.text, [lead.block])]
                 else:

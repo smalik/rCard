@@ -259,6 +259,42 @@ _SKILL_SPLIT = re.compile(r"\s*(?:[,;|•·▪◦\t]|\s{3,})\s*")
 _REFERENCES_LINE = re.compile(r"^references?\b.*\b(?:request|available)\b", re.IGNORECASE)
 
 
+# Sub-headings inside a job that only say what kind of lines follow. They group
+# nothing a person would name, so they're not a workstream.
+GENERIC_LABELS = {
+    "responsibilities",
+    "key responsibilities",
+    "main responsibilities",
+    "duties",
+    "duties and responsibilities",
+    "responsibilities and duties",
+    "responsibilities and achievements",
+    "achievements",
+    "key achievements",
+    "notable achievements",
+    "accomplishments",
+    "key accomplishments",
+    "major accomplishments",
+    "selected accomplishments",
+    "highlights",
+    "key highlights",
+    "results",
+    "key results",
+    "contributions",
+    "key contributions",
+    "role",
+    "overview",
+    "description",
+    "job description",
+    "summary",
+    "tasks",
+}
+
+
+def is_generic_label(text: str | None) -> bool:
+    return text is not None and normalize_heading(text.strip().rstrip(":")) in GENERIC_LABELS
+
+
 def normalize_heading(text: str) -> str:
     text = text.lower().replace("&", " and ").replace("/", " and ")
     text = re.sub(r"[^a-z ]+", " ", text)

@@ -382,3 +382,51 @@ def test_text_copied_out_wrongly_still_compares() -> None:
     assert norm("Sales &amp; marketing") == norm("Sales & marketing")
     assert norm("Didnâ€™t miss a deadline") == norm("Didn’t miss a deadline")
     assert norm("Led teamsÂ of 12") == norm("Led teams of 12")
+
+
+def test_a_job_with_no_title_is_paired_with_one_read_without_a_title() -> None:
+    career = Career(
+        key="untitled",
+        employments=[
+            Employment(
+                employer="Fabrikam",
+                positions=[Position(title="", groups=[Group(items=["Kept the books."])])],
+            )
+        ],
+    )
+    r = Cards()
+    fabrikam = r.add("employment", "Fabrikam", {"employer": "Fabrikam"})
+    untitled = r.add("position", "Title not found", {}, fabrikam)
+    r.add("accomplishment", "Kept the books.", None, untitled)
+    s = score(career, None, r.result())
+    assert s.positions.right == s.positions.of == 1
+    assert s.items.right == 1
+    assert s.extra == 0
+
+
+def test_the_same_words_under_two_jobs_are_each_found_under_their_own() -> None:
+    career = Career(
+        key="twins",
+        anonymous_employers=True,
+        employments=[
+            job("Store Manager", "2019-03", PRESENT, "Ran the weekly stock count."),
+            job("Assistant Manager", "2016-01", "2019-02", "Ran the weekly stock count."),
+        ],
+    )
+    r = two_stand_ins()
+    for card in r.cards:
+        if card.kind == "accomplishment":
+            card.content.framing.headline = "Ran the weekly stock count."
+    s = score(career, None, r.result())
+    assert (s.items.right, s.misattributed) == (2, 0)
+
+
+def test_a_generic_sub_heading_is_no_workstream() -> None:
+    career = TWO_STAND_INS.model_copy(deep=True)
+    career.employments[0].positions[0].groups[0].label = "Key Achievements:"
+    r = two_stand_ins()
+    grew = next(c for c in r.cards if c.content.framing.headline.startswith("Grew"))
+    grew.content.facts["workstream"] = "Responsibilities"
+    s = score(career, None, r.result())
+    assert s.groups.of == 0
+    assert s.kinds == {}

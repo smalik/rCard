@@ -9,6 +9,7 @@ from typing import Any
 
 import anthropic
 import httpx2
+import pytest
 from docx import Document
 from docx.shared import Pt
 from PIL import Image
@@ -221,3 +222,19 @@ def test_claude_reads_pictures_at_low_effort_with_each_one_labelled() -> None:
     assert content[0] == {"type": "text", "text": "Picture 1: an image placed in the resume."}
     assert content[1]["type"] == "image"
     assert content[1]["source"]["media_type"] == "image/png"
+
+
+def test_a_scan_whose_pictures_hold_no_words_is_unreadable() -> None:
+    from plytos_api.imports.extract import UnsupportedFileError
+
+    class Blind:
+        name = "blind"
+
+        def read(self, doc: Any) -> None:
+            return None
+
+        def read_pictures(self, images: Any) -> AiPictures:
+            return AiPictures.model_validate({"pictures": []})
+
+    with pytest.raises(UnsupportedFileError):
+        import_resume(scanned_pdf(), "scan.pdf", today=TODAY, reader=Blind())  # type: ignore[arg-type]

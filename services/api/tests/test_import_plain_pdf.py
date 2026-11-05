@@ -99,3 +99,29 @@ def test_a_job_read_as_one_endless_line_does_not_stop_the_import() -> None:
     endless = " ".join(["Handled the store's weekly ordering and stock counts"] * 120)
     result = read(f"Pat Lee\nExperience\nStore Manager, Fabrikam, 2019 - 2021\n• {endless}\n")
     assert all(len(c.content.framing.body) <= 5000 for c in result.cards)
+
+
+def test_a_very_tall_scanned_page_is_read_in_page_sized_pieces() -> None:
+    import io
+
+    import pdfplumber
+    from PIL import Image
+
+    from plytos_api.imports.fidelity.layouts import write_pdf
+    from plytos_api.imports.fidelity.truth import SAM
+
+    page = write_pdf(SAM, PDF[0].style)
+    with pdfplumber.open(io.BytesIO(page)) as doc:
+        shot = doc.pages[0].to_image(resolution=72).original.convert("L")
+    # One endless page: the same page three times over, as a long screenshot is.
+    tall = Image.new("L", (shot.width, shot.height * 3), 255)
+    for k in range(3):
+        tall.paste(shot, (0, shot.height * k))
+    out = io.BytesIO()
+    tall.save(out, "PDF", resolution=72)
+    doc = extract(out.getvalue(), "resume.pdf")
+    assert doc.facts.scanned_pages == [1]
+    assert len(doc.images) >= 3
+    for image in doc.images:
+        with Image.open(io.BytesIO(image.data)) as piece:
+            assert piece.height <= piece.width * 1.7

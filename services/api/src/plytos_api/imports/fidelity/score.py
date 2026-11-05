@@ -29,6 +29,7 @@ from plytos_api.cards.model import FactValue
 from plytos_api.imports.fidelity.layouts import Layout
 from plytos_api.imports.fidelity.truth import PRESENT, Career, Employment, Position
 from plytos_api.imports.model import Contact, ImportResult, ProposedCard
+from plytos_api.imports.segment import is_generic_label
 
 
 class Tally(BaseModel):
@@ -314,6 +315,13 @@ class _Reading:
         everywhere = [p for e in self.career.employments for p in e.positions if norm(p.title)]
         mine = [p for p in employer.positions if norm(p.title)] if employer else []
         pools = [mine, everywhere] if employer else [everywhere]
+        title = card.content.facts.get("title")
+        if not (isinstance(title, str) and title.strip()):
+            # A job with no title written, read as one: it stands for an untitled job.
+            untitled = [p for e in self.career.employments for p in e.positions if not p.title]
+            mine_untitled = [p for p in employer.positions if not p.title] if employer else []
+            if mine_untitled or untitled:
+                return mine_untitled or untitled
         name = self._fact(card, "title")
         for pool in pools:
             exact = [p for p in pool if norm(p.title) == name]
@@ -504,7 +512,7 @@ def score(
             card = read_as[0]
             under, _ = reading.ancestors(card)
             title = card.content.facts.get("title")
-            right_name = isinstance(title, str) and norm(title) == norm(position.title)
+            right_name = norm(title if isinstance(title, str) else "") == norm(position.title)
             right_place = stand_ins or reading.employer_of(under) is employment
             if not out.positions.add(len(read_as) == 1 and right_name and right_place):
                 put = reading.employer_of(under)
@@ -578,8 +586,18 @@ def _score_item(
     miss: Miss,
 ) -> ProposedCard | None:
     """Scores one accomplishment; returns the card it begins on, if found."""
+    # "Responsibilities" over a job's bullets is no workstream, whoever wrote it down.
+    label = None if is_generic_label(label) else label
     short = _short(item)
-    holders = reading.holding(item)
+    # The same words can sit under more than one job: take the copy under this one.
+    holders = sorted(
+        reading.holding(item),
+        key=lambda c: (
+            not reading.same(c, item),
+            c.ref in reading.used,
+            _home(reading, c)[1] is not position,
+        ),
+    )
     # Kept as what its own title was, above the accomplishments: the words are where
     # the person would look for them.
     if (
@@ -643,6 +661,8 @@ def _score_item(
     out.items.add(whole and kind_ok and placed)
 
     stream = card.content.facts.get("workstream")
+    if isinstance(stream, str) and is_generic_label(stream):
+        stream = None
     if label is not None:
         if not out.groups.add(isinstance(stream, str) and norm(stream) == norm(label)):
             miss("workstream lost", f"“{short}” lost its workstream {label}", card)

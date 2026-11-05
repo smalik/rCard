@@ -21,7 +21,7 @@ from plytos_api.imports.ai import (
 from plytos_api.imports.audit import audit
 from plytos_api.imports.cards import propose_cards
 from plytos_api.imports.career import group_employments, settle_employments
-from plytos_api.imports.extract import extract
+from plytos_api.imports.extract import UnsupportedFileError, extract
 from plytos_api.imports.facts import add_result_facts, to_ask, words
 from plytos_api.imports.model import ExtractedDocument, ImportResult, ParsedResume
 from plytos_api.imports.pictures import add_picture_lines, mark_picture_cards
@@ -77,6 +77,10 @@ def _read(
         seen = reader.read_pictures(doc.images)
         if seen is not None:
             doc = add_picture_lines(doc, seen)
+        if not doc.blocks:
+            # The pictures were read and held no words that could be made out (a scan
+            # too faint or too small): say so, rather than show an empty resume.
+            raise UnsupportedFileError("No words could be read in this file.")
 
     on_stage("structure")
     with ThreadPoolExecutor(max_workers=2) as pool:

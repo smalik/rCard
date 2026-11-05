@@ -11,6 +11,8 @@ read them before the lines are sorted (imports/pictures.py).
 """
 
 import io
+import itertools
+import math
 import re
 import zipfile
 from collections import Counter
@@ -688,10 +690,14 @@ def _read_pdf(data: bytes, filename: str) -> ExtractedDocument:
             before = len(blocks) - 1 if blocks else None
             if not words:
                 if page.images and len(kept) < MAX_PICTURES:
-                    # A scanned page: keep the whole page as a picture to read.
-                    image = _render(page, None, 150)
-                    if image is not None:
-                        scanned.append(number)
+                    # A scanned page: keep the whole page as a picture to read, in
+                    # pieces when it's too tall to read whole.
+                    for box in _tiles(page)[: MAX_PICTURES - len(kept)]:
+                        image = _render(page, box, 150)
+                        if image is None:
+                            continue
+                        if number not in scanned:
+                            scanned.append(number)
                         kept.append(
                             PictureImage(
                                 after_block=before, page=number, media_type=image[0], data=image[1]
@@ -817,6 +823,50 @@ def _pdf_picture(
                 data=image[1],
             )
         )
+
+
+# A page taller than this for its width (a long resume saved as one endless page) is
+# read in pieces: shrunk whole to what Claude reads, its words would be too small.
+_TALLEST = 1.6
+
+
+def _tiles(page: Any) -> list[tuple[float, float, float, float] | None]:
+    """The parts of a scanned page to read one at a time: the whole page, or slices of
+    about a page each, cut where a row is blank so no line is cut in two."""
+    width, height = float(page.width), float(page.height)
+    if height <= width * _TALLEST:
+        return [None]
+    count = math.ceil(height / (width * 1.3))
+    try:
+        shade = page.to_image(resolution=36).original.convert("L")
+    except Exception:  # a page that won't render is cut evenly
+        shade = None
+    cuts = [0.0]
+    for k in range(1, count):
+        want = height * k / count
+        cuts.append(_blank_row_near(shade, want, height, height / count * 0.15))
+    cuts.append(height)
+    return [(0.0, top, width, bottom) for top, bottom in itertools.pairwise(cuts)]
+
+
+def _blank_row_near(shade: Image.Image | None, want: float, height: float, reach: float) -> float:
+    """The y nearest `want`, within `reach`, where the page is blank all the way across."""
+    if shade is None:
+        return want
+    scale = shade.height / height
+    rows = range(
+        max(0, int((want - reach) * scale)), min(shade.height, int((want + reach) * scale) + 1)
+    )
+    blank = [row for row in rows if _darkest(shade.crop((0, row, shade.width, row + 1))) > 200]
+    if not blank:
+        return want
+    best = min(blank, key=lambda row: abs(row / scale - want))
+    return best / scale
+
+
+def _darkest(strip: Image.Image) -> int:
+    low = strip.getextrema()[0]
+    return int(low if isinstance(low, int | float) else low[0])
 
 
 def _render(
