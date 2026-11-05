@@ -202,3 +202,49 @@ def test_a_label_can_be_read_written_out_as_a_word_file() -> None:
     assert scored is not None and scored.failed is None
     assert scored.layout == WORD[0].name and scored.kind == "docx"
     assert scored.fidelity == 1.0
+
+
+def test_a_label_without_a_place_dates_or_title_is_written_without_them() -> None:
+    from plytos_api.imports.extract import extract
+    from plytos_api.imports.fidelity.layouts import WORD
+    from plytos_api.imports.fidelity.truth import Employment, Group, Position
+
+    career = Career(
+        key="bare",
+        name="Pat Lee",
+        employments=[
+            Employment(
+                employer="Company Name",
+                positions=[
+                    Position(
+                        title="Cashier",
+                        start="2016-03",
+                        end="2019-05",
+                        groups=[Group(items=["Processed returns", "Trained four new cashiers"])],
+                    )
+                ],
+            ),
+            Employment(
+                employer="Fabrikam Retail",
+                positions=[Position(title="", groups=[Group(items=["Opened the store"])])],
+            ),
+        ],
+    )
+    for layout in WORD:
+        text = "\n".join(b.text for b in extract(layout.render(career), "resume.docx").blocks)
+        assert "None" not in text, layout.name
+        assert " – \n" not in text and not text.rstrip().endswith("–"), layout.name
+    paragraphs = next(lay for lay in WORD if lay.name == "word-paragraphs")
+    text = "\n".join(b.text for b in extract(paragraphs.render(career), "resume.docx").blocks)
+    assert "Processed returns. Trained four new cashiers." in text
+
+
+def test_a_shape_can_show_a_label_written_out_as_a_word_file() -> None:
+    from plytos_api.imports.fidelity.layouts import WORD
+
+    classic = next(lay for lay in WORD if lay.name == "word-classic")
+    reading = import_resume(classic.render(MORGAN), "resume.docx", today=TODAY, reader=None)
+    shown = show(MORGAN, reading, classic)
+    assert shown.startswith(f"== {MORGAN.key} (word-classic)")
+    assert "Reading (100%)" in shown
+    assert MORGAN.employments[0].employer.lower() not in shown.lower()

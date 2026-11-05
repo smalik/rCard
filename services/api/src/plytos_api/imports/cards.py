@@ -81,6 +81,12 @@ def propose_cards(
         add("story", {"use": "summary"}, parsed.summary, parsed.summary_blocks, None)
 
     employments = parsed.employments or group_employments(parsed.roles, parsed_blocks)
+    # Years alone throughout are how the person writes dates, nothing to ask about;
+    # a title in years among titles with months may well have lost its months.
+    months_written = any(
+        r.dates is not None and "YYYY" not in (r.dates.start_format, r.dates.end_format)
+        for r in parsed.roles
+    )
     # The proposed card each role became: a position, or an engagement for client work.
     held: dict[str, ProposedCard] = {}
     for employment in employments:
@@ -122,7 +128,10 @@ def propose_cards(
                 )
             held[role.ref] = card
             card.needs_check = _role_checks(
-                role, by_ref.get(role.parent_ref or ""), dated_by=employment
+                role,
+                by_ref.get(role.parent_ref or ""),
+                dated_by=employment,
+                months_written=months_written,
             )
             prose = role.description is not None and not role.bullets
             if role.description and not prose:
@@ -154,9 +163,9 @@ def propose_cards(
                 # the lines a sentence wraps over.
                 prose_lines = [(b, parsed_blocks[b], False) for b in role.description_blocks]
                 for run in _wrapped(prose_lines):
-                    for sentence, spanned in _sentences_over(run):
-                        if len(sentence.split()) < 5:
-                            continue
+                    # A short sentence is still something done ("Processed returns."); a
+                    # scrap of two words joins the sentence before it.
+                    for sentence, spanned in _sentences_over(run, shortest=3):
                         add(
                             "accomplishment",
                             {},
@@ -244,7 +253,9 @@ def _employment_checks(employment: Employment, roles: list[Role]) -> list[str]:
     return checks
 
 
-def _role_checks(role: Role, parent: Role | None, *, dated_by: Employment) -> list[str]:
+def _role_checks(
+    role: Role, parent: Role | None, *, dated_by: Employment, months_written: bool
+) -> list[str]:
     checks: list[str] = []
     if role.client and parent is not None:
         span = f" (within {parent.dates.raw})" if parent.dates else ""
@@ -260,7 +271,7 @@ def _role_checks(role: Role, parent: Role | None, *, dated_by: Employment) -> li
         if not (dated_by.tenure_written and dated_by.dates is not None):
             # A title inside a written tenure is dated by it; asking isn't needed.
             checks.append("When did you start and finish in this title?")
-    elif "YYYY" in (role.dates.start_format, role.dates.end_format):
+    elif months_written and "YYYY" in (role.dates.start_format, role.dates.end_format):
         checks.append("Which months did you start and finish in this title?")
     return checks
 

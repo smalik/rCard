@@ -218,3 +218,31 @@ def test_a_client_under_a_title_under_its_employer_is_still_a_client() -> None:
     )
     kinds = [(kind, client, n) for kind, _, client, n in _jobs(result)]
     assert kinds == [("position", None, 0), ("engagement", "Fabrikam Health", 1)]
+
+
+def test_years_throughout_ask_no_months() -> None:
+    years = read(
+        "Pat Lee\nExperience\nStore Manager, Fabrikam Retail, 2019 – 2021\n• Grew sales 12%.\n"
+        "Cashier, Contoso Foods Inc., 2016 – 2019\n• Trained nine new cashiers.\n"
+    )
+    assert not any("months" in q for c in years.cards for q in c.needs_check)
+    # One title in years among titles with months may have lost them.
+    mixed = read(
+        "Pat Lee\nExperience\nStore Manager, Fabrikam Retail, March 2019 – May 2021\n"
+        "• Grew sales 12%.\nCashier, Contoso Foods Inc., 2016 – 2019\n"
+        "• Trained nine new cashiers.\n"
+    )
+    asked = [c for c in mixed.cards if any("months" in q for q in c.needs_check)]
+    assert [c.content.facts.get("title") for c in asked] == ["Cashier"]
+
+
+def test_a_short_sentence_in_a_paragraph_is_kept() -> None:
+    result = read(
+        "Pat Lee\nExperience\nCashier, Contoso Foods Inc., March 2016 – May 2019\n"
+        "Processed returns and exchanges. Trained four new cashiers on the register.\n"
+    )
+    done = [c.content.framing.headline for c in result.cards if c.kind == "accomplishment"]
+    assert done == [
+        "Processed returns and exchanges.",
+        "Trained four new cashiers on the register.",
+    ]

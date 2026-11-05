@@ -1,6 +1,7 @@
 """The shape of a real resume, its label and a reading of it, without its words.
 
-    python -m plytos_api.imports.fidelity.shape --labels DIR [--readings DIR] KEY...
+    python -m plytos_api.imports.fidelity.shape --labels DIR [--readings DIR]
+        [--as-layout LAYOUT] KEY...
 
 Shows where a reading went wrong on a resume that can't leave its machine: each line's
 place and kind, and each word only as its kind (W a capitalized word, w a lowercase
@@ -19,6 +20,7 @@ from pathlib import Path
 
 from plytos_api.imports.dates import find_range
 from plytos_api.imports.extract import extract
+from plytos_api.imports.fidelity.layouts import Layout, layouts
 from plytos_api.imports.fidelity.real import file_id, load_labels
 from plytos_api.imports.fidelity.score import norm, score
 from plytos_api.imports.fidelity.truth import Career
@@ -93,15 +95,19 @@ def _find_lines(words: str, lines: dict[int, str], after: int) -> list[int]:
     return found
 
 
-def show(career: Career, reading: ImportResult | None) -> str:
+def show(career: Career, reading: ImportResult | None, layout: Layout | None = None) -> str:
+    """The shape of a label's file, or of the label written out in a layout."""
     source = Path(career.source or "")
-    data = source.read_bytes()
-    if file_id(data) != career.key:
-        return f"{career.key}: the label is for another file\n"
+    if layout is not None:
+        data, filename, folder = layout.render(career), f"resume{layout.suffix}", layout.name
+    else:
+        data, filename, folder = source.read_bytes(), source.name, source.parent.name
+        if file_id(data) != career.key:
+            return f"{career.key}: the label is for another file\n"
     # The reading's own lines when there's a reading (a scan's were read from its
     # pictures), so the lines its cards name are these.
-    blocks = reading.blocks if reading is not None else extract(data, source.name).blocks
-    out = [f"== {career.key} ({source.parent.name})", "", "Lines"]
+    blocks = reading.blocks if reading is not None else extract(data, filename).blocks
+    out = [f"== {career.key} ({folder})", "", "Lines"]
     lines: dict[int, str] = {}
     for block in blocks:
         lines[block.index] = block.text
@@ -140,7 +146,7 @@ def show(career: Career, reading: ImportResult | None) -> str:
         out.append(f"  location {skeleton(career.location)}")
     if reading is None:
         return "\n".join(out) + "\n"
-    scored = score(career, None, reading, kind="?", name="?")
+    scored = score(career, layout, reading, kind="?", name="?")
     found = reading.contact
     out += [
         "",
@@ -193,17 +199,26 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m plytos_api.imports.fidelity.shape")
     parser.add_argument("--labels", type=Path, required=True, metavar="DIR")
     parser.add_argument("--readings", type=Path, metavar="DIR", help="saved readings")
+    parser.add_argument(
+        "--as-layout", metavar="LAYOUT", help="the label written out in this layout instead"
+    )
     parser.add_argument("keys", nargs="+", help="file ids, or their first characters")
     args = parser.parse_args(argv)
+    layout = None
+    if args.as_layout:
+        layout = next((lay for lay in layouts() if lay.name == args.as_layout), None)
+        if layout is None:
+            parser.error(f"no layout named {args.as_layout}")
     careers, _ = load_labels(args.labels)
     for want in args.keys:
         for career in (c for c in careers if c.key.startswith(want)):
             reading = None
             if args.readings is not None:
-                saved = args.readings / f"{career.key}.json"
+                key = career.key if layout is None else f"{career.key}-{layout.name}"
+                saved = args.readings / f"{key}.json"
                 if saved.exists():
                     reading = ImportResult.model_validate_json(saved.read_text())
-            sys.stdout.write(show(career, reading) + "\n")
+            sys.stdout.write(show(career, reading, layout) + "\n")
     return 0
 
 

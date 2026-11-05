@@ -182,8 +182,17 @@ def show_date(value: str | None, style: str) -> str:
     return f"{MONTHS[int(month) - 1]} {year}"
 
 
-def span(start: str | None, end: str | None, style: str) -> str:
-    return f"{show_date(start, style)} – {show_date(end, style)}"
+def span(start: str | None, end: str | None, style: str) -> str | None:
+    """A job's dates as written, or nothing when the label has none."""
+    if start is None and end is None:
+        return None
+    return f"{show_date(start, style)} – {show_date(end, style)}".strip(" –")
+
+
+def _place(*parts: str | None) -> str:
+    """Words joined by commas, leaving out those the label doesn't have: a real
+    person's job may have no place written, and "None" is no place."""
+    return ", ".join(p for p in parts if p)
 
 
 def contact_line(c: Career) -> str:
@@ -200,30 +209,29 @@ Line = tuple[str, str, str | None]
 def _job_lines(e: Employment, s: Style) -> Iterator[Line]:
     if s.header == "web_print":
         for p in e.positions:
-            yield ("title", p.title, None)
-            when = f"{show_date(p.start, s.dates)} to {show_date(p.end, s.dates)}"
-            yield ("text", f"{when} {e.employer} - {e.location}", None)
+            if p.title:
+                yield ("title", p.title, None)
+            where = " - ".join(w for w in (e.employer, e.location) if w)
+            if p.start or p.end:
+                where = f"{show_date(p.start, s.dates)} to {show_date(p.end, s.dates)} {where}"
+            yield ("text", where, None)
             yield from _groups(p, s)
         return
     if s.header == "employer_first":
-        yield ("employer", f"{e.employer}, {e.location}", span(e.start, e.end, s.dates))
+        yield ("employer", _place(e.employer, e.location), span(e.start, e.end, s.dates))
         for p in e.positions:
-            yield ("title", p.title, span(p.start, p.end, s.dates))
+            if p.title:
+                yield ("title", p.title, span(p.start, p.end, s.dates))
             yield from _groups(p, s)
         return
     for p in e.positions:
+        when = span(p.start, p.end, s.dates)
         if s.header == "title_first":
-            yield (
-                "employer",
-                f"{p.title} — {e.employer}, {e.location}",
-                span(p.start, p.end, s.dates),
-            )
+            where = _place(e.employer, e.location)
+            yield ("employer", f"{p.title} — {where}" if p.title else where, when)
         else:
-            yield (
-                "employer",
-                f"{p.title}, {e.employer}, {e.location} | {span(p.start, p.end, s.dates)}",
-                None,
-            )
+            line = _place(p.title, e.employer, e.location)
+            yield ("employer", f"{line} | {when}" if when else line, None)
         yield from _groups(p, s)
 
 
@@ -236,10 +244,17 @@ def _groups(p: Position, s: Style) -> Iterator[Line]:
 
 def _items(g: Group, s: Style) -> Iterator[Line]:
     if s.bullets == "paragraph":
-        yield ("para", " ".join(g.items), None)
+        # Written as prose, each one ends its sentence, as a person writing a
+        # paragraph would; the words are scored without their punctuation.
+        yield ("para", " ".join(_sentence(item) for item in g.items), None)
     else:
         for item in g.items:
             yield ("bullet", item, None)
+
+
+def _sentence(item: str) -> str:
+    item = item.rstrip()
+    return item if item.endswith((".", "!", "?")) else f"{item.rstrip(';,:')}."
 
 
 def _sections(c: Career, s: Style) -> dict[str, list[Line]]:
