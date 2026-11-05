@@ -3,7 +3,7 @@
 // awards, credentials, skills, projects and activities. Pure functions only,
 // so the shaping is tested without a browser.
 
-import type { CardContent, CardKind, FactValue, WrittenPart } from "./cards";
+import { type CardContent, type CardKind, type FactValue, numbersIn, type WrittenPart } from "./cards";
 
 export type AttachmentKind = "paper" | "repo" | "link";
 
@@ -257,19 +257,21 @@ export function relativeTime(iso: string, now: Date): string {
   return `${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
 }
 
-export type Evidence = { figures: number; attachments: number; level: 0 | 1 | 2 | 3 };
+export type Evidence = { numbers: number; attachments: number; level: 0 | 1 | 2 | 3 };
 
-/** How well an accomplishment is backed: numbers, things to show, and a story. */
+/** How well an accomplishment is backed: numbers in its words, things to
+ * show, and a story. */
 export function evidence(card: LibraryCard): Evidence {
-  const figures = listFact(card, "figures").length;
+  const framing = card.content?.framing;
+  const numbers = numbersIn(`${framing?.headline ?? ""} ${framing?.body ?? ""}`).length;
   const attachments = card.content?.attachments.length ?? 0;
-  const told = (card.content?.framing.body.trim().length ?? 0) >= 40;
-  const level = ((figures > 0 ? 1 : 0) + (attachments > 0 ? 1 : 0) + (told ? 1 : 0)) as
+  const told = (framing?.body.trim().length ?? 0) >= 40;
+  const level = ((numbers > 0 ? 1 : 0) + (attachments > 0 ? 1 : 0) + (told ? 1 : 0)) as
     | 0
     | 1
     | 2
     | 3;
-  return { figures, attachments, level };
+  return { numbers, attachments, level };
 }
 
 /** What a web address most likely points at. */

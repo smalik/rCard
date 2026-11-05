@@ -33,7 +33,7 @@ const card: ProposedCard = {
   missing: "Did late shipments drop?",
   content: {
     parent: "job",
-    facts: { date: "2026-09", figures: ["9"] },
+    facts: { date: "2026-09" },
     framing: { headline: "Rolled a carrier scorecard out to all 9 carriers", body: "" },
   },
 };

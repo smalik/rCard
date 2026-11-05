@@ -71,7 +71,7 @@ const CARDS: Proposal[] = [
     kind: "accomplishment",
     role_ref: "role-1",
     content: {
-      facts: { ...ROLE, figures: ["30%"] },
+      facts: ROLE,
       framing: { headline: "Cut claim review time 30% by rebuilding triage.", body: "" },
     },
     source_blocks: [12],
@@ -269,7 +269,7 @@ describe("reviewQueue", () => {
 
   it("reviews a card in the words the person's answers gave it", () => {
     const edited = {
-      facts: { ...ROLE, figures: ["25%"] },
+      facts: ROLE,
       framing: { headline: "Cut claim review time 25% by rebuilding triage.", body: "" },
     };
     const r = review({ edits: { "card-2": edited } });
@@ -379,7 +379,7 @@ const TREE: Proposal[] = [
     kind: "accomplishment",
     parent_ref: "t-2",
     content: {
-      facts: { figures: ["30%"] },
+      facts: {},
       framing: { headline: "Cut claim review time 30%.", body: "" },
     },
   }),
@@ -421,7 +421,6 @@ describe("career tree", () => {
     expect(rows.map((row) => [row.label, row.value, row.above ?? false])).toEqual([
       ["Under", "Senior Analyst, Fabrikam Inc.", true],
       ["When", "Jul 2019 – Present", true],
-      ["Numbers", "30%", false],
     ]);
     const title = TREE[1]!;
     expect(factRows(title, title.content, factsAbove(title, r)).map((row) => row.label)).toEqual([
@@ -437,7 +436,6 @@ describe("career tree", () => {
       kind: "accomplishment",
       content: {
         facts: {
-          figures: ["3", "$2.4M"],
           outcome: "collecting $2.4M a year",
           scope: ["3 clinics"],
           skills: ["billing"],
@@ -449,7 +447,6 @@ describe("career tree", () => {
       ["Result", "collecting $2.4M a year"],
       ["Scope", "3 clinics"],
       ["Skills", "billing"],
-      ["Numbers", "3\n$2.4M"],
     ]);
   });
 

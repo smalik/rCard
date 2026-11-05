@@ -164,7 +164,6 @@ def career(cards: CardRepository) -> Career:
             "accomplishment",
             "Cut late shipments by 22%",
             director,
-            figures=["22%"],
             date="2022-05",
         ),
         forecast=card(
@@ -172,7 +171,6 @@ def career(cards: CardRepository) -> Career:
             "accomplishment",
             "Built the demand forecast, saving $3.1M",
             director,
-            figures=["$3.1M"],
             date="2023-02",
         ),
         rollout=card(
@@ -180,7 +178,6 @@ def career(cards: CardRepository) -> Career:
             "accomplishment",
             "Rolled out warehouse software to 6 sites",
             senior,
-            figures=["6"],
             date="2019-04",
         ),
         mentoring=card(cards, "accomplishment", "Mentored new analysts", nw),
@@ -190,7 +187,6 @@ def career(cards: CardRepository) -> Career:
             "accomplishment",
             "Mapped inbound freight for 120 suppliers",
             consultant,
-            figures=["120"],
         ),
         degree=card(cards, "education", "B.S. Industrial Engineering", degree="B.S."),
     )

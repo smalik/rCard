@@ -48,7 +48,7 @@ export function CheckInOffer({ onPlan }: { onPlan: Plan }) {
       attached={
         <>
           {picking ? (
-            <div className="w-full max-w-md rounded-2xl border bg-card p-4 shadow-card">
+            <div className="w-full max-w-md rounded-card border bg-card p-4 shadow-card">
               <CheckInPicker
                 initial={USUAL_CHECK_IN}
                 busy={busy}
@@ -106,7 +106,7 @@ export function CheckInSettings({
   return (
     <section
       aria-label="Check-ins"
-      className="mt-3 flex flex-col gap-3 rounded-2xl border bg-card p-4 shadow-card"
+      className="mt-3 flex flex-col gap-3 rounded-card border bg-card p-4 shadow-card"
     >
       <p className="text-[14px] font-medium">Once a month, I&apos;ll ask one quick question. When suits you?</p>
       <CheckInPicker

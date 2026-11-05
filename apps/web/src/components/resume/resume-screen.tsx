@@ -478,7 +478,7 @@ function Notice({ tone, children }: { tone: "quiet" | "live"; children: ReactNod
   return (
     <section
       className={cn(
-        "mt-5 rounded-2xl border px-4 py-3.5 text-[14.5px] shadow-sheet sm:px-5 print:hidden",
+        "mt-5 rounded-card border px-4 py-3.5 text-[14.5px] shadow-sheet sm:px-5 print:hidden",
         tone === "live" ? "border-live/30 bg-live-soft" : "bg-card",
       )}
     >
@@ -489,7 +489,7 @@ function Notice({ tone, children }: { tone: "quiet" | "live"; children: ReactNod
 
 function RailCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="rounded-2xl border bg-card p-4 shadow-card">
+    <section className="rounded-card border bg-card p-4 shadow-card">
       <h2 className="text-[12px] font-semibold tracking-[0.04em] text-muted-foreground uppercase">
         {title}
       </h2>

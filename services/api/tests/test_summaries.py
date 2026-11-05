@@ -94,10 +94,7 @@ class Job:
             "accomplishment",
             under(
                 self.lead,
-                content(
-                    "Cut empty miles by 18% by pooling loads across 4 depots",
-                    figures=["18%", "4"],
-                ),
+                content("Cut empty miles by 18% by pooling loads across 4 depots"),
             ),
             ME,
         ).id
@@ -203,7 +200,8 @@ def test_plytos_sums_up_the_job_and_each_title(make_user, cards: Cards) -> None:
         [(_, asked)] = thinker.asked
         assert asked["employer"] == "Fernwood Freight"
         assert [t["title"] for t in asked["titles"]] == ["Planning Lead", "Planning Analyst"]
-        assert asked["titles"][0]["accomplishments"][0]["figures"] == "18%, 4"
+        first = asked["titles"][0]["accomplishments"][0]
+        assert first["text"].startswith("Cut empty miles by 18%") and "figures" not in first
 
     with cards(user) as (repo, _):
         # Nothing changed since: nothing to write, and no call to the model.
@@ -267,7 +265,6 @@ def test_a_changed_accomplishment_rewrites_only_what_plytos_wrote(make_user, car
                 "framing": win.content.framing.model_copy(
                     update={"headline": "Cut empty miles by 18% by pooling loads across 6 depots"}
                 ),
-                "facts": {"figures": ["18%", "6"]},
             }
         )
         repo.save_main_version(job.win, win.head.id, better, ME)

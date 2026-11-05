@@ -47,7 +47,7 @@ export function PaperSheet({ children, className, ...props }: ComponentProps<"ar
   return (
     <article
       className={cn(
-        "relative min-w-0 rounded-[10px] border border-black/[0.06] bg-paper px-5 py-7 text-[13.5px] leading-[1.5] text-paper-ink shadow-card sm:px-10 sm:py-10 lg:px-14 lg:py-12",
+        "relative min-w-0 rounded-card border border-black/[0.06] bg-paper px-5 py-7 text-[13.5px] leading-[1.5] text-paper-ink shadow-card sm:px-10 sm:py-10 lg:px-14 lg:py-12",
         "print:rounded-none print:border-0 print:p-0 print:text-[10.5pt] print:shadow-none",
         className,
       )}
@@ -183,10 +183,12 @@ function Bullet() {
 
 function Line({ item, dated, bullet, edit, onOpen, up, down }: LineProps & { bullet: boolean }) {
   const { text, detail } = lineParts(item);
+  // The page reads as one clean flow; which lines carry this version's own
+  // wording shows only while editing.
   const words = (
     <>
       {text}
-      <Worded wording={item.wording} />
+      {edit && <Worded wording={item.wording} />}
     </>
   );
   return (
@@ -361,7 +363,7 @@ function EntryTools({
 function OnFile({ entry, edit }: { entry: RenderedEntry; edit: PaperEdits }) {
   if (entry.hidden.length === 0) return null;
   return (
-    <details className="group/more mt-2 rounded-[8px] border border-dashed border-paper-rule print:hidden">
+    <details className="group/more mt-2 rounded-inset border border-dashed border-paper-rule print:hidden">
       <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-[12.5px] font-medium text-paper-soft [&::-webkit-details-marker]:hidden">
         <DisclosureTriangle open={false} className="text-paper-soft group-open/more:rotate-90" />
         {entry.hidden.length} more {entry.hidden.length === 1 ? "line" : "lines"} on file for{" "}
@@ -452,7 +454,7 @@ export function Paper({
       ))}
 
       {empty && (
-        <p className="mt-6 rounded-[8px] border border-dashed border-paper-rule px-4 py-6 text-center text-paper-soft">
+        <p className="mt-6 rounded-inset border border-dashed border-paper-rule px-4 py-6 text-center text-paper-soft">
           {edit
             ? "Nothing shows yet. Add jobs and cards from the list beside the page."
             : "Nothing shows on this resume yet. Choose Edit to bring in jobs and cards."}
@@ -572,7 +574,7 @@ function DiffJob({ entry }: { entry: DiffEntry }) {
 function TopChanges({ changes }: { changes: HeaderChange[] }) {
   if (changes.length === 0) return null;
   return (
-    <ul className="mt-3 flex flex-col gap-1 rounded-[8px] bg-black/[0.035] px-3 py-2 text-[12.5px]">
+    <ul className="mt-3 flex flex-col gap-1 rounded-inset bg-black/[0.035] px-3 py-2 text-[12.5px]">
       {changes.map((c) => (
         <li key={c.field}>
           <span className="font-semibold">{c.label}</span>{" "}

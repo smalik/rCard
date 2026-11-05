@@ -770,15 +770,4 @@ def _replace_figure(content: MainContent, old: str, new: str) -> MainContent:
             "body": pattern.sub(new, content.framing.body),
         }
     )
-    facts = dict(content.facts)
-    figures = facts.get("figures")
-    if isinstance(figures, list):
-        facts["figures"] = list(dict.fromkeys(new if _same(f, old) else f for f in figures))
-    return MainContent(facts=facts, framing=framing)
-
-
-def _same(a: str, b: str) -> bool:
-    def norm(s: str) -> str:
-        return re.sub(r"[\s$,~≈]", "", s).lower().rstrip(".")
-
-    return norm(a) == norm(b)
+    return MainContent(facts=dict(content.facts), framing=framing)

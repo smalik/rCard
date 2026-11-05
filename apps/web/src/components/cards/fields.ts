@@ -29,7 +29,6 @@ export const FIELDS = {
     END,
   ],
   accomplishment: [
-    { key: "figures", label: "Figures", placeholder: "40%, $1.2M, 12 reports", list: true },
     { key: "skills", label: "Skills shown", placeholder: "SQL, Oracle", list: true },
     DATE,
     { key: "scope", label: "Scope", half: true },
@@ -54,7 +53,6 @@ export const FIELDS = {
   project: [
     { key: "role", label: "Your role", half: true },
     DATE,
-    { key: "figures", label: "Figures", list: true },
   ],
   activity: [
     { key: "name", label: "What" },

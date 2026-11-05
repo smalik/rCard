@@ -177,7 +177,7 @@ function SortableRow({
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={cn(
-        "group/row relative rounded-xl",
+        "group/row relative rounded-inset",
         !inline && "flex items-stretch gap-1.5",
         isDragging && "z-10 scale-[1.015] bg-card shadow-lift",
       )}

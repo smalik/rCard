@@ -70,7 +70,7 @@ function ResumeRow({ resume, changes, now }: { resume: ResumeSummary; changes: n
   return (
     <Link
       href={`/resumes/${encodeURIComponent(resume.id)}`}
-      className="group flex items-center gap-4 rounded-2xl border bg-card p-3.5 shadow-card transition-shadow hover:shadow-lift focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none sm:p-4"
+      className="group flex items-center gap-4 rounded-card border bg-card p-3.5 shadow-card transition-shadow hover:shadow-lift focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none sm:p-4"
     >
       <Thumb />
       <div className="min-w-0 flex-1">
@@ -117,7 +117,7 @@ export default async function ResumesPage() {
         </p>
 
         {data === null && (
-          <p role="alert" className="mt-6 rounded-2xl border bg-card p-5 text-[15px] shadow-card">
+          <p role="alert" className="mt-6 rounded-card border bg-card p-5 text-[15px] shadow-card">
             Plytos couldn&apos;t load your resumes just now. Try again in a moment.
           </p>
         )}
@@ -125,7 +125,7 @@ export default async function ResumesPage() {
         {data?.ready.map((file) => (
           <section
             key={file.id}
-            className="mt-6 flex flex-col gap-3 rounded-2xl border border-primary/25 bg-accent/60 p-5 shadow-card sm:flex-row sm:items-center"
+            className="mt-6 flex flex-col gap-3 rounded-card border border-primary/25 bg-accent/60 p-5 shadow-card sm:flex-row sm:items-center"
           >
             <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground">
               <FileText className="size-5" />
@@ -142,7 +142,7 @@ export default async function ResumesPage() {
         ))}
 
         {data && data.resumes.length === 0 && data.ready.length === 0 && (
-          <section className="mt-8 rounded-2xl border bg-card p-6 shadow-card">
+          <section className="mt-8 rounded-card border bg-card p-6 shadow-card">
             <h2 className="text-[20px] font-semibold tracking-[-0.015em]">No resumes yet</h2>
             <p className="mt-2 text-[15px] text-muted-foreground">
               Bring in your resume and keep its cards. Plytos sets it up as you wrote it, then

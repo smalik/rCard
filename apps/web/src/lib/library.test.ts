@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { numbersIn } from "./cards";
 import {
   attachmentKindFor,
   buildLibrary,
@@ -175,16 +176,27 @@ describe("dates", () => {
 });
 
 describe("evidence", () => {
-  it("counts figures, attachments and a told story", () => {
+  it("counts numbers in the words, attachments and a told story", () => {
     const bare = card("accomplishment", "Ran peak season");
-    expect(evidence(bare)).toEqual({ figures: 0, attachments: 0, level: 0 });
+    expect(evidence(bare)).toEqual({ numbers: 0, attachments: 0, level: 0 });
 
-    const backed = card("accomplishment", "Cut late shipments", { figures: ["40 people", "−22%"] });
+    const backed = card("accomplishment", "Cut late shipments 22% across 40 sites");
     backed.content!.attachments = [
       { kind: "paper", url: "https://example.org/a.pdf", title: "Write-up", note: "" },
     ];
     backed.content!.framing.body = "Moved three sites onto one daily plan with shared cut-off times.";
-    expect(evidence(backed)).toEqual({ figures: 2, attachments: 1, level: 3 });
+    expect(evidence(backed)).toEqual({ numbers: 2, attachments: 1, level: 3 });
+  });
+
+  it("leaves names, codes, years and 24/7 out of the numbers", () => {
+    expect(numbersIn("Moved Dynamics 365 in Q3 2023 to a 24/7 desk saving $1.2M")).toEqual([
+      "$1.2M",
+    ]);
+    expect(numbersIn("Grew sign-ups 3x and cut costs 15 %, to 1,200 users")).toEqual([
+      "3x",
+      "15 %",
+      "1,200",
+    ]);
   });
 
   it("reads a list fact written as one string", () => {
@@ -216,7 +228,7 @@ describe("attachments", () => {
 describe("cleanContent", () => {
   const valid = {
     parent: null,
-    facts: { figures: ["40 people"], start: "2020-01" },
+    facts: { skills: ["SQL"], start: "2020-01" },
     framing: { headline: " Cut late shipments ", body: "", shown_facts: null },
     attachments: [{ kind: "repo", url: "https://github.com/example/x", title: "x", note: "" }],
   };
@@ -225,7 +237,7 @@ describe("cleanContent", () => {
     const clean = cleanContent(valid);
     expect(clean?.framing.headline).toBe("Cut late shipments");
     expect(clean?.attachments).toHaveLength(1);
-    expect(clean?.facts.figures).toEqual(["40 people"]);
+    expect(clean?.facts.skills).toEqual(["SQL"]);
   });
 
   it("keeps Plytos's marks it knows, and only those", () => {

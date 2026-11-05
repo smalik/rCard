@@ -488,7 +488,7 @@ function GroupStep({
       attached={
         <article
           aria-label="Draft cards"
-          className="w-full max-w-full overflow-hidden rounded-2xl border bg-card shadow-card sm:max-w-[92%]"
+          className="w-full max-w-full overflow-hidden rounded-card border bg-card shadow-card sm:max-w-[92%]"
         >
           {group.kind === "job" ? (
             <JobDraft

@@ -174,7 +174,7 @@ function RoleBlock({
   const regionId = `role-${block.card.id}`;
   const title = blockTitle(block);
   return (
-    <div className={cn("relative pl-5", fresh.has(block.card.id) && "animate-live-glow rounded-lg")}>
+    <div className={cn("relative pl-5", fresh.has(block.card.id) && "animate-live-glow rounded-inset")}>
       {/* A node on the employer's timeline. */}
       <span
         aria-hidden
@@ -186,7 +186,7 @@ function RoleBlock({
           onClick={() => onToggle(block.card.id)}
           aria-expanded={open}
           aria-controls={regionId}
-          className="grid min-w-0 flex-1 grid-cols-[12px_minmax(0,1fr)] items-start gap-x-2 rounded-lg py-1.5 pr-1 text-left focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none sm:grid-cols-[12px_minmax(0,1fr)_auto] sm:gap-x-3"
+          className="grid min-w-0 flex-1 grid-cols-[12px_minmax(0,1fr)] items-start gap-x-2 rounded-inset py-1.5 pr-1 text-left focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none sm:grid-cols-[12px_minmax(0,1fr)_auto] sm:gap-x-3"
         >
           <DisclosureTriangle open={open} className="mt-[5px]" />
           <span className="min-w-0">
@@ -246,7 +246,7 @@ function RoleBlock({
               </div>
             )}
             {block.items.length > 0 ? (
-              <div className="rounded-xl bg-muted/55 p-1 dark:bg-muted/40">
+              <div className="rounded-inset bg-muted/55 p-1 dark:bg-muted/40">
                 <SortableList
                   items={block.items}
                   id={(c) => c.id}
@@ -493,7 +493,7 @@ export function ExperienceCard({
           ) : (
             <div id={sectionsId} className="flex flex-col gap-4">
               {arranging && (
-                <div className="flex items-center justify-between rounded-xl bg-accent px-3 py-2 text-[13px] text-accent-foreground">
+                <div className="flex items-center justify-between rounded-inset bg-accent px-3 py-2 text-[13px] text-accent-foreground">
                   <span>Drag the handles, or use the arrows, to put these in order.</span>
                   <Button size="sm" variant="ghost" onClick={() => setArranging(false)}>
                     <Check /> Done
@@ -554,7 +554,7 @@ export function ExperienceCard({
                   </button>
                   <div id={`${sectionsId}-across`}>
                     {acrossOpen ? (
-                      <div className="rounded-xl bg-muted/55 p-1 dark:bg-muted/40">
+                      <div className="rounded-inset bg-muted/55 p-1 dark:bg-muted/40">
                         <SortableList
                           items={view.items}
                           id={(c) => c.id}

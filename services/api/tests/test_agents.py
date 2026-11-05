@@ -474,7 +474,6 @@ def stitch(data: dict[str, Any]) -> StitcherAnswer:
         notes=refs[:1],
         headline="Cut late shipments by 40%",
         body="",
-        figures=["40%"],
         missing="",
         message="One win.",
     )
@@ -483,7 +482,6 @@ def stitch(data: dict[str, Any]) -> StitcherAnswer:
             notes=refs,
             headline="Built a carrier scorecard and rolled it out to all 9 carriers",
             body="Late shipments were at 12% when it started.",
-            figures=["9", "12%"],
             missing="Did late shipments drop?",
             message="I think two of your notes are one win. Did late shipments drop?",
         )
@@ -492,7 +490,6 @@ def stitch(data: dict[str, Any]) -> StitcherAnswer:
             notes=refs,
             headline="Cut late shipments from 12% to 7% with a scorecard for all 9 carriers",
             body="",
-            figures=["12%", "7%", "9"],
             missing="",
             message="Your scorecard notes have a result now.",
         )
@@ -521,7 +518,7 @@ def test_the_stitcher_joins_notes_into_one_win_and_improves_it(
         content = draft.body.card.content
         assert content.parent == role
         assert content.framing.headline.startswith("Built a carrier scorecard")
-        assert content.facts == {"date": "2026-09", "figures": ["9", "12%"]}
+        assert content.facts == {"date": "2026-09"}
         offered = store.conversation()[-1]
         assert offered.proposal is not None and offered.proposal.id == draft.id
         assert offered.text.startswith("I think two of your notes")

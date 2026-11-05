@@ -57,3 +57,25 @@ export type CardContent = {
 
 export const HEADLINE_MAX = 200;
 export const BODY_MAX = 5000;
+
+// A number as a resume line writes one: "$1.2M", "40%", "1,200", "3x".
+const NUMBER = /\$?\d[\d,]*(?:\.\d+)?(?:\s?%|[kKmMbBx]\b)?/g;
+// "24/7" says always on; it isn't two numbers.
+const ROUND_THE_CLOCK = /\b24\s*[/x]\s*7\b/gi;
+// A capitalised word right before a number: "Dynamics 365", "Windows 11".
+const NAMED_BEFORE = /\S\s+[A-Z][A-Za-z]*\s$/;
+
+/** The numbers an accomplishment's words cite, leaving out ones that are part
+ * of a name or code ("Q3", "Windows 11"), years and "24/7". */
+export function numbersIn(text: string): string[] {
+  const plain = text.replace(ROUND_THE_CLOCK, " ");
+  const found: string[] = [];
+  for (const m of plain.matchAll(NUMBER)) {
+    const token = m[0].trim();
+    const before = plain.slice(0, m.index);
+    if (/[A-Za-z]$/.test(before)) continue;
+    if (/^\d+$/.test(token) && (NAMED_BEFORE.test(before) || /^(19|20)\d\d$/.test(token))) continue;
+    found.push(token);
+  }
+  return [...new Set(found)];
+}

@@ -117,10 +117,12 @@ class MainContent(BaseModel):
     * position: title, plain_title (shown beside the title, never instead),
       start, end, team, location, scope
     * engagement: client, title, start, end
-    * accomplishment: figures, workstream, skills, scope, outcome, evidence, date
+    * accomplishment: workstream, skills, scope, outcome, evidence, date
 
     Dates are YYYY-MM or YYYY, as precise as the person wrote them; an open
-    end is "present". Numbers that framing text may cite go in facts too.
+    end is "present". An accomplishment's numbers live in its words, which
+    variants may cite; there is no separate list of them. Older versions may
+    carry a "figures" fact, which nothing reads or writes any more.
     """
 
     model_config = ConfigDict(extra="forbid")

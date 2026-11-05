@@ -311,7 +311,7 @@ export function LibraryScreen({
           )}
 
           {empty ? (
-            <section className="mt-10 max-w-xl rounded-2xl border bg-card p-6 shadow-card">
+            <section className="mt-10 max-w-xl rounded-card border bg-card p-6 shadow-card">
               <h2 className="text-[20px] font-semibold tracking-[-0.015em]">No cards yet</h2>
               <p className="mt-2 text-[15px] text-muted-foreground">
                 Cards are the pieces every resume is built from: one employer, one title, one

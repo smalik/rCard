@@ -40,7 +40,6 @@ For each win:
 - headline: one sentence that starts with a strong verb, in plain words a hiring manager \
 would follow. Use only facts in those notes. Every number must appear in the notes exactly.
 - body: empty, or one more sentence of context from the notes.
-- figures: each number you used, exactly as written in the notes.
 - missing: if the result is unknown, one short question that would complete it ("Did late \
 shipments drop?"); otherwise empty.
 - message: what Plytos says when offering it, at most two sentences, such as "I think \
@@ -57,7 +56,6 @@ class StitchedWin(BaseModel):
     notes: list[str]
     headline: str = Field(max_length=200)
     body: str = Field(max_length=600)
-    figures: list[str]
     missing: str = Field(max_length=300)
     message: str = Field(max_length=600)
 
@@ -169,9 +167,6 @@ def _card(win: StitchedWin, cited: list[TidbitView], job_id: UUID | None) -> New
     if not number_tokens(headline + " " + win.body) <= said:
         return None
     facts: dict[str, FactValue] = {"date": max(n.said_at for n in cited).strftime("%Y-%m")}
-    figures = [f for f in win.figures if f and number_tokens(f) <= said]
-    if figures:
-        facts["figures"] = figures
     content = MainContent(
         parent=job_id,
         facts=facts,

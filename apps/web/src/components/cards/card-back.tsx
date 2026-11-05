@@ -206,7 +206,7 @@ export function CardBack({
       {movedOn && (
         <div
           role="status"
-          className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-live-soft px-3 py-2 text-[13px]"
+          className="flex flex-wrap items-center justify-between gap-2 rounded-inset bg-live-soft px-3 py-2 text-[13px]"
         >
           <span>This card changed somewhere else while you were editing it.</span>
           <Button
@@ -230,8 +230,10 @@ export function CardBack({
           {fields.map((f) => (
             <div key={f.key} className={cn("grid gap-1.5", f.half ? "col-span-1" : "col-span-2")}>
               <Label htmlFor={`${card.id}-${f.key}`}>
-                {f.label}
-                {f.list && <span className="font-normal text-muted-foreground">, one per line</span>}
+                <span>
+                  {f.label}
+                  {f.list && <span className="font-normal text-muted-foreground">, one per line</span>}
+                </span>
               </Label>
               {f.list ? (
                 <Textarea

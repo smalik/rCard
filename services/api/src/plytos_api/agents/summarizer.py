@@ -186,7 +186,7 @@ def _line(card: LibraryCard) -> dict[str, Any]:
     line: dict[str, Any] = {"text": content.framing.headline}
     if content.framing.body.strip():
         line["detail"] = content.framing.body[:_DETAIL]
-    for key in ("figures", "date", "scope", "outcome"):
+    for key in ("date", "scope", "outcome"):
         value = _text(content.facts.get(key))
         if value:
             line[key] = value

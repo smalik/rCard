@@ -43,7 +43,7 @@ export default async function Cards() {
         <LibraryScreen initial={cards} contact={contact} />
       ) : (
         <main className="mx-auto max-w-xl px-4 pt-10">
-          <p role="alert" className="rounded-2xl border bg-card p-5 text-[15px] shadow-card">
+          <p role="alert" className="rounded-card border bg-card p-5 text-[15px] shadow-card">
             Plytos couldn&apos;t load your cards just now. Try again in a moment.
           </p>
         </main>
