@@ -4,6 +4,15 @@
     python -m plytos_api.imports.fidelity --ai --budget 20      # Claude reads them
     python -m plytos_api.imports.fidelity --only word-classic --keep /tmp/files
 
+Real resumes, against labels written for them (real.py), on the machine that has them:
+
+    python -m plytos_api.imports.fidelity --labels ~/.plytos/bench/labels
+    python -m plytos_api.imports.fidelity --labels DIR --from-readings ~/.plytos/bench/readings/RUN
+    python -m plytos_api.imports.fidelity --labels DIR --ai --budget 14 --save-readings DIR
+
+The report on real resumes is counts only. --json and --save-readings hold their words:
+they're written readable by their owner only, and stay on that machine.
+
 With --ai, spend is counted in the same ledger as the resume bench
 (~/.plytos/bench/spend.json), so one budget covers both.
 """
@@ -16,6 +25,7 @@ import sys
 from pathlib import Path
 
 from plytos_api.imports.fidelity.layouts import layouts
+from plytos_api.imports.fidelity.real import load_labels, read_labels, write_private
 from plytos_api.imports.fidelity.run import read_all
 from plytos_api.imports.fidelity.score import Score, baseline, report
 from plytos_api.imports.fidelity.truth import CAREERS
@@ -40,9 +50,22 @@ def main(argv: list[str] | None = None) -> int:
         metavar="PATH",
         help="write the rules' scores on the Word and PDF layouts as the floor CI holds to",
     )
+    parser.add_argument("--labels", type=Path, metavar="DIR", help="score real resumes")
+    parser.add_argument("--sample", type=int, help="just this many labels (with --labels)")
+    parser.add_argument("--seed", type=int, default=7, help="for --sample")
+    parser.add_argument(
+        "--from-readings", type=Path, metavar="DIR", help="score readings saved here (no AI)"
+    )
+    parser.add_argument("--save-readings", type=Path, metavar="DIR", help="keep each reading")
     args = parser.parse_args(argv)
     if args.write_baseline and args.ai:
         parser.error("the baseline is the rules' reading: leave out --ai")
+    if args.labels is None and (args.from_readings or args.save_readings or args.sample):
+        parser.error("--from-readings, --save-readings and --sample go with --labels")
+    if args.labels is not None and (args.only or args.career or args.keep or args.write_baseline):
+        parser.error("--only, --career, --keep and --write-baseline are for the made-up bench")
+    if args.from_readings is not None and args.ai:
+        parser.error("--from-readings scores saved readings: leave out --ai")
 
     chosen = layouts()
     if args.only:
@@ -82,21 +105,37 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
 
-    scores = read_all(
-        careers,
-        chosen,
-        reader,
-        ledger=ledger,
-        workers=min(4, args.workers),
-        keep=args.keep,
-        heard=heard,
-    )
     title = "Import fidelity, " + ("Claude reading" if reader else "rules only")
-    text = report(scores, title=title)
+    if args.labels is not None:
+        labelled, bad = load_labels(args.labels, sample=args.sample, seed=args.seed)
+        print(f"{len(labelled)} labels ({bad} unreadable).", file=sys.stderr)
+        scores = read_labels(
+            labelled,
+            reader,
+            ledger=ledger,
+            workers=min(4, args.workers),
+            readings=args.from_readings,
+            save=args.save_readings,
+            heard=heard,
+        )
+        if args.from_readings is not None:
+            title = "Import fidelity, saved readings"
+        text = report(scores, title=title + ", real resumes", private=True)
+    else:
+        scores = read_all(
+            careers,
+            chosen,
+            reader,
+            ledger=ledger,
+            workers=min(4, args.workers),
+            keep=args.keep,
+            heard=heard,
+        )
+        text = report(scores, title=title)
     if args.out:
         args.out.write_text(text)
     if args.json:
-        args.json.write_text(json.dumps([s.model_dump() for s in scores], indent=1))
+        write_private(args.json, json.dumps([s.model_dump() for s in scores], indent=1))
     if args.write_baseline:
         args.write_baseline.write_text(json.dumps(baseline(scores), indent=1) + "\n")
     sys.stdout.write(text)

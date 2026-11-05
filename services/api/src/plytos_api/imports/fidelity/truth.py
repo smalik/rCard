@@ -1,10 +1,17 @@
-"""Made-up careers with every fact known, to write out as resumes and score readings
-against. Everyone here is fictional; employers are the usual stand-in names."""
+"""Careers with every fact known, to score readings against.
+
+The made-up ones here are written out as resumes (layouts.py). Everyone in them is
+fictional; employers are the usual stand-in names. The same models hold the labels
+written by hand for real resumes, which never leave the machine they're made on: a
+real resume may leave things out, so most fields can be empty.
+"""
 
 # The accomplishments are written whole, the way a resume has them.
 # ruff: noqa: E501
 
 from __future__ import annotations
+
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -20,9 +27,12 @@ class Group(BaseModel):
 
 class Position(BaseModel):
     title: str
-    start: str  # YYYY-MM
-    end: str  # YYYY-MM or "present"
-    groups: list[Group]
+    # YYYY-MM, or YYYY when only the year is written; end may be "present".
+    start: str | None = None
+    end: str | None = None
+    # The client, for consulting work shown under the consultancy.
+    client: str | None = None
+    groups: list[Group] = Field(default_factory=list)
 
     @property
     def items(self) -> list[str]:
@@ -31,18 +41,19 @@ class Position(BaseModel):
 
 class Employment(BaseModel):
     employer: str
-    location: str
+    location: str | None = None
+    volunteer: bool = False
     # Newest title first, as resumes list them.
     positions: list[Position]
 
     @property
-    def start(self) -> str:
-        return min(p.start for p in self.positions)
+    def start(self) -> str | None:
+        return min((p.start for p in self.positions if p.start), default=None)
 
     @property
-    def end(self) -> str:
-        ends = [p.end for p in self.positions]
-        return PRESENT if PRESENT in ends else max(ends)
+    def end(self) -> str | None:
+        ends = [p.end for p in self.positions if p.end]
+        return PRESENT if PRESENT in ends else max(ends, default=None)
 
 
 class Highlight(BaseModel):
@@ -58,15 +69,15 @@ class SkillGroup(BaseModel):
 
 class School(BaseModel):
     school: str
-    degree: str
-    field: str
-    year: str
+    degree: str = ""
+    field: str = ""
+    year: str | None = None
 
 
 class Award(BaseModel):
     name: str
-    issuer: str
-    year: str
+    issuer: str | None = None
+    year: str | None = None
 
 
 class Talk(BaseModel):
@@ -74,20 +85,40 @@ class Talk(BaseModel):
     text: str
 
 
+class Other(BaseModel):
+    """Anything else with a card of its own: a credential, a project, an activity."""
+
+    kind: Literal["credential", "project", "activity"]
+    text: str
+    year: str | None = None
+
+
 class Career(BaseModel):
     key: str
-    name: str
-    email: str
-    phone: str
-    location: str
-    summary: str
+    name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    location: str | None = None
+    summary: str | None = None
     highlights: list[Highlight] = Field(default_factory=list)
     # Newest first.
-    employments: list[Employment]
+    employments: list[Employment] = Field(default_factory=list)
     skills: list[SkillGroup] = Field(default_factory=list)
     education: list[School] = Field(default_factory=list)
     awards: list[Award] = Field(default_factory=list)
     talks: list[Talk] = Field(default_factory=list)
+    other: list[Other] = Field(default_factory=list)
+    # A label for a real resume: the file it describes, and where the right answer
+    # was a judgment call.
+    source: str | None = None
+    notes: str | None = None
+    # When every employer is written as a stand-in ("Company Name"), which jobs were
+    # at the same employer can't be known: titles are then scored without them.
+    anonymous_employers: bool = False
+    # What the label leaves out: cards of these kinds, and cards holding these words,
+    # are neither scored nor counted as invented.
+    unscored_kinds: list[str] = Field(default_factory=list)
+    unscored: list[str] = Field(default_factory=list)
 
 
 MORGAN = Career(

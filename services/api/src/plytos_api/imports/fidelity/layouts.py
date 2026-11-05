@@ -159,7 +159,9 @@ def layouts(*, with_word_pdfs: bool | None = None) -> list[Layout]:
 # -- dates -------------------------------------------------------------------------
 
 
-def show_date(value: str, style: str) -> str:
+def show_date(value: str | None, style: str) -> str:
+    if value is None:
+        return ""
     if value == PRESENT:
         return "Present"
     year, _, month = value.partition("-")
@@ -170,12 +172,12 @@ def show_date(value: str, style: str) -> str:
     return f"{MONTHS[int(month) - 1]} {year}"
 
 
-def span(start: str, end: str, style: str) -> str:
+def span(start: str | None, end: str | None, style: str) -> str:
     return f"{show_date(start, style)} – {show_date(end, style)}"
 
 
 def contact_line(c: Career) -> str:
-    return f"{c.location} | {c.phone} | {c.email}"
+    return " | ".join(part for part in (c.location, c.phone, c.email) if part)
 
 
 # -- what a resume says, in order --------------------------------------------------
@@ -236,14 +238,16 @@ def _sections(c: Career, s: Style) -> dict[str, list[Line]]:
         ("text", f"{e.degree} {e.field}, {e.school}, {e.year}", None) for e in c.education
     ]
     summary: list[Line] = (
-        [("heading", "SUMMARY", None), ("text", c.summary, None)] if s.summary == "section" else []
+        [("heading", "SUMMARY", None), ("text", c.summary, None)]
+        if s.summary == "section" and c.summary
+        else []
     )
     highlights: list[Line] = []
     if s.highlights and c.highlights:
         highlights = [("heading", "SELECTED ACHIEVEMENTS", None)]
         highlights += [("bullet", h.text, None) for h in c.highlights]
     experience: list[Line] = [("heading", "EXPERIENCE", None)]
-    if s.summary == "in_experience":
+    if s.summary == "in_experience" and c.summary:
         experience.append(("text", c.summary, None))
     for e in c.employments:
         experience += list(_job_lines(e, s))
@@ -401,7 +405,7 @@ def write_pdf(c: Career, s: Style) -> bytes:
         pdf.cell(0, 4, _pdf_text(f"{c.name} | {contact_line(c)}"))
     pdf.set_font("Helvetica", "B", 16)
     pdf.set_xy(12, 12)
-    pdf.cell(0, 8, _pdf_text(c.name))
+    pdf.cell(0, 8, _pdf_text(c.name or ""))
     parts = _sections(c, s)
     size = 9.0 if s.sidebar else (11.0 if s.wrap else 10.0)
     if s.sidebar:
