@@ -49,6 +49,12 @@ def rules(result: ImportResult) -> set[str]:
         ("Summer 2020 – Fall 2020", "2020-06", "2020-09", False, "Season YYYY"),
         ("Aug '19 — Dec '21", "2019-08", "2021-12", False, "Mon 'YY"),
         ("2019/04 - 2020/11", "2019-04", "2020-11", False, "YYYY/MM"),
+        # Files converted from PDF that lost the dash between two dates.
+        ("Jan 2018  Dec 2020", "2018-01", "2020-12", False, "Mon YYYY"),
+        ("1/2018  12/2020", "2018-01", "2020-12", False, "M/YYYY"),
+        ("Jan 2018  Present", "2018-01", None, True, "Mon YYYY"),
+        ("Sales Manager 20182020", "2018", "2020", False, "YYYY"),
+        ("Fabrikam 2019/---", "2019", None, True, "YYYY"),
     ],
 )
 def test_date_ranges_in_many_formats(
@@ -60,6 +66,12 @@ def test_date_ranges_in_many_formats(
     assert (found.end.iso() if found.end else None) == end
     assert found.current is current
     assert found.start_format == fmt
+
+
+def test_two_dates_with_only_a_gap_are_a_range_only_in_order() -> None:
+    found = find_range("Lakeshore College 2015  2012")
+    assert found is not None and found.separator is None
+    assert found.start is not None and found.start.iso() == "2012"
 
 
 def test_strip_range_leaves_the_rest_of_the_line() -> None:
