@@ -926,21 +926,40 @@ def _roles(
             role.organization = role.organization or parent.organization
             # Client work sits in the employment of the agency job it was done in.
             role.employment_ref = role.employment_key = parent.employment_ref
-    return _fold_subheadings(roles, blocks)
+    employers = {e.ref: set(e.header_blocks) for e in employments}
+    return _fold_subheadings(roles, blocks, employers)
 
 
-def _fold_subheadings(roles: list[Role], blocks: dict[int, Block]) -> list[Role]:
+def _fold_subheadings(
+    roles: list[Role], blocks: dict[int, Block], shared: dict[str, set[int]]
+) -> list[Role]:
     """A short undated line inside a dated title, read as another title of the same
     employment ("Planning & Process Improvement" over some bullets), is a workstream
     of the title above it: its bullets stay with that title, under its name. A title
-    ends on a word like Manager or Lead; a workstream doesn't."""
+    ends on a word like Manager or Lead; a workstream doesn't, unless it's set apart
+    from the title above it, in bold where the title isn't."""
     parents = {r.parent_ref for r in roles if r.parent_ref}
     kept: list[Role] = []
     above: dict[str, Role] = {}  # the last title kept in each employment
+
+    def own(role: Role) -> list[int]:
+        """A role's own header lines, without its employer's."""
+        theirs = shared.get(role.employment_ref or "", set())
+        return [i for i in role.header_blocks if i not in theirs and i in blocks]
+
     for role in roles:
         home = above.get(role.employment_ref or "")
-        line = role.header_blocks[0] if len(role.header_blocks) == 1 else None
+        mine = own(role)
+        line = mine[0] if len(mine) == 1 else None
         words = (role.title or "").split()
+        titled = bool(words) and words[-1].strip(",.():").lower() in TITLE_WORDS
+        home_lines = own(home) if home is not None else []
+        set_apart = (
+            line is not None
+            and blocks[line].bold
+            and bool(home_lines)
+            and not any(blocks[i].bold for i in home_lines)
+        )
         if (
             home is not None
             and line is not None
@@ -953,7 +972,7 @@ def _fold_subheadings(roles: list[Role], blocks: dict[int, Block]) -> list[Role]
             and role.title is not None
             and _norm(blocks[line].text) == _norm(role.title)
             and _names_a_group(blocks[line])
-            and words[-1].strip(",.():").lower() not in TITLE_WORDS
+            and (not titled or set_apart)
             and role.organization in (None, home.organization)
         ):
             label = _norm(blocks[line].text).rstrip(":")
