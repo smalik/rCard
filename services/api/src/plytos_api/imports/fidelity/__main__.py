@@ -10,6 +10,7 @@ Real resumes, against labels written for them (real.py), on the machine that has
     python -m plytos_api.imports.fidelity --labels DIR --from-readings ~/.plytos/bench/readings/RUN
     python -m plytos_api.imports.fidelity --labels DIR --ai --budget 14 --save-readings DIR
     python -m plytos_api.imports.fidelity --labels DIR --ai --budget 14 --tape DIR
+    python -m plytos_api.imports.fidelity --labels DIR --as-layout word-classic word-sidebar
 
 The report on real resumes is counts only. --json and --save-readings hold their words:
 they're written readable by their owner only, and stay on that machine.
@@ -59,6 +60,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--save-readings", type=Path, metavar="DIR", help="keep each reading")
     parser.add_argument(
+        "--as-layout",
+        nargs="+",
+        metavar="LAYOUT",
+        help="read each label written out in these layouts, not its own file (with --labels)",
+    )
+    parser.add_argument(
         "--tape",
         type=Path,
         metavar="DIR",
@@ -67,8 +74,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.write_baseline and args.ai:
         parser.error("the baseline is the rules' reading: leave out --ai")
-    if args.labels is None and (args.from_readings or args.save_readings or args.sample):
-        parser.error("--from-readings, --save-readings and --sample go with --labels")
+    if args.labels is None and (
+        args.from_readings or args.save_readings or args.sample or args.as_layout
+    ):
+        parser.error("--from-readings, --save-readings, --sample and --as-layout go with --labels")
     if args.labels is not None and (args.only or args.career or args.keep or args.write_baseline):
         parser.error("--only, --career, --keep and --write-baseline are for the made-up bench")
     if args.from_readings is not None and args.ai:
@@ -122,15 +131,22 @@ def main(argv: list[str] | None = None) -> int:
     if args.labels is not None:
         labelled, bad = load_labels(args.labels, sample=args.sample, seed=args.seed)
         print(f"{len(labelled)} labels ({bad} unreadable).", file=sys.stderr)
-        scores = read_labels(
-            labelled,
-            reader,
-            ledger=ledger,
-            workers=min(4, args.workers),
-            readings=args.from_readings,
-            save=args.save_readings,
-            heard=heard,
-        )
+        known = {lay.name: lay for lay in layouts()}
+        unknown = set(args.as_layout or []) - set(known)
+        if unknown:
+            parser.error(f"unknown layouts: {', '.join(sorted(unknown))}")
+        scores: list[Score] = []
+        for layout in [known[n] for n in args.as_layout] if args.as_layout else [None]:
+            scores += read_labels(
+                labelled,
+                reader,
+                ledger=ledger,
+                workers=min(4, args.workers),
+                readings=args.from_readings,
+                save=args.save_readings,
+                heard=heard,
+                layout=layout,
+            )
         if args.from_readings is not None:
             title = "Import fidelity, saved readings"
         text = report(scores, title=title + ", real resumes", private=True)

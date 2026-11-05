@@ -19,6 +19,7 @@ from pathlib import Path
 
 from plytos_api.imports.ai import ResumeReader
 from plytos_api.imports.bench import Ledger
+from plytos_api.imports.fidelity.layouts import Layout
 from plytos_api.imports.fidelity.run import TODAY
 from plytos_api.imports.fidelity.score import Score, score
 from plytos_api.imports.fidelity.truth import Career
@@ -66,35 +67,45 @@ def read_label(
     *,
     readings: Path | None = None,
     save: Path | None = None,
+    layout: Layout | None = None,
 ) -> Score | None:
     """Reads the labelled file and scores the reading. With `readings`, scores the
     reading saved there instead (no Claude calls), or nothing when there isn't one.
-    With `save`, keeps the reading there to score again later."""
+    With `save`, keeps the reading there to score again later. With `layout`, reads
+    the label written out in that layout instead of its file: a real person's words
+    in a Word file, say, where there are no real Word files to read."""
     source = Path(career.source or "")
-    group = source.parent.name or "unknown"
+    group = layout.name if layout is not None else source.parent.name or "unknown"
+    key = career.key if layout is None else f"{career.key}-{layout.name}"
     if readings is not None:
-        saved = readings / f"{career.key}.json"
+        saved = readings / f"{key}.json"
         if not saved.exists():
             return None
         result = ImportResult.model_validate_json(saved.read_text())
-        return score(career, None, result, kind=_kind(result), name=group)
-    try:
-        data = source.read_bytes()
-    except OSError as exc:
-        return score(career, None, None, failed=type(exc).__name__, kind="?", name=group)
-    if file_id(data) != career.key:
-        return score(career, None, None, failed="LabelIsForAnotherFile", kind="?", name=group)
+        return score(career, layout, result, kind=_kind(result), name=group)
+    if layout is not None:
+        try:
+            data, filename = layout.render(career), f"resume{layout.suffix}"
+        except Exception:  # a label the layout can't write out isn't scored
+            return None
+    else:
+        try:
+            data, filename = source.read_bytes(), source.name
+        except OSError as exc:
+            return score(career, None, None, failed=type(exc).__name__, kind="?", name=group)
+        if file_id(data) != career.key:
+            return score(career, None, None, failed="LabelIsForAnotherFile", kind="?", name=group)
     started = time.monotonic()
     try:
-        result = import_resume(data, source.name, today=TODAY, reader=reader)
+        result = import_resume(data, filename, today=TODAY, reader=reader)
     except Exception as exc:
-        out = score(career, None, None, failed=type(exc).__name__, kind="?", name=group)
+        out = score(career, layout, None, failed=type(exc).__name__, kind="?", name=group)
         calls: list[AiCall] = getattr(exc, "ai_calls", [])
         out.cost_usd = sum(c.cost_usd or 0.0 for c in calls)
     else:
         if save is not None:
-            write_private(save / f"{career.key}.json", result.model_dump_json())
-        out = score(career, None, result, kind=_kind(result), name=group)
+            write_private(save / f"{key}.json", result.model_dump_json())
+        out = score(career, layout, result, kind=_kind(result), name=group)
     out.seconds = round(time.monotonic() - started, 2)
     return out
 
@@ -108,6 +119,7 @@ def read_labels(
     readings: Path | None = None,
     save: Path | None = None,
     heard: Callable[[Score], None] | None = None,
+    layout: Layout | None = None,
 ) -> list[Score]:
     """Every labelled resume, in the labels' order. With a ledger, stops starting new
     ones once the budget is spent."""
@@ -116,7 +128,7 @@ def read_labels(
     def one(career: Career) -> None:
         if ledger is not None and not ledger.may_start():
             return
-        result = read_label(career, reader, readings=readings, save=save)
+        result = read_label(career, reader, readings=readings, save=save, layout=layout)
         if result is None:
             return
         if ledger is not None:

@@ -190,3 +190,15 @@ def test_the_city_and_state_are_kept_from_an_address_line() -> None:
     assert where("123 Main St Springfield IL 62701") == "Springfield IL 62701"
     assert where("Springfield , IL") == "Springfield, IL"
     assert where("12 Oak Way Apt 4 Boston MA 02118") == "Boston MA 02118"
+
+
+def test_a_label_can_be_read_written_out_as_a_word_file() -> None:
+    from plytos_api.imports.fidelity.layouts import WORD
+    from plytos_api.imports.fidelity.real import read_label
+
+    # No file of its own: the layout writes the label out.
+    career = MORGAN.model_copy(update={"key": "0" * 16, "source": "/nowhere/resume.pdf"})
+    scored = read_label(career, layout=WORD[0])
+    assert scored is not None and scored.failed is None
+    assert scored.layout == WORD[0].name and scored.kind == "docx"
+    assert scored.fidelity == 1.0
