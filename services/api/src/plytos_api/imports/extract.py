@@ -34,6 +34,7 @@ from plytos_api.imports.model import (
     Picture,
     PictureImage,
 )
+from plytos_api.imports.segment import HEADINGS, normalize_heading
 
 MAX_BYTES = 5 * 1024 * 1024
 MAX_PAGES = 12
@@ -131,9 +132,48 @@ def extract(data: bytes, filename: str) -> ExtractedDocument:
     return _read_text(data.decode("utf-8"), filename)
 
 
+# Fullwidth letters and punctuation, as their plain forms.
+_FULLWIDTH = {code: code - 0xFEE0 for code in range(0xFF01, 0xFF5F)}
+
+
 def clean(text: str) -> str:
-    text = text.replace(" ", " ").replace("​", "").replace("﻿", "")
-    return text.replace("‑", "-").strip(" \r")
+    text = _unmangle(text.replace(" ", " ").replace("​", "").replace("﻿", ""))
+    return text.translate(_FULLWIDTH).replace("‑", "-").strip(" \r")
+
+
+# A character's UTF-8 bytes read one by one as Windows-1252: a lead byte, then one to
+# three continuation bytes (an en dash comes out as three odd letters).
+_CONTINUATION = (
+    "\u0080-\u00bf\u20ac\u201a\u0192\u201e\u2026\u2020\u2021\u02c6"
+    "\u2030\u0160\u2039\u0152\u017d\u2018\u2019\u201c\u201d\u2022\u2013"
+    "\u2014\u02dc\u2122\u0161\u203a\u0153\u017e\u0178"
+)
+_MANGLED = re.compile(f"[\u00c2-\u00f4][{_CONTINUATION}]{{1,3}}")
+
+
+def _unmangle(text: str) -> str:
+    """Puts back characters whose UTF-8 bytes were read as Windows-1252, as some PDF
+    makers write them. Only a run that decodes as UTF-8 is changed."""
+
+    def fix(match: re.Match[str]) -> str:
+        raw = bytearray()
+        for char in match.group(0):
+            try:
+                raw += char.encode("cp1252")
+            except UnicodeEncodeError:
+                if ord(char) > 0xFF:
+                    return match.group(0)
+                raw.append(ord(char))
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            # A character that lost a byte on the way. Standing alone between words,
+            # it was a separator (a wide dash or bar); inside a word, leave it be.
+            before = match.string[match.start() - 1 : match.start()]
+            after = match.string[match.end() : match.end() + 1]
+            return "-" if before in ("", " ") and after in ("", " ") else match.group(0)
+
+    return _MANGLED.sub(fix, text) if _MANGLED.search(text) else text
 
 
 def split_bullet(text: str) -> tuple[str, str | None]:
@@ -666,8 +706,11 @@ def _read_pdf(data: bytes, filename: str) -> ExtractedDocument:
             else:
                 regions = [words]
             tops: list[tuple[int, float]] = []  # (block, top) of each line on this page
+            marks = _bullet_marks(page)
             for region in regions:
                 lines = list(_pdf_lines(region))
+                for line in lines:
+                    line["marked"] = _marked(line, marks)
                 # The region's right margin: where the longest line of running text
                 # stops. Dates set against a tab stop can reach past it.
                 running = [
@@ -876,6 +919,25 @@ def _split_columns(words: list[dict[str, Any]], gutter: float) -> list[list[dict
     return [r for r in (above, left, right, below) if r]
 
 
+def _bullet_marks(page: Any) -> list[tuple[float, float, float]]:
+    """Bullets drawn rather than typed, as a browser prints a list: small dots and
+    squares, as (right edge, top, bottom)."""
+    marks: list[tuple[float, float, float]] = []
+    for shape in [*page.curves, *page.rects]:
+        width, height = float(shape["width"]), float(shape["height"])
+        if 1.5 <= width <= 8 and 1.5 <= height <= 8 and abs(width - height) <= 1.5:
+            marks.append((float(shape["x1"]), float(shape["top"]), float(shape["bottom"])))
+    return marks
+
+
+def _marked(line: dict[str, Any], marks: list[tuple[float, float, float]]) -> bool:
+    """Whether a drawn bullet sits just left of a line, level with its first words."""
+    return any(
+        0 <= line["x0"] - right <= 20 and top >= line["top"] - 2 and bottom <= line["bottom"] + 2
+        for right, top, bottom in marks
+    )
+
+
 def _pdf_lines(words: list[dict[str, Any]]) -> Iterator[dict[str, Any]]:
     for line in _cluster_lines(words):
         parts: list[str] = []
@@ -950,8 +1012,20 @@ def _add_pdf_line(
         return
     raw_fonts = [str(w["fontname"]) for w in words]
     stripped, glyph = split_bullet(text)
+    drawn = glyph is None and bool(line.get("marked"))
+    if drawn:
+        stripped, glyph = text, "•"
     prev = blocks[-1] if blocks else None
-    if glyph is None and prev is not None and prev.page == page and prev.index in bullet_x:
+    # A section heading never carries a line on, nor is carried on by one, whatever its
+    # type: a resume printed in one plain font sets its headings like any other line.
+    heading = _is_heading(text)
+    if (
+        glyph is None
+        and not heading
+        and prev is not None
+        and prev.page == page
+        and prev.index in bullet_x
+    ):
         text_x, bottom = bullet_x[prev.index]
         size = float(words[0]["size"])
         if abs(text_x - line["x0"]) <= 3 and line["top"] - bottom < size * 1.2:
@@ -964,6 +1038,8 @@ def _add_pdf_line(
         and prev is not None
         and prev.page == page
         and prev.index in flow
+        and not heading
+        and not _is_heading(prev.text)
         and not prev.text.rstrip().endswith((".", "!", "?"))
         and not _ends_on_date(prev.text)
         and _wraps_from(flow[prev.index], line, text, right)
@@ -984,7 +1060,8 @@ def _add_pdf_line(
         page=page,
     )
     if glyph is not None:
-        text_x = float(words[1]["x0"]) if len(words) > 1 else line["x0"]
+        typed = not drawn and len(words) > 1
+        text_x = float(words[1]["x0"]) if typed else line["x0"]
         bullet_x[block.index] = (text_x, line["bottom"])
     else:
         flow[block.index] = _Flow(
@@ -996,6 +1073,10 @@ def _add_pdf_line(
             spaced="\t" in line["text"],
         )
     blocks.append(block)
+
+
+def _is_heading(text: str) -> bool:
+    return normalize_heading(text.strip().rstrip(":")) in HEADINGS
 
 
 def _ends_on_date(text: str) -> bool:

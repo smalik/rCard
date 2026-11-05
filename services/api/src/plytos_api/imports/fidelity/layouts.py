@@ -36,7 +36,8 @@ Kind = Literal["docx", "pdf", "scan", "pdf-from-word"]
 
 @dataclass(frozen=True)
 class Style:
-    header: Literal["employer_first", "title_first", "one_line"] = "employer_first"
+    # web_print: each title on its own line, then "dates employer - place".
+    header: Literal["employer_first", "title_first", "one_line", "web_print"] = "employer_first"
     dates: Literal["mon", "num", "year"] = "mon"
     bullets: Literal["word", "typed", "paragraph"] = "word"
     contact: Literal["body", "page_header"] = "body"
@@ -46,6 +47,9 @@ class Style:
     sidebar: bool = False
     # PDF only: a narrow column and a larger font, so bullets wrap onto more lines.
     wrap: bool = False
+    # PDF only: a web page printed without its stylesheet, as a browser prints it: one
+    # plain font throughout, headings set like any other line, bullets drawn as dots.
+    plain: bool = False
 
 
 @dataclass(frozen=True)
@@ -134,6 +138,12 @@ PDF: list[Layout] = [
     Layout(
         "pdf-year-dates", "pdf", Style(dates="year", talks="by_year"), "Years only, talks by year"
     ),
+    Layout(
+        "pdf-web-print",
+        "pdf",
+        Style(header="web_print", plain=True),
+        "A web page printed unstyled: one plain font, drawn bullets, plain headings",
+    ),
 ]
 
 SCANS: list[Layout] = [
@@ -188,6 +198,13 @@ Line = tuple[str, str, str | None]
 
 
 def _job_lines(e: Employment, s: Style) -> Iterator[Line]:
+    if s.header == "web_print":
+        for p in e.positions:
+            yield ("title", p.title, None)
+            when = f"{show_date(p.start, s.dates)} to {show_date(p.end, s.dates)}"
+            yield ("text", f"{when} {e.employer} - {e.location}", None)
+            yield from _groups(p, s)
+        return
     if s.header == "employer_first":
         yield ("employer", f"{e.employer}, {e.location}", span(e.start, e.end, s.dates))
         for p in e.positions:
@@ -234,9 +251,13 @@ def _sections(c: Career, s: Style) -> dict[str, list[Line]]:
     skills: list[Line] = [("heading", "SKILLS", None)]
     skills += [("text", f"{g.category}: {', '.join(g.items)}", None) for g in c.skills]
     education: list[Line] = [("heading", "EDUCATION", None)]
-    education += [
-        ("text", f"{e.degree} {e.field}, {e.school}, {e.year}", None) for e in c.education
-    ]
+    for school in c.education:
+        if s.header == "web_print":
+            education += [("text", f"{school.degree} : {school.field} , {school.year}", None)]
+            education += [("text", school.school, None)]
+        else:
+            line = f"{school.degree} {school.field}, {school.school}, {school.year}"
+            education += [("text", line, None)]
     summary: list[Line] = (
         [("heading", "SUMMARY", None), ("text", c.summary, None)]
         if s.summary == "section" and c.summary
@@ -269,6 +290,9 @@ def _sections(c: Career, s: Style) -> dict[str, list[Line]]:
         main = summary + highlights + experience + awards + talks
     else:
         main = contact + summary + highlights + experience + skills + education + awards + talks
+    if s.plain:
+        # Headings in the words' own case, like any other line.
+        main = [(k, t.title() if k == "heading" else t, r) for k, t, r in main]
     return {"side": side, "main": main}
 
 
@@ -338,21 +362,40 @@ def _pdf_text(text: str) -> str:
 class _Flow:
     """Writes lines down one column of a PDF page."""
 
-    def __init__(self, pdf: Any, x: float, width: float, size: float, top: float) -> None:
+    def __init__(
+        self, pdf: Any, x: float, width: float, size: float, top: float, *, plain: bool = False
+    ) -> None:
         self.pdf, self.x, self.width, self.size = pdf, x, width, size
         self.y = top
-        self.h = size * 0.5
+        self.plain = plain
+        self.h = size * (0.37 if plain else 0.5)
 
     def write(self, lines: list[Line]) -> None:
         pdf = self.pdf
         for kind, text, right in lines:
             pdf.set_xy(self.x, self.y)
             bold = kind in ("heading", "employer", "label")
-            pdf.set_font("Helvetica", "B" if bold else ("I" if kind == "title" else ""), self.size)
+            if self.plain:
+                pdf.set_font("Times", "", self.size)
+            else:
+                style = "B" if bold else ("I" if kind == "title" else "")
+                pdf.set_font("Helvetica", style, self.size)
             if kind == "heading":
                 pdf.set_y(self.y + self.h * 0.6)
                 pdf.set_x(self.x)
-            if kind == "bullet":
+            if kind == "bullet" and self.plain:
+                # A dot drawn the way a browser draws a list's bullet: not a character.
+                pdf.ellipse(self.x + 4.9, self.y + self.h * 0.4, 1.06, 1.06, style="F")
+                pdf.set_x(self.x + 8.5)
+                pdf.multi_cell(
+                    self.width - 8.5,
+                    self.h,
+                    _pdf_text(text),
+                    align="L",
+                    new_x="LMARGIN",
+                    new_y="NEXT",
+                )
+            elif kind == "bullet":
                 pdf.cell(4, self.h, chr(149))
                 pdf.set_x(self.x + 4)
                 pdf.multi_cell(
@@ -403,17 +446,20 @@ def write_pdf(c: Career, s: Style) -> bytes:
         pdf.set_font("Helvetica", "", 8)
         pdf.set_xy(12, 5)
         pdf.cell(0, 4, _pdf_text(f"{c.name} | {contact_line(c)}"))
-    pdf.set_font("Helvetica", "B", 16)
+    if s.plain:
+        pdf.set_font("Times", "", 11.4)
+    else:
+        pdf.set_font("Helvetica", "B", 16)
     pdf.set_xy(12, 12)
     pdf.cell(0, 8, _pdf_text(c.name or ""))
     parts = _sections(c, s)
-    size = 9.0 if s.sidebar else (11.0 if s.wrap else 10.0)
+    size = 11.4 if s.plain else 9.0 if s.sidebar else (11.0 if s.wrap else 10.0)
     if s.sidebar:
         _Flow(pdf, 12, 52, size, 24).write(parts["side"])
         pdf.page = 1
         _Flow(pdf, 72, 132, size, 24).write(parts["main"])
     else:
-        _Flow(pdf, 12, 100 if s.wrap else 190, size, 24).write(parts["main"])
+        _Flow(pdf, 12, 100 if s.wrap else 190, size, 24, plain=s.plain).write(parts["main"])
     return bytes(pdf.output())
 
 

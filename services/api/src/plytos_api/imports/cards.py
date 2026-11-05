@@ -20,6 +20,7 @@ from plytos_api.imports.model import (
 from plytos_api.imports.segment import _DEGREE, _SCHOOL, sentences
 
 _HEADLINE_MAX = 200
+_BODY_MAX = 5000
 
 
 def propose_cards(
@@ -200,6 +201,8 @@ def propose_cards(
     for entry in parsed.activities:
         add("activity", _dated({"name": entry.text}, entry), entry.text, entry.blocks, None)
         cards[-1].content.framing.body = "\n".join(entry.details)
+    for card in cards:
+        card.content.framing.body = _fit(card.content.framing.body)
     return cards
 
 
@@ -257,7 +260,15 @@ def _framing(text: str) -> tuple[str, str]:
     if len(text) <= _HEADLINE_MAX:
         return text, ""
     cut = text[: _HEADLINE_MAX - 1].rsplit(" ", 1)[0]
-    return cut + "…", text
+    return cut + "…", _fit(text)
+
+
+def _fit(body: str) -> str:
+    """A body no longer than a card holds. Only a misread runs this long (a whole job's
+    lines read as one), and its lines are still there to be read again."""
+    if len(body) <= _BODY_MAX:
+        return body
+    return body[: _BODY_MAX - 1].rsplit(" ", 1)[0] + "…"
 
 
 def _employment_facts(employment: Employment) -> dict[str, FactValue]:
@@ -376,16 +387,30 @@ def _dated(facts: dict[str, FactValue], entry: Entry) -> dict[str, FactValue]:
     return facts
 
 
+_DEGREE_WORD = re.compile(
+    r"\b(?:Diploma|Certificate|GED|Bachelor|Master|Associate|Doctor|Doctorate)\b", re.I
+)
+# A date at either end of a piece of an education line: "May 2015 Lakeshore College".
+_MONTH = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?"
+_DATE_EDGE = re.compile(
+    rf"^(?:{_MONTH}\s+)?(?:19|20)\d{{2}}\b[\s:,-]*|[\s:,-]*\b(?:{_MONTH}\s+)?(?:19|20)\d{{2}}$",
+    re.I,
+)
+
+
 def _education_facts(entry: Entry) -> dict[str, FactValue]:
     facts: dict[str, FactValue] = {}
     pieces = [
         p.strip() for p in re.split(r",|\t|\s+[|–—-]\s+", " , ".join([entry.text, *entry.details]))
     ]
     for piece in pieces:
+        piece = _DATE_EDGE.sub("", piece).strip()
         if not piece:
             continue
-        if "institution" not in facts and _SCHOOL.search(piece):
-            facts["institution"] = piece
-        elif "degree" not in facts and _DEGREE.search(piece):
+        # "High School Diploma" is a degree; "Lincoln High School" is a school.
+        degree = _DEGREE.search(piece) and (not _SCHOOL.search(piece) or _DEGREE_WORD.search(piece))
+        if "degree" not in facts and degree:
             facts["degree"] = piece
+        elif "institution" not in facts and _SCHOOL.search(piece):
+            facts["institution"] = piece
     return _dated(facts, entry)

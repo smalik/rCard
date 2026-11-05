@@ -19,6 +19,23 @@ from plytos_api.imports.model import (
 
 # Standard headings an applicant tracking system expects, by what they hold.
 HEADINGS: dict[str, SectionKind] = {
+    # Headings a resume builder sets; a page printed without styling has nothing else
+    # to tell them from any other line.
+    "executive profile": "summary",
+    "career overview": "summary",
+    "career focus": "summary",
+    "core qualifications": "skills",
+    "skill highlights": "skills",
+    "summary of skills": "skills",
+    "computer skills": "skills",
+    "core strengths": "skills",
+    "core accomplishments": "highlights",
+    "selected achievements": "highlights",
+    "activities and honors": "awards",
+    "educational background": "education",
+    "military experience": "experience",
+    "personal information": "contact",
+    "additional information": "other",
     "contact": "contact",
     "contact information": "contact",
     "contact info": "contact",
@@ -558,6 +575,19 @@ def _carries_on(group: _Group, block: Block) -> bool:
     return text[0].islower() and not lines[-1].text.rstrip().endswith((".", "!", "?", ":"))
 
 
+def _opens_description(group: _Group, block: Block) -> bool:
+    """A short sentence under a dated title and employer, before its bullets: what the
+    job was ("Ran a store of 40 people."), not more of its heading."""
+    text = block.text.strip()
+    return (
+        group.dated()
+        and not group.bullets
+        and len(text.split()) >= 4
+        and text.endswith((".", "!"))
+        and find_range(text) is None
+    )
+
+
 def _pieces(text: str) -> list[str]:
     return [p for p in (_tidy(p) for p in _SPLIT_PIECES.split(text)) if p]
 
@@ -583,7 +613,11 @@ def parse_roles(blocks: list[Block], section: SectionKind, *, start: int = 0) ->
                 groups.append(current)
             current.bullets.append(block)
             continue
-        if current is not None and (_is_description(block) or _carries_on(current, block)):
+        if current is not None and (
+            _is_description(block)
+            or _carries_on(current, block)
+            or _opens_description(current, block)
+        ):
             (current.bullets if current.bullets else current.description).append(block)
             continue
         line_range = find_range(block.text)

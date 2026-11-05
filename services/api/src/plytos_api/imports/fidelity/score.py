@@ -580,6 +580,16 @@ def _score_item(
     """Scores one accomplishment; returns the card it begins on, if found."""
     short = _short(item)
     holders = reading.holding(item)
+    # Kept as what its own title was, above the accomplishments: the words are where
+    # the person would look for them.
+    if (
+        holders
+        and holders[0].kind in ("position", "engagement")
+        and reading.position_of(holders[0]) is position
+    ):
+        out.items.add(True)
+        miss("accomplishment kept as its title's description", f"“{short}” on its title")
+        return holders[0]
     if holders:
         card = holders[0]
         cards = [card]
