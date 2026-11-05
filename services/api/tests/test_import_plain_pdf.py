@@ -134,6 +134,46 @@ def test_a_school_without_college_in_its_name_is_found_before_its_city() -> None
     assert card.content.facts["degree"] == "Bachelors : Biology"
 
 
+def test_a_dated_school_under_an_undated_one_is_a_school_of_its_own() -> None:
+    result = read("Pat Lee\nEducation\nState University\nLincoln High School, 2008\n")
+    schools = [c.content.facts for c in result.cards if c.kind == "education"]
+    assert schools == [
+        {"institution": "State University"},
+        {"institution": "Lincoln High School", "date": "2008"},
+    ]
+
+
+def test_a_dated_degree_under_its_school_is_the_same_school() -> None:
+    result = read("Pat Lee\nEducation\nState University\nB.S., 2015\n")
+    [card] = [c for c in result.cards if c.kind == "education"]
+    assert card.content.facts["institution"] == "State University"
+    assert card.content.facts["date"] == "2015"
+
+
+def test_the_year_under_a_school_is_still_its_year() -> None:
+    result = read("Pat Lee\nEducation\nBachelor of Science, State University\nMay 2015\n")
+    [card] = [c for c in result.cards if c.kind == "education"]
+    assert card.content.facts["date"] == "2015-05"
+
+
+def test_what_was_studied_before_the_school_is_kept_without_a_degree_named() -> None:
+    result = read("Pat Lee\nEducation\nAccounting, Riverside Community College, 2012\n")
+    [card] = [c for c in result.cards if c.kind == "education"]
+    assert card.content.facts["degree"] == "Accounting"
+    assert card.content.facts["institution"] == "Riverside Community College"
+
+
+def test_a_place_or_a_grade_is_not_taken_for_what_was_studied() -> None:
+    for line in (
+        "State University, Springfield, IL, 2012",
+        "GPA 3.8, State University, 2012",
+        "Minor in Economics, Accounting, State University",
+    ):
+        result = read(f"Pat Lee\nEducation\n{line}\n")
+        [card] = [c for c in result.cards if c.kind == "education"]
+        assert "degree" not in card.content.facts, line
+
+
 def test_accomplishments_with_a_colon_inside_a_job_stay_in_the_job() -> None:
     result = read(
         "Pat Lee\nExperience\nStore Manager\nMarch 2019 to Current Fabrikam Retail - Chicago, IL\n"

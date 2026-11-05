@@ -214,6 +214,16 @@ def _year_of(card: ProposedCard) -> str | None:
     return date[:4] if isinstance(date, str) else None
 
 
+_A_YEAR = re.compile(r"\b(?:19|20)\d{2}\b")
+
+
+def _year_written(written: str) -> str:
+    """The year a label's date stands for: "May 2014" is 2014, and "2010 - 2014"
+    (years at school) is the year it ended, the one a card keeps."""
+    years = _A_YEAR.findall(written)
+    return years[-1] if years else written[:4]
+
+
 def _dates_fit(card: ProposedCard, start: str | None, end: str | None) -> bool:
     """Whether a card's dates are the ones written, to the year."""
     if start is None and end is None:
@@ -821,7 +831,10 @@ def _score_others(
                         and norm(school.field) in degree
                     ),
                 ),
-                ("year misread", school.year is None or _year_of(card) == school.year[:4]),
+                (
+                    "year misread",
+                    school.year is None or _year_of(card) == _year_written(school.year),
+                ),
             )
             if not ok
         ]
@@ -839,7 +852,7 @@ def _score_others(
             card is not None
             and card.kind == "accomplishment"
             and "award" in card.content.facts
-            and (award.year is None or _year_of(card) == award.year[:4])
+            and (award.year is None or _year_of(card) == _year_written(award.year))
         )
         if not out.others.add(ok):
             miss(

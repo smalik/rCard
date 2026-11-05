@@ -1211,12 +1211,15 @@ def _continues(entry: Entry, text: str) -> bool:
     """A school line after a degree line (or the reverse) belongs to the same entry."""
     if entry.details:
         return False
+    # "May 2015" under its school, however much the line above names. ("Lincoln High
+    # School, 2008" names a school: it's dated, but it's a school of its own.)
+    names = _SCHOOL.search(text) or _DEGREE.search(text)
+    if find_range(text) is not None and len(text.split()) <= 4 and not names:
+        return True
     first_degree = bool(_DEGREE.search(entry.text))
     first_school = bool(_SCHOOL.search(entry.text))
     if first_degree and first_school:
         return False
-    return (
-        (first_degree and bool(_SCHOOL.search(text)) and not _DEGREE.search(text))
-        or (first_school and bool(_DEGREE.search(text)) and not _SCHOOL.search(text))
-        or (find_range(text) is not None and len(text.split()) <= 4)
+    return (first_degree and bool(_SCHOOL.search(text)) and not _DEGREE.search(text)) or (
+        first_school and bool(_DEGREE.search(text)) and not _SCHOOL.search(text)
     )

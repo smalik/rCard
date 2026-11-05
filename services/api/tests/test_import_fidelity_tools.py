@@ -100,6 +100,27 @@ def test_an_education_miss_says_what_was_misread() -> None:
     assert "education degree misread" not in kinds
 
 
+def test_a_school_year_written_as_a_month_or_span_is_scored_by_its_last_year() -> None:
+    for written in ("May 2015", "2011 - 2015", "Expected 2015"):
+        career = Career(
+            key="school",
+            employments=[job("Store Manager", "2019-03", "2021-01", "Grew sales 12%.")],
+            education=[School(school="Lakeshore College", degree="Bachelor", year=written)],
+        )
+        r = Cards()
+        work = r.add("employment", "Fabrikam", {"employer": "Company Name"})
+        title = r.add(
+            "position", "Store Manager", {"title": "Store Manager", "start": "2019-03"}, work
+        )
+        r.add("accomplishment", "Grew sales 12%.", None, title)
+        r.add(
+            "education",
+            "Bachelor, Lakeshore College",
+            {"degree": "Bachelor", "institution": "Lakeshore College", "date": "2015-05"},
+        )
+        assert not [k for k in score(career, None, r.result()).kinds if "education" in k], written
+
+
 def test_an_accomplishment_under_a_title_not_in_the_resume_says_so() -> None:
     store, assistant = (
         job("Store Manager", "2019-03", "2021-01", "Grew sales 12% in a year."),

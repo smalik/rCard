@@ -440,6 +440,15 @@ def _education_facts(entry: Entry) -> dict[str, FactValue]:
             facts["degree"] = piece
         elif "institution" not in facts and _SCHOOL.search(piece):
             facts["institution"] = piece
+    if "degree" not in facts and isinstance(facts.get("institution"), str):
+        # "Accounting, State University, 2015": what was studied, written before the
+        # school on its line without a degree's name. Only when it's the one piece
+        # there, and not a year or a grade.
+        head = [_DATE_EDGE.sub("", p).strip() for p in re.split(r",|\t|\s+[|–—-]\s+", entry.text)]
+        if facts["institution"] in head:
+            before = [p for p in head[: head.index(str(facts["institution"]))] if p]
+            if len(before) == 1 and not re.search(r"\d", before[0]):
+                facts["degree"] = before[0]
     if "institution" not in facts:
         # A school with no "College" in its name ("Penn State - State College, PA"):
         # the piece just before its city and state.
