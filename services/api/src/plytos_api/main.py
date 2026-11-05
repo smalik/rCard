@@ -79,7 +79,6 @@ from plytos_api.resumes.as_written import as_written
 from plytos_api.resumes.model import ResumeChange, ResumeContent, keep_wording
 from plytos_api.resumes.render import RenderedResume, describe, render
 from plytos_api.resumes.store import (
-    ResumeContact,
     ResumeDetail,
     ResumeNotFoundError,
     ResumeStore,
@@ -837,14 +836,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 i for i in imports(conn, user_id).summaries() if i.approved > 0 and i.id not in made
             ]
             return Resumes(resumes=listed, ready=ready)
-
-    @app.get("/v1/resumes/latest/contact")
-    def latest_contact(user_id: User) -> ResumeContact | None:
-        """The contact details at the top of the resume changed most recently,
-        for the contact card on Cards. Null when there's no resume yet."""
-        with db.as_user(user_id) as conn:
-            store, _ = resumes(conn, user_id)
-            return store.latest_contact()
 
     @app.post("/v1/resumes/as-written", status_code=status.HTTP_201_CREATED)
     def make_as_written(body: MakeAsWritten, user_id: User) -> ResumePage:

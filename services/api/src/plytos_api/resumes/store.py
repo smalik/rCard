@@ -33,7 +33,6 @@ from plytos_api.resumes.model import (
     RESUME_SCHEMA_VERSION,
     ResumeChange,
     ResumeContent,
-    ResumeHeader,
     apply,
     diff,
     still_to_take,
@@ -89,15 +88,6 @@ class ResumeDetail(ResumeSummary):
     versions: list[ResumeVersionView]
     # How many changes in the parent resume this one hasn't taken or passed on.
     parent_changes: int
-
-
-class ResumeContact(BaseModel):
-    """The contact details at the top of a resume, and the version they're from."""
-
-    resume_id: UUID
-    resume_name: str
-    base_version_id: UUID
-    header: ResumeHeader
 
 
 def resume_chain_hash(
@@ -295,42 +285,20 @@ class ResumeStore:
         ).fetchall()
         return [self._summary(r) for r in rows]
 
-    def latest_contact(self) -> ResumeContact | None:
-        """The top of the resume changed most recently, read in one query, for
-        the contact card. None when the person has no resume yet."""
-        row = self._conn.execute(
-            "select r.id, r.name_ciphertext, v.id, v.content_ciphertext"
-            " from plytos.resume r join plytos.resume_version v on v.id = r.head_version_id"
-            " where r.archived_at is null order by v.created_at desc limit 1"
-        ).fetchone()
-        if row is None:
-            return None
-        resume_id, version_id = row[0], row[2]
-        content = ResumeContent() if row[3] is None else self._decrypt_content(version_id, row[3])
-        return ResumeContact(
-            resume_id=resume_id,
-            resume_name=self._cipher.decrypt(bytes(row[1]), _name_aad(resume_id)).decode(),
-            base_version_id=version_id,
-            header=content.header,
-        )
-
     def detail(self, resume_id: UUID) -> ResumeDetail:
-        # One trip for the resume, its versions and their names.
-        with self._conn.pipeline():
-            found = self._conn.execute(
-                "select r.id, r.name_ciphertext, r.target_id, r.parent_id, r.import_id,"
-                " v.number, r.created_at, v.created_at, t.name_ciphertext"
-                " from plytos.resume r join plytos.resume_version v on v.id = r.head_version_id"
-                " left join plytos.target t on t.id = r.target_id"
-                " where r.id = %s and r.archived_at is null",
-                (resume_id,),
-            )
-            sent = self._send_versions(resume_id)
-        row = found.fetchone()
+        row = self._conn.execute(
+            "select r.id, r.name_ciphertext, r.target_id, r.parent_id, r.import_id,"
+            " v.number, r.created_at, v.created_at, t.name_ciphertext"
+            " from plytos.resume r join plytos.resume_version v on v.id = r.head_version_id"
+            " left join plytos.target t on t.id = r.target_id"
+            " where r.id = %s and r.archived_at is null",
+            (resume_id,),
+        ).fetchone()
         if row is None:
             raise ResumeNotFoundError(str(resume_id))
         summary = self._summary(row)
-        versions, contents = self._version_views(resume_id, *sent)
+        # The versions come with their content, so the head's isn't asked again.
+        versions, contents = self._versions_and_contents(resume_id)
         head = versions[-1]
         content = contents.get(head.id, ResumeContent())
         parent_name = None
@@ -494,47 +462,38 @@ class ResumeStore:
         return version, self._content(version.id)
 
     def _versions(self, resume_id: UUID) -> list[ResumeVersionView]:
-        with self._conn.pipeline():
-            sent = self._send_versions(resume_id)
-        return self._version_views(resume_id, *sent)[0]
+        return self._versions_and_contents(resume_id)[0]
 
-    def _send_versions(self, resume_id: UUID) -> tuple[psycopg.Cursor[Any], psycopg.Cursor[Any]]:
-        """Sends the queries for a resume's versions and their names, so they
-        can share a trip; `_version_views` reads them."""
-        versions = self._conn.execute(
-            f"select {_VERSION_COLUMNS} from plytos.resume_version"  # noqa: S608
-            " where resume_id = %s order by number",
-            (resume_id,),
-        )
-        names = self._conn.execute(
-            "select n.id, n.version_id, n.name_ciphertext from plytos.resume_version_name n"
-            " join plytos.resume_version v on v.id = n.version_id"
-            " where v.resume_id = %s order by n.created_at desc",
-            (resume_id,),
-        )
-        return versions, names
-
-    def _version_views(
-        self,
-        resume_id: UUID,
-        versions: psycopg.Cursor[Any],
-        names: psycopg.Cursor[Any],
+    def _versions_and_contents(
+        self, resume_id: UUID
     ) -> tuple[list[ResumeVersionView], dict[UUID, ResumeContent]]:
         """A resume's versions, oldest first, and the content of each one not
-        redacted."""
-        rows = versions.fetchall()
+        redacted. The versions and their names come in one trip."""
+        with self._conn.pipeline():
+            found = self._conn.execute(
+                f"select {_VERSION_COLUMNS} from plytos.resume_version"  # noqa: S608
+                " where resume_id = %s order by number",
+                (resume_id,),
+            )
+            named = self._conn.execute(
+                "select n.id, n.version_id, n.name_ciphertext from plytos.resume_version_name n"
+                " join plytos.resume_version v on v.id = n.version_id"
+                " where v.resume_id = %s order by n.created_at desc",
+                (resume_id,),
+            )
+        rows = found.fetchall()
         if not rows:
             raise ResumeNotFoundError(str(resume_id))
-        named: dict[UUID, list[str]] = {}
-        for name_id, version_id, blob in names.fetchall():
-            named.setdefault(version_id, []).append(
+        names: dict[UUID, list[str]] = {}
+        for name_id, version_id, blob in named.fetchall():
+            names.setdefault(version_id, []).append(
                 self._cipher.decrypt(bytes(blob), _version_name_aad(name_id)).decode()
             )
         views = []
         contents: dict[UUID, ResumeContent] = {}
         for r in rows:
             view = self._version_view(r)
-            view.names = named.get(view.id, [])
+            view.names = names.get(view.id, [])
             if not view.redacted and r[9] is not None:
                 contents[view.id] = self._decrypt_content(r[0], r[9])
                 view.note = contents[view.id].note

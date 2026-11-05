@@ -15,7 +15,6 @@ import type {
   RenderedResume,
   ResumeContent,
   ResumeDetail,
-  ResumeHeader,
   ResumePage,
   Resumes,
   ResumeVersionPage,
@@ -403,22 +402,6 @@ export function listResumes(session: Session): Promise<Resumes> {
 // file. Asking again for the same file returns the one made.
 export function makeAsWritten(session: Session, importId: string): Promise<ResumePage> {
   return apiFetch<ResumePage>("/v1/resumes/as-written", session, json({ import_id: importId }));
-}
-
-export type LatestContact = { resumeId: string; resumeName: string; baseVersionId: string; header: ResumeHeader };
-
-// The contact details at the top of the resume changed most recently, read in
-// one request for the contact card. Null when there's no resume yet.
-export async function getLatestContact(session: Session): Promise<LatestContact | null> {
-  type Sent = { resume_id: string; resume_name: string; base_version_id: string; header: ResumeHeader };
-  const contact = await apiFetch<Sent | null>("/v1/resumes/latest/contact", session);
-  if (!contact) return null;
-  return {
-    resumeId: contact.resume_id,
-    resumeName: contact.resume_name,
-    baseVersionId: contact.base_version_id,
-    header: contact.header,
-  };
 }
 
 export function getResume(session: Session, id: string): Promise<ResumePage> {
