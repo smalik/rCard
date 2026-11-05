@@ -9,6 +9,7 @@ Real resumes, against labels written for them (real.py), on the machine that has
     python -m plytos_api.imports.fidelity --labels ~/.plytos/bench/labels
     python -m plytos_api.imports.fidelity --labels DIR --from-readings ~/.plytos/bench/readings/RUN
     python -m plytos_api.imports.fidelity --labels DIR --ai --budget 14 --save-readings DIR
+    python -m plytos_api.imports.fidelity --labels DIR --ai --budget 14 --tape DIR
 
 The report on real resumes is counts only. --json and --save-readings hold their words:
 they're written readable by their owner only, and stay on that machine.
@@ -57,6 +58,12 @@ def main(argv: list[str] | None = None) -> int:
         "--from-readings", type=Path, metavar="DIR", help="score readings saved here (no AI)"
     )
     parser.add_argument("--save-readings", type=Path, metavar="DIR", help="keep each reading")
+    parser.add_argument(
+        "--tape",
+        type=Path,
+        metavar="DIR",
+        help="keep Claude's answers here, and answer a question asked before from them (tape.py)",
+    )
     args = parser.parse_args(argv)
     if args.write_baseline and args.ai:
         parser.error("the baseline is the rules' reading: leave out --ai")
@@ -66,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--only, --career, --keep and --write-baseline are for the made-up bench")
     if args.from_readings is not None and args.ai:
         parser.error("--from-readings scores saved readings: leave out --ai")
+    if args.tape is not None and not args.ai:
+        parser.error("--tape keeps Claude's answers: it goes with --ai")
 
     chosen = layouts()
     if args.only:
@@ -81,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.budget is None:
             parser.error("--ai needs --budget")
         from plytos_api.config import Settings
-        from plytos_api.imports.ai import reader_for
+        from plytos_api.imports.ai import ClaudeReader, reader_for
         from plytos_api.imports.bench import Ledger
 
         settings = Settings()
@@ -93,6 +102,10 @@ def main(argv: list[str] | None = None) -> int:
             settings.ai_vertex_project,
             settings.ai_vertex_region,
         )
+        if args.tape is not None and isinstance(reader, ClaudeReader):
+            from plytos_api.imports.fidelity.tape import TapedReader
+
+            reader = TapedReader(reader, args.tape)
         args.ledger.parent.mkdir(parents=True, exist_ok=True)
         ledger = Ledger(args.ledger, args.budget)
         print(f"Spent so far ${ledger.spent:.2f} of ${args.budget:.2f}.", file=sys.stderr)

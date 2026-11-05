@@ -95,6 +95,9 @@ class Score(BaseModel):
     misses: list[str] = Field(default_factory=list)
     # How many of each kind of miss: what can be reported without a resume's words.
     kinds: dict[str, int] = Field(default_factory=dict)
+    # The kinds of miss marked on each card, by its ref: where a reading went wrong,
+    # to look at without its words (shape.py).
+    marks: dict[str, list[str]] = Field(default_factory=dict)
 
     @property
     def tallies(self) -> list[Tally]:
@@ -438,6 +441,8 @@ def score(
         out.kinds[what] = out.kinds.get(what, 0) + 1
         out.misses.append(note)
         wrong.update(c.ref for c in on)
+        for card in on:
+            out.marks.setdefault(card.ref, []).append(what)
 
     def dates(label: str, card: ProposedCard, start: str | None, end: str | None) -> None:
         for key, want in (("start", start), ("end", end)):
@@ -648,7 +653,7 @@ def _score_item(
     right_employer = reading.anonymous or employer is employment
     if home is None:
         out.unplaced += 1
-        miss("accomplishment under no title", f"“{short}” under no title", card)
+        miss(_unplaced(reading, card), f"“{short}” under no title", card)
     elif len(homes) > 1 or home is not position or not right_employer:
         out.misattributed += 1
         where = f"{home.title} at {employer.employer if employer else 'no employer'}"
@@ -670,6 +675,16 @@ def _score_item(
         out.groups.add(False)
         miss("workstream invented", f"“{short}” given a workstream it doesn't have: {stream}", card)
     return card
+
+
+def _unplaced(reading: _Reading, card: ProposedCard) -> str:
+    """What an accomplishment under no title of the career's sits under instead."""
+    employment, title = reading.ancestors(card)
+    if title is not None:
+        return "accomplishment under a title the resume doesn't have"
+    if employment is not None:
+        return "accomplishment under an employer, no title"
+    return "accomplishment under no job"
 
 
 # What kinds of card each kind of other entry belongs on.
@@ -742,27 +757,41 @@ def _score_others(
         if not norm(known_by):
             continue
         card = find(known_by, ["education"])
-        institution = card.content.facts.get("institution") if card else None
-        degree = card.content.facts.get("degree") if card else None
-        ok = (
-            card is not None
-            and card.kind == "education"
-            and (
-                not school.school
-                or (isinstance(institution, str) and norm(institution) == norm(school.school))
+        if card is None:
+            out.others.add(False)
+            miss("education lost", f"Education at {school.school}: lost")
+            continue
+        institution = card.content.facts.get("institution")
+        degree = norm(str(card.content.facts.get("degree") or ""))
+        wrong_parts = [
+            part
+            for part, ok in (
+                ("as another kind", card.kind == "education"),
+                (
+                    "school misread",
+                    not school.school
+                    or (isinstance(institution, str) and norm(institution) == norm(school.school)),
+                ),
+                (
+                    "degree misread",
+                    not (school.degree or school.field)
+                    or (
+                        bool(degree)
+                        and norm(school.degree) in degree
+                        and norm(school.field) in degree
+                    ),
+                ),
+                ("year misread", school.year is None or _year_of(card) == school.year[:4]),
             )
-            and (not (school.degree or school.field) or isinstance(degree, str))
-            and norm(school.degree) in norm(str(degree or ""))
-            and norm(school.field) in norm(str(degree or ""))
-            and (school.year is None or _year_of(card) == school.year[:4])
-        )
-        if not out.others.add(ok):
-            miss(
-                "education misread" if card else "education lost",
-                f"Education at {school.school}: "
-                + (f"{card.kind}, {card.content.facts}" if card else "lost"),
-                *([card] if card else []),
-            )
+            if not ok
+        ]
+        if not out.others.add(not wrong_parts):
+            for part in wrong_parts:
+                miss(
+                    f"education {part}",
+                    f"Education at {school.school}: {card.kind}, {card.content.facts}",
+                    card,
+                )
 
     for award in career.awards:
         card = find(award.name, ["accomplishment"])
