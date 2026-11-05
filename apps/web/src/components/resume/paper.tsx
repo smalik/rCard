@@ -101,7 +101,13 @@ function Contact({ header }: { header: ResumeHeader }) {
 }
 
 function Top({ header, edit }: { header: ResumeHeader; edit?: PaperEdits }) {
-  const empty = !header.name && !header.email && !header.phone && !header.location;
+  const empty =
+    !header.name &&
+    !header.headline &&
+    !header.email &&
+    !header.phone &&
+    !header.location &&
+    header.links.length === 0;
   if (empty && !header.summary && !edit) return null;
   return (
     <header className="relative pb-1">

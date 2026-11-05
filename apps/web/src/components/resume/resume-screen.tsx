@@ -1211,44 +1211,55 @@ function RenameDialog({
   onClose: () => void;
   onSave: (name: string) => void;
 }) {
-  const [value, setValue] = useState(name);
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(o) => {
-        if (o) setValue(name);
-        else onClose();
-      }}
-    >
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
-        <form
-          className="grid gap-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (value.trim()) onSave(value.trim());
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>Rename this resume</DialogTitle>
-            <DialogDescription>Only you see its name.</DialogDescription>
-          </DialogHeader>
-          <Input
-            aria-label="Name"
-            autoFocus
-            value={value}
-            maxLength={120}
-            onChange={(e) => setValue(e.target.value)}
-          />
-          <DialogFooter>
-            <Button type="button" variant="ghost" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={busy || !value.trim()}>
-              Rename
-            </Button>
-          </DialogFooter>
-        </form>
+        {/* Mounts each time the dialog opens, so it starts from the current name. */}
+        {open && <RenameForm name={name} busy={busy} onClose={onClose} onSave={onSave} />}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function RenameForm({
+  name,
+  busy,
+  onClose,
+  onSave,
+}: {
+  name: string;
+  busy: boolean;
+  onClose: () => void;
+  onSave: (name: string) => void;
+}) {
+  const [value, setValue] = useState(name);
+  return (
+    <form
+      className="grid gap-4"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (value.trim()) onSave(value.trim());
+      }}
+    >
+      <DialogHeader>
+        <DialogTitle>Rename this resume</DialogTitle>
+        <DialogDescription>Only you see its name.</DialogDescription>
+      </DialogHeader>
+      <Input
+        aria-label="Name"
+        autoFocus
+        value={value}
+        maxLength={120}
+        onChange={(e) => setValue(e.target.value)}
+      />
+      <DialogFooter>
+        <Button type="button" variant="ghost" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button type="submit" disabled={busy || !value.trim()}>
+          Rename
+        </Button>
+      </DialogFooter>
+    </form>
   );
 }
