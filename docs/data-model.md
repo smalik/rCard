@@ -68,6 +68,18 @@ address (http or https only), a title and an optional note, encrypted with
 the rest of the content. Variants can't add or change them. Versions saved
 before schema 3 read as having none, so their hashes still verify.
 
+**Plytos's own words are marked.** A job's headline (one line across every
+title there) and each title's story are summed up from the accomplishments by
+the Summarizer (docs/agents.md) and saved as main versions with
+`author_kind = 'ai'`. Framing carries `plytos_wrote` (schema version 4): the
+parts, `headline` or `body`, that Plytos wrote and nobody has changed since.
+Only the Summarizer sets it. Any other save keeps a mark only on text left
+exactly as Plytos wrote it, so an edit makes that part the person's own and
+Plytos leaves it alone from then on. Until a job has a headline, its
+`framing.headline` stands in with the employer's name, which also lives in
+the `employer` fact; a title's headline is its title. Versions before schema
+4 read as having no marks.
+
 **Facts live only on the main line.** Main versions hold `facts` (employer,
 client, agency, title, dates, numbers, scope, skills, evidence) and default
 `framing`. Variant versions hold `framing` only, so a variant can't change or

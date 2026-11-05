@@ -4,6 +4,9 @@ import { createContext, type ReactNode, useContext } from "react";
 
 import type { LibraryCard, LibraryContent } from "@/lib/library";
 
+// What Plytos wrote when asked to sum a job up again.
+export type Rewritten = { headline: boolean; stories: number; dropped: number };
+
 export type CardVersion = {
   id: string;
   number: number;
@@ -18,6 +21,9 @@ export type CardActions = {
   save(card: LibraryCard, content: LibraryContent): Promise<void>;
   reorder(parentId: string | null, ids: string[]): Promise<void>;
   history(cardId: string): Promise<CardVersion[]>;
+  // Asks Plytos to sum a job up again now, from its accomplishments. Left out
+  // where Plytos can't write, such as the sample gallery.
+  rewrite?(jobId: string, replaceOwn: boolean): Promise<Rewritten>;
   // Cards that changed since the person last looked, to glow for a moment.
   fresh: ReadonlySet<string>;
   // The time the cards measure "2 h ago" against.

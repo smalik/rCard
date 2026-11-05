@@ -192,7 +192,7 @@ function Face({
   return (
     <div
       className={cn(
-        "flex flex-col rounded-2xl border bg-card text-card-foreground shadow-card",
+        "flex flex-col rounded-card border bg-card text-card-foreground shadow-card",
         compact ? "gap-2.5 p-3.5" : "gap-4 p-4 sm:p-5",
         side === "back" && "bg-[color-mix(in_oklab,var(--card),var(--muted)_45%)]",
       )}
@@ -289,7 +289,7 @@ export function StrengthCard({
   return (
     <section
       aria-label={label}
-      className={cn("flip-scene rounded-2xl", fresh && "animate-live-glow", className)}
+      className={cn("flip-scene rounded-card", fresh && "animate-live-glow", className)}
     >
       <div
         className="flip-body grid grid-cols-[minmax(0,1fr)]"

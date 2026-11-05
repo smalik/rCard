@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 
 from plytos_api.cards.model import CardKind, FactValue, Framing, MainContent
-from plytos_api.imports.cards import _figures, _framing
+from plytos_api.imports.cards import _framing
 from plytos_api.imports.dates import find_range, strip_range
 from plytos_api.imports.model import (
     ExtractedDocument,
@@ -172,7 +172,7 @@ def _guess(
     parent: ProposedCard | None = None
     check = unsure
     if section in ("experience", "volunteer") or (section is None and _after_work(i, cards)):
-        kind, facts = "accomplishment", _figures(text)
+        kind = "accomplishment"
         parent = _work_above(i, cards)
         if parent is not None:
             where = _employer_of(parent, cards)
@@ -188,7 +188,7 @@ def _guess(
     elif section in ("contact", None):
         kind, facts = "story", {"use": "headline"}
     elif section in ("highlights", "awards"):
-        kind, facts = "accomplishment", _figures(text)
+        kind = "accomplishment"
     elif section == "education":
         kind = "education"
     elif section == "certifications":
@@ -198,7 +198,7 @@ def _guess(
         kind = "skill"
         facts = {"category": "Languages" if section == "languages" else "Skills", "skills": items}
     elif section == "projects":
-        kind, facts = "project", _figures(text)
+        kind = "project"
     else:
         facts = {"name": text.strip()}
     headline, body = _framing(text)

@@ -27,6 +27,7 @@ AgentName = Literal[
     "scout",
     "assembler",
     "critic",
+    "summarizer",
 ]
 ProposalKind = Literal["new_card", "card_version", "variant", "resume", "question", "insight"]
 ProposalState = Literal["open", "kept", "edited", "dismissed", "superseded"]

@@ -138,6 +138,10 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
   --radius-2xl: calc(var(--radius) + 8px);
+  /* Cards are nearly rectangular: a slight round on the corners, and less
+     for the panels inside them. */
+  --radius-card: 4px;
+  --radius-inset: 3px;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -184,6 +188,17 @@
 
   --animate-live-glow: live-glow 2.4s ease-out 1;
   --animate-live-dot: live-dot 2.4s ease-in-out infinite;
+  --animate-writing: writing 1.8s ease-in-out infinite;
+}
+
+/* A line Plytos is writing: a soft light passing over its placeholder. */
+@keyframes writing {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
 }
 
 @keyframes live-glow {

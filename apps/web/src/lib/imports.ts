@@ -5,7 +5,14 @@
 // kept on the server, encrypted with the person's own key. A proposed card
 // becomes a card only when the person approves it.
 
-import { BODY_MAX, type CardContent, type CardKind, type FactValue, HEADLINE_MAX } from "./cards";
+import {
+  BODY_MAX,
+  type CardContent,
+  type CardKind,
+  type FactValue,
+  HEADLINE_MAX,
+  numbersIn,
+} from "./cards";
 
 export const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
 export const MAX_PASTE_CHARS = 60_000;
@@ -444,8 +451,7 @@ export function wordingTips(card: Proposal, review: Review): number[] {
 export function strength(card: Proposal, content: CardContent): number {
   if (card.kind === "accomplishment") {
     if (content.facts.award !== undefined) return 2;
-    const figures = content.facts.figures;
-    return Array.isArray(figures) && figures.length > 0 ? 4 : 3;
+    return numbersOf(content).length > 0 ? 4 : 3;
   }
   if (card.kind === "project") return 2;
   if (FRAME_KINDS.has(card.kind)) return 1;
@@ -553,9 +559,9 @@ export function reviewQueue(review: Review): string[] {
 
 // --- Summaries for the screens ---------------------------------------------
 
-function figuresOf(content: CardContent): string[] {
-  const figures = content.facts.figures;
-  return Array.isArray(figures) ? figures : [];
+// The numbers a card's words cite.
+function numbersOf(content: CardContent): string[] {
+  return numbersIn(`${content.framing.headline} ${content.framing.body}`);
 }
 
 function yearOf(value: FactValue | undefined): number | null {
@@ -603,7 +609,7 @@ export function overview(review: Review): Overview {
   return {
     things: review.cards.length,
     accomplishments: accomplishments.length,
-    withNumbers: accomplishments.filter((c) => figuresOf(content(c)).length > 0).length,
+    withNumbers: accomplishments.filter((c) => numbersOf(content(c)).length > 0).length,
     roles: roles.length,
     employers: review.cards.filter((c) => c.kind === "employment").length,
     years: years.length > 0 ? [Math.min(...years), Math.max(...years)] : null,
@@ -717,7 +723,6 @@ export type FactRow = {
   label: string;
   value: string;
   note?: string;
-  numbers?: boolean;
   // Shown from a card above this one; it changes there, not here.
   above?: boolean;
 };
@@ -803,8 +808,6 @@ export function factRows(
     add("scope", "Scope", text(f.scope));
     add("skills", "Skills", text(f.skills));
   }
-  const figures = figuresOf(content);
-  if (figures.length > 0) add("figures", "Numbers", figures.join("\n"), { numbers: true });
   return rows;
 }
 
@@ -840,7 +843,6 @@ const FACT_LABELS: Record<string, string> = {
   employment_type: "Employment type",
   role_type: "Role type",
   workstream: "Workstream",
-  figures: "Numbers",
   outcome: "Result",
   scope: "Scope",
   award: "Award",
@@ -857,7 +859,6 @@ export const FACT_HINTS: Record<string, string> = {
   start: "Year and month, like 2021-03",
   end: "Year and month, or present",
   date: "Year and month, like 2021-03",
-  figures: "Separate with commas",
   skills: "Separate with commas",
   scope: "Separate with commas",
 };

@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     imports_inline: bool = True
     # How long the Stitcher waits after a note, so a burst of notes is read together.
     stitch_delay_seconds: int = 30
+    # How long the Summarizer waits after accomplishments change, so a burst of
+    # edits to one job is summed up once.
+    summary_delay_seconds: int = 20
 
     @property
     def dev_shortcuts(self) -> bool:

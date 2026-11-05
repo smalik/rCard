@@ -106,7 +106,7 @@ def test_facts_are_kept_only_when_the_accomplishment_says_them() -> None:
     assert "skills" not in er
     assert er["scope"] == ["across 4 sites"]
     assert er["outcome"] == "Cut average ER wait times by 18%"
-    assert er["figures"] == ["18%", "4"]
+    assert "figures" not in er
     billing = _card(result, "billing").content.facts
     assert billing["skills"] == ["billing"]
     assert billing["scope"] == ["3 clinics", "$2.4M a year"]

@@ -39,7 +39,7 @@ function Kind({ children, done }: { children: string; done?: string }) {
   );
 }
 
-const OFFER = "flex w-full max-w-[92%] flex-col gap-3 rounded-2xl border bg-card p-4 shadow-card sm:max-w-[85%]";
+const OFFER = "flex w-full max-w-[92%] flex-col gap-3 rounded-card border bg-card p-4 shadow-card sm:max-w-[85%]";
 
 /** A win the Stitcher joined from the person's notes. Nothing is a card until
  * they keep it, as it is or in their words. */
@@ -61,7 +61,6 @@ export function WinOffer({
   // card itself holds it, so the thread just says it was kept in their words.
   const [keptWording, setKeptWording] = useState<string | null>(null);
   const date = card.content.facts.date;
-  const figures = card.content.facts.figures;
 
   async function decide(decision: "keep" | "dismiss", content: unknown = null) {
     setBusy(true);
@@ -122,19 +121,11 @@ export function WinOffer({
           {framing.body && <p className="text-[14px] text-muted-foreground">{framing.body}</p>}
         </div>
       )}
-      {(typeof date === "string" || Array.isArray(figures)) && !editing && (
-        <p className="flex flex-wrap items-center gap-1.5 text-[13px] text-muted-foreground">
-          {typeof date === "string" && <span>{monthLabel(date)}</span>}
-          {Array.isArray(figures) &&
-            figures.map((f) => (
-              <span key={f} className="rounded-full bg-accent px-2 py-0.5 font-medium text-accent-foreground tabular-nums">
-                {f}
-              </span>
-            ))}
-        </p>
+      {typeof date === "string" && !editing && (
+        <p className="text-[13px] text-muted-foreground">{monthLabel(date)}</p>
       )}
       {card.missing && !editing && (
-        <p className="rounded-xl bg-live-soft px-3 py-2 text-[14px]">
+        <p className="rounded-inset bg-live-soft px-3 py-2 text-[14px]">
           <b className="font-semibold">Still open:</b> {card.missing}{" "}
           <span className="text-muted-foreground">Answer below and I&apos;ll add it.</span>
         </p>
@@ -315,7 +306,7 @@ export function SharedResume({
   return (
     <article
       aria-label="Your resume"
-      className="flex w-full max-w-[92%] flex-col gap-2 rounded-2xl border bg-card p-4 shadow-card sm:max-w-[85%]"
+      className="flex w-full max-w-[92%] flex-col gap-2 rounded-card border bg-card p-4 shadow-card sm:max-w-[85%]"
     >
       <p className="flex items-center gap-2 text-[14px] font-semibold">
         <FileText className="size-4 shrink-0 text-primary" />

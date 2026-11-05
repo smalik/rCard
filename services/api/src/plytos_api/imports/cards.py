@@ -7,7 +7,6 @@ person accepts, edits or drops each card, and only accepted cards are saved.
 import re
 
 from plytos_api.cards.model import FactValue, Framing, MainContent
-from plytos_api.cards.rules import _NUMBER
 from plytos_api.imports.career import group_employments
 from plytos_api.imports.model import (
     DateRange,
@@ -135,7 +134,7 @@ def propose_cards(
                 for text, spanned in pieces:
                     add(
                         "accomplishment",
-                        {**extra, **_figures(text)},
+                        extra,
                         text,
                         spanned,
                         role.ref,
@@ -151,7 +150,7 @@ def propose_cards(
                             continue
                         add(
                             "accomplishment",
-                            _figures(sentence),
+                            {},
                             sentence,
                             spanned,
                             role.ref,
@@ -163,7 +162,7 @@ def propose_cards(
         home = _named_in(entry.text, cards)
         card = add(
             "accomplishment",
-            _figures(entry.text),
+            {},
             entry.text,
             entry.blocks,
             home.role_ref if home else None,
@@ -190,7 +189,7 @@ def propose_cards(
     for entry in parsed.projects:
         add(
             "project",
-            _dated(_figures(" ".join([entry.text, *entry.details])), entry),
+            _dated({}, entry),
             entry.text,
             entry.blocks,
             None,
@@ -313,12 +312,6 @@ def _own(role: Role, employment: Employment) -> list[int]:
     return own or role.header_blocks
 
 
-# "24/7" says always on; it isn't two figures.
-_ROUND_THE_CLOCK = re.compile(r"\b24\s*[/x]\s*7\b", re.IGNORECASE)
-# A capitalised word right before a number, past the start: "Dynamics 365", "Windows 11".
-_NAMED_BEFORE = re.compile(r"(?<=\S)\s+[A-Z][A-Za-z]*\s$")
-
-
 _ENDS = (".", "!", "?", ":", ";")
 # A line that ends on one of these words runs on to the next.
 _RUNS_ON = re.compile(
@@ -375,21 +368,6 @@ def _sentences_over(run: list[tuple[int, str]], shortest: int = 0) -> list[tuple
             continue
         out.append((sentence, blocks))
     return out
-
-
-def _figures(text: str) -> dict[str, FactValue]:
-    """The numbers in a line, leaving out ones that are part of a name or "24/7"."""
-    text = _ROUND_THE_CLOCK.sub(" ", text)
-    figures: list[str] = []
-    for m in _NUMBER.finditer(text):
-        token = m.group(0).strip()
-        before = text[: m.start()]
-        if before[-1:].isalpha():
-            continue  # part of a word or code, like "Q3" or "S4"
-        if token.isdigit() and _NAMED_BEFORE.search(before):
-            continue
-        figures.append(token)
-    return {"figures": list(dict.fromkeys(figures))} if figures else {}
 
 
 def _dated(facts: dict[str, FactValue], entry: Entry) -> dict[str, FactValue]:

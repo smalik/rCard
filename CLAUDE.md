@@ -36,7 +36,11 @@ plus a gitleaks secret scan.
 - **No public pages or public API in v1.** Keep `noindex` headers, the
   robots disallow, and IAM-only access to the API.
 - **AI proposes, the person decides.** AI output becomes a version only when
-  the person accepts it, and is recorded with `author_kind = 'ai'`.
+  the person accepts it, and is recorded with `author_kind = 'ai'`. One
+  exception, at the person's request: the Summarizer saves a job's headline
+  and each title's story without a tap, marked as Plytos's
+  (`framing.plytos_wrote`), and never replaces the person's own words unless
+  they ask from the card. Every earlier wording stays in the history.
 - **Good on every screen, iOS first.** Design for phone, tablet and laptop
   alike, leaning on iOS conventions; the app will be iOS first.
 - **No real resumes in the repo.** Import tests use made-up people built in

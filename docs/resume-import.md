@@ -411,7 +411,7 @@ under the title it was written under.
 | Each employer, with the tenure | `employment`: employer, start, end, location, employment type | nothing |
 | Each title held there | `position`: title, its own start and end, and a location or type only when it differs from the employment's | its employment |
 | Each client engagement under an agency or consultancy role | `engagement`: client, title, dates | the agency position |
-| Each bullet | `accomplishment`: its workstream label if it sits under one, and every number in the text as `figures`, except ones in a name or code ("Dynamics 365", "Q3") and "24/7". A bullet wrapped onto lines with no bullet mark of their own, broken mid-sentence, is joined and proposed one sentence per card | its position or engagement |
+| Each bullet | `accomplishment`: its words, and its workstream label if it sits under one. A bullet wrapped onto lines with no bullet mark of their own, broken mid-sentence, is joined and proposed one sentence per card | its position or engagement |
 | Each sentence of a role written as a paragraph | `accomplishment`, as for a bullet | its position or engagement |
 | Key achievements | `accomplishment`; one that names a single client or employer is proposed under that work, with a question to confirm it | that work, or nothing |
 | Each skills line | `skill`, with the category and skills as facts | nothing |
@@ -444,8 +444,9 @@ above, an engagement's dates, year-only dates) the card carries `needs_check`
 questions for the person to answer during review. Rewriting with AI comes later and follows the
 usual rule: AI proposes, the person decides.
 
-Numbers go into `figures` so that variants can cite them: the "no new
-numbers" rule only lets a variant use numbers its main version has.
+Numbers stay in the words. The "no new numbers" rule lets a variant use only
+numbers its main version's words or facts already have, so a separate list of
+them added nothing and was dropped.
 
 ## Known gaps
 

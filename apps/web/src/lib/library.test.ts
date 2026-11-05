@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { numbersIn } from "./cards";
 import {
   attachmentKindFor,
   buildLibrary,
@@ -8,6 +9,7 @@ import {
   cleanContent,
   evidence,
   formatDate,
+  hasJobHeadline,
   isWebAddress,
   type LibraryCard,
   listFact,
@@ -15,6 +17,8 @@ import {
   relativeTime,
   tenure,
   withOrder,
+  withWords,
+  writtenBy,
 } from "./library";
 
 let made = 0;
@@ -172,16 +176,27 @@ describe("dates", () => {
 });
 
 describe("evidence", () => {
-  it("counts figures, attachments and a told story", () => {
+  it("counts numbers in the words, attachments and a told story", () => {
     const bare = card("accomplishment", "Ran peak season");
-    expect(evidence(bare)).toEqual({ figures: 0, attachments: 0, level: 0 });
+    expect(evidence(bare)).toEqual({ numbers: 0, attachments: 0, level: 0 });
 
-    const backed = card("accomplishment", "Cut late shipments", { figures: ["40 people", "−22%"] });
+    const backed = card("accomplishment", "Cut late shipments 22% across 40 sites");
     backed.content!.attachments = [
       { kind: "paper", url: "https://example.org/a.pdf", title: "Write-up", note: "" },
     ];
     backed.content!.framing.body = "Moved three sites onto one daily plan with shared cut-off times.";
-    expect(evidence(backed)).toEqual({ figures: 2, attachments: 1, level: 3 });
+    expect(evidence(backed)).toEqual({ numbers: 2, attachments: 1, level: 3 });
+  });
+
+  it("leaves names, codes, years and 24/7 out of the numbers", () => {
+    expect(numbersIn("Moved Dynamics 365 in Q3 2023 to a 24/7 desk saving $1.2M")).toEqual([
+      "$1.2M",
+    ]);
+    expect(numbersIn("Grew sign-ups 3x and cut costs 15 %, to 1,200 users")).toEqual([
+      "3x",
+      "15 %",
+      "1,200",
+    ]);
   });
 
   it("reads a list fact written as one string", () => {
@@ -213,7 +228,7 @@ describe("attachments", () => {
 describe("cleanContent", () => {
   const valid = {
     parent: null,
-    facts: { figures: ["40 people"], start: "2020-01" },
+    facts: { skills: ["SQL"], start: "2020-01" },
     framing: { headline: " Cut late shipments ", body: "", shown_facts: null },
     attachments: [{ kind: "repo", url: "https://github.com/example/x", title: "x", note: "" }],
   };
@@ -222,7 +237,14 @@ describe("cleanContent", () => {
     const clean = cleanContent(valid);
     expect(clean?.framing.headline).toBe("Cut late shipments");
     expect(clean?.attachments).toHaveLength(1);
-    expect(clean?.facts.figures).toEqual(["40 people"]);
+    expect(clean?.facts.skills).toEqual(["SQL"]);
+  });
+
+  it("keeps Plytos's marks it knows, and only those", () => {
+    const marked = { ...valid, framing: { ...valid.framing, plytos_wrote: ["body", "x", "headline"] } };
+    expect(cleanContent(marked)?.framing.plytos_wrote).toEqual(["headline", "body"]);
+    expect(cleanContent(valid)?.framing.plytos_wrote).toEqual([]);
+    expect(cleanContent({ ...valid, framing: { ...valid.framing, plytos_wrote: "body" } })).toBeNull();
   });
 
   it("treats missing attachments as none", () => {
@@ -281,5 +303,45 @@ describe("order", () => {
     const c = card("position", "C");
     const changed = changedSince([a, b], [a, { ...b, version_id: "version-next" }, c]);
     expect([...changed].sort()).toEqual([b.id, c.id].sort());
+  });
+});
+
+describe("who wrote a job's headline and a title's story", () => {
+  const job = (headline: string, marks: ("headline" | "body")[] = []) => {
+    const c = card("employment", headline, { employer: "Fernwood Freight" });
+    c.content!.framing.plytos_wrote = marks;
+    return c;
+  };
+
+  it("reads the employer's name as no headline yet", () => {
+    expect(hasJobHeadline(job("Fernwood Freight"))).toBe(false);
+    expect(hasJobHeadline(job("fernwood freight "))).toBe(false);
+    expect(writtenBy(job("Fernwood Freight"), "headline")).toBeNull();
+    expect(hasJobHeadline(job("Grew from analyst to planning lead"))).toBe(true);
+  });
+
+  it("tells Plytos's words from the person's", () => {
+    expect(writtenBy(job("Grew from analyst to lead", ["headline"]), "headline")).toBe("plytos");
+    expect(writtenBy(job("Grew from analyst to lead"), "headline")).toBe("person");
+    const title = card("position", "Planning Lead", { title: "Planning Lead" });
+    expect(writtenBy(title, "body")).toBeNull();
+    title.content!.framing.body = "Led planning for the depots.";
+    title.content!.framing.plytos_wrote = ["body"];
+    expect(writtenBy(title, "body")).toBe("plytos");
+  });
+
+  it("hands an emptied headline back to the employer's name", () => {
+    const written = job("Grew from analyst to lead", ["headline"]);
+    expect(withWords(written, "headline", "  ")?.framing.headline).toBe("Fernwood Freight");
+    expect(withWords(written, "headline", " My own line ")?.framing.headline).toBe("My own line");
+    const title = card("position", "Planning Lead", { title: "Planning Lead" });
+    expect(withWords(title, "body", " Mine. ")?.framing.body).toBe("Mine.");
+  });
+
+  it("keeps an older job's name as a fact before its headline changes", () => {
+    const older = card("employment", "Fernwood Freight");
+    const mine = withWords(older, "headline", "Ran planning for the depots");
+    expect(mine?.facts.employer).toBe("Fernwood Freight");
+    expect(mine?.framing.headline).toBe("Ran planning for the depots");
   });
 });

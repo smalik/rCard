@@ -220,7 +220,7 @@ def test_promotions_sit_inside_one_employment() -> None:
 def test_accomplishments_hold_only_their_own_facts() -> None:
     result = _import(good_reading())
     led = next(c for c in result.cards if c.content.framing.headline.startswith("Led a 40-person"))
-    assert led.content.facts == {"figures": ["40", "22%"]}
+    assert led.content.facts == {}
     director = next(c for c in result.cards if c.ref == led.parent_ref)
     assert director.content.facts["title"] == "Director, Supply Chain Operations"
 

@@ -7,11 +7,14 @@ import { changedSince, type LibraryCard } from "@/lib/library";
 export type Sync = "live" | "syncing" | "offline";
 
 const EVERY_MS = 20_000;
+// While Plytos is writing a job's headline and stories, so they land soon.
+const WRITING_MS = 3_000;
 const GLOW_MS = 2_600;
 
 /** Keeps the library in step with the server: it checks every 20 seconds
- * while the page is in view, and at once when the person comes back to it.
- * Cards that changed glow for a moment. */
+ * while the page is in view (every few seconds while Plytos is writing), and
+ * at once when the person comes back to it. Cards that changed glow for a
+ * moment. */
 export function useLiveLibrary(initial: LibraryCard[]) {
   const [cards, setCards] = useState(initial);
   const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set());
@@ -59,6 +62,15 @@ export function useLiveLibrary(initial: LibraryCard[]) {
       window.removeEventListener("focus", back);
     };
   }, [refresh]);
+
+  const writing = cards.some((c) => c.writing);
+  useEffect(() => {
+    if (!writing) return;
+    const tick = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refresh();
+    }, WRITING_MS);
+    return () => window.clearInterval(tick);
+  }, [writing, refresh]);
 
   // An arrangement the person just made shows at once, before the server answers.
   const arrange = useCallback((change: (cards: LibraryCard[]) => LibraryCard[]) => {

@@ -99,12 +99,12 @@ export function AttachmentEditor({
           Attach a paper you wrote, a repository, or a link that shows this work.
         </p>
       ) : (
-        <ul className="flex flex-col divide-y rounded-xl border bg-card">
+        <ul className="flex flex-col divide-y rounded-inset border bg-card">
           {attachments.map((a) => {
             const Icon = KINDS[a.kind].icon;
             return (
               <li key={a.url} className="flex items-center gap-3 px-3 py-2.5">
-                <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent text-accent-foreground">
+                <span className="grid size-8 shrink-0 place-items-center rounded-inset bg-accent text-accent-foreground">
                   <Icon className="size-4" />
                 </span>
                 <div className="min-w-0 flex-1">
@@ -221,7 +221,7 @@ function AddAttachment({
           </div>
           <div className="grid gap-2">
             <Label>What it is</Label>
-            <div className="grid grid-cols-3 gap-1 rounded-xl bg-muted p-1" role="radiogroup">
+            <div className="grid grid-cols-3 gap-1 rounded-inset bg-muted p-1" role="radiogroup">
               {(Object.keys(KINDS) as AttachmentKind[]).map((k) => {
                 const Icon = KINDS[k].icon;
                 return (
@@ -232,7 +232,7 @@ function AddAttachment({
                     aria-checked={chosen === k}
                     onClick={() => setKind(k)}
                     className={cn(
-                      "flex h-9 items-center justify-center gap-1.5 rounded-lg text-[13px] font-medium text-muted-foreground transition-all",
+                      "flex h-9 items-center justify-center gap-1.5 rounded-[2px] text-[13px] font-medium text-muted-foreground transition-all",
                       chosen === k && "bg-card text-foreground shadow-sheet",
                     )}
                   >

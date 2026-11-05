@@ -1,7 +1,5 @@
 "use client";
 
-import { Paperclip } from "lucide-react";
-
 import { useCardActions } from "@/components/cards/actions";
 import { AttachmentChips } from "@/components/cards/attachments";
 import { CardBack } from "@/components/cards/card-back";
@@ -18,12 +16,12 @@ import {
 } from "@/lib/library";
 import { cn } from "@/lib/utils";
 
-/** Three small pips: numbers, something to show, and a story. Filled ones
- * are there; the label says which. */
+/** Three small pips: numbers in the words, something to show, and a story.
+ * Filled ones are there; the label says which. */
 export function EvidencePips({ card, className }: { card: LibraryCard; className?: string }) {
   const e = evidence(card);
   const parts = [
-    e.figures > 0 ? `${e.figures} ${e.figures === 1 ? "figure" : "figures"}` : "no figures",
+    e.numbers > 0 ? `${e.numbers} ${e.numbers === 1 ? "number" : "numbers"}` : "no numbers",
     e.attachments > 0 ? `${e.attachments} attached` : "nothing attached",
   ];
   return (
@@ -46,25 +44,27 @@ export function EvidencePips({ card, className }: { card: LibraryCard; className
   );
 }
 
-function Figures({ card, className }: { card: LibraryCard; className?: string }) {
-  const figures = listFact(card, "figures");
-  if (figures.length === 0) return null;
+/** The skills an accomplishment shows, as pills on the card itself. */
+function Skills({ card, className }: { card: LibraryCard; className?: string }) {
+  const skills = listFact(card, "skills");
+  if (skills.length === 0) return null;
   return (
-    <ul className={cn("flex flex-wrap gap-1", className)} aria-label="Figures">
-      {figures.map((f) => (
+    <ul className={cn("flex flex-wrap gap-1", className)} aria-label="Skills shown">
+      {skills.map((s) => (
         <li
-          key={f}
-          className="rounded-md bg-accent px-1.5 py-px text-[12px] font-semibold text-accent-foreground tabular-nums"
+          key={s}
+          className="rounded-[3px] bg-accent px-1.5 py-px text-[12px] font-medium text-accent-foreground"
         >
-          {f}
+          {s}
         </li>
       ))}
     </ul>
   );
 }
 
-/** One accomplishment as a line on its job: the headline, its numbers, and
- * how well it is backed. Tapping it opens the card itself. */
+/** One accomplishment as a line on its job: just its words, so the job reads
+ * as one clean flow. Its skills and evidence show on the card itself, which
+ * tapping the line opens. */
 export function AccomplishmentRow({
   card,
   onOpen,
@@ -74,42 +74,28 @@ export function AccomplishmentRow({
   card: LibraryCard;
   onOpen: (card: LibraryCard) => void;
   fresh?: boolean;
-  // Two lines at most and no evidence, as while arranging.
+  // Two lines at most, as while arranging.
   compact?: boolean;
 }) {
-  const attached = card.content?.attachments.length ?? 0;
   return (
     <button
       type="button"
       onClick={() => onOpen(card)}
       className={cn(
-        "group flex w-full items-start gap-2.5 rounded-lg px-2 text-left transition-colors hover:bg-accent/60 focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none",
+        "group flex w-full items-start gap-2.5 rounded-inset px-2 text-left transition-colors hover:bg-accent/60 focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none",
         compact ? "py-1.5" : "py-2",
         fresh && "animate-live-glow",
       )}
     >
       <span aria-hidden className="mt-[9px] size-[5px] shrink-0 rounded-full bg-foreground/45" />
-      <span className="min-w-0 flex-1">
-        <span
-          className={cn(
-            "block text-[14.5px] leading-[1.45] text-foreground/90",
-            compact && "line-clamp-2",
-          )}
-        >
-          {headline(card)}
-        </span>
-        <span className={cn("mt-1 flex flex-wrap items-center gap-2", compact && "hidden")}>
-          <Figures card={card} />
-          {attached > 0 && (
-            <span className="inline-flex items-center gap-0.5 text-[12px] text-muted-foreground">
-              <Paperclip className="size-3" aria-hidden />
-              {attached}
-              <span className="sr-only"> attached</span>
-            </span>
-          )}
-        </span>
+      <span
+        className={cn(
+          "min-w-0 flex-1 text-[14.5px] leading-[1.45] text-foreground/90",
+          compact && "line-clamp-2",
+        )}
+      >
+        {headline(card)}
       </span>
-      {!compact && <EvidencePips card={card} className="mt-2 opacity-70 group-hover:opacity-100" />}
     </button>
   );
 }
@@ -136,16 +122,16 @@ export function AccomplishmentPeek({
       {more > 1 && (
         <span
           aria-hidden
-          className="absolute inset-x-4 top-2 -bottom-2 rounded-xl border bg-card/60 shadow-sheet"
+          className="absolute inset-x-4 top-2 -bottom-2 rounded-inset border bg-card/60 shadow-sheet"
         />
       )}
       {more > 0 && (
         <span
           aria-hidden
-          className="absolute inset-x-2 top-1 -bottom-1 rounded-xl border bg-card/85 shadow-sheet"
+          className="absolute inset-x-2 top-1 -bottom-1 rounded-inset border bg-card/85 shadow-sheet"
         />
       )}
-      <span className="relative flex items-center gap-2 rounded-xl border bg-card px-3 py-2.5 shadow-sheet transition-transform group-hover:-translate-y-px group-focus-visible:ring-[3px] group-focus-visible:ring-ring/40">
+      <span className="relative flex items-center gap-2 rounded-inset border bg-card px-3 py-2.5 shadow-sheet transition-transform group-hover:-translate-y-px group-focus-visible:ring-[3px] group-focus-visible:ring-ring/40">
         <span className="line-clamp-1 flex-1 text-[13.5px] text-foreground/80">{headline(top)}</span>
         {more > 0 && (
           <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground tabular-nums">
@@ -194,7 +180,7 @@ export function AccomplishmentCard({ card, className }: { card: LibraryCard; cla
               {card.content.framing.body}
             </p>
           )}
-          <Figures card={card} />
+          <Skills card={card} />
           <AttachmentChips attachments={card.content?.attachments ?? []} />
           <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
             <EvidencePips card={card} />
@@ -217,7 +203,7 @@ export function AccomplishmentSheet({
 }) {
   return (
     <Dialog open={card !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="border-0 bg-transparent p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-none sm:max-w-lg sm:p-0 [&>button:last-child]:hidden">
+      <DialogContent className="rounded-t-(--radius-card) border-0 bg-transparent p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-none sm:max-w-lg sm:rounded-(--radius-card) sm:p-0 [&>button:last-child]:hidden">
         <DialogTitle className="sr-only">{card ? headline(card) : "Accomplishment"}</DialogTitle>
         <DialogDescription className="sr-only">
           Turn the card over for its facts, evidence and versions.

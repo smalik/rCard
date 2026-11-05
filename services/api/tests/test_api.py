@@ -290,7 +290,6 @@ def test_resume_import_keeps_the_original_and_saves_only_approved_cards(
     [ref] = progress["settled"][str(conflict)]["changed"]
     edited = progress["edits"][ref]
     assert "~25%" in edited["framing"]["headline"]
-    assert edited["facts"]["figures"] == ["25%"]
 
     # Changing the answer puts the import's own wording back.
     unsure = client.post(
@@ -714,7 +713,7 @@ def test_a_proposed_resume_over_http(client: TestClient, db: Database, vault: Va
             "kind": "accomplishment",
             "content": {
                 "parent": card["id"],
-                "facts": {"figures": ["22%"]},
+                "facts": {},
                 "framing": {"headline": "Cut late shipments by 22%"},
             },
         },

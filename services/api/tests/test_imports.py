@@ -215,7 +215,7 @@ def test_cards_keep_the_resume_wording(messy: ImportResult) -> None:
     by_ref = {c.ref: c for c in messy.cards}
     spend = next(c for c in messy.cards if "$40M" in c.content.framing.headline)
     # The accomplishment holds its own facts; the title and employer sit above it.
-    assert spend.content.facts == {"figures": ["$40M"]}
+    assert spend.content.facts == {}
     assert "consistency.tense" in spend.findings
     position = by_ref[spend.parent_ref or ""]
     assert position.kind == "position"
@@ -431,14 +431,6 @@ def test_a_year_shared_without_months_isnt_an_overlap() -> None:
     ]
     # Only the months that really overlap are flagged.
     assert pairs == [["Northwind Traders", "Tailspin Toys"]]
-
-
-def test_product_names_quarters_and_24_7_arent_figures() -> None:
-    from plytos_api.imports.cards import _figures
-
-    line = "Rolled out Microsoft Dynamics 365 to 1,200 users in Q3 with 24/7 support"
-    assert _figures(line) == {"figures": ["1,200"]}
-    assert _figures("Ran a 24x7 desk and FY2023 budgets of $5M") == {"figures": ["$5M"]}
 
 
 def _short_resume(*bullets: str) -> ImportResult:

@@ -31,6 +31,12 @@ from plytos_api.agents.store import (
     CheckInPlanError,
     ProposalConflictError,
 )
+from plytos_api.agents.summarizer import (
+    SummaryUnavailableError,
+    needs_first_summary,
+    summarize,
+)
+from plytos_api.agents.thinking import Usage, thinker_for
 from plytos_api.auth import resolve_user
 from plytos_api.cards.model import CardKind, MainContent, TargetKind, VariantContent
 from plytos_api.cards.repository import (
@@ -111,6 +117,19 @@ class Reorder(BaseModel):
 class SaveMainVersion(BaseModel):
     base_version_id: UUID
     content: MainContent
+
+
+class Rewrite(BaseModel):
+    # Also rewrite the parts in the person's own words. Their words stay in
+    # the card's history either way.
+    replace_own: bool = False
+
+
+class Rewritten(BaseModel):
+    headline: bool
+    stories: int
+    # Parts left as they were because they cited a number no card has.
+    dropped: int
 
 
 class CreateTarget(BaseModel):
@@ -300,6 +319,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.ai_vertex_project,
         settings.ai_vertex_region,
     )
+    # For the one agent the person can ask to write straight away (the
+    # Summarizer, from a card). Every other agent runs from the queue.
+    thinker = thinker_for(
+        settings.ai_provider,
+        settings.ai_model,
+        settings.ai_effort,
+        settings.ai_vertex_project,
+        settings.ai_vertex_region,
+    )
 
     # The API reads uploads itself unless told a separate worker does. The agents
     # run inside it only in development; in production they run as their own
@@ -421,7 +449,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     User = Annotated[UUID, Depends(resolve_user)]
 
     def repo(conn: psycopg.Connection, user_id: UUID) -> CardRepository:
-        return CardRepository(conn, user_id, vault.cipher_for(conn, user_id))
+        cipher = vault.cipher_for(conn, user_id)
+
+        def sum_up(employment_id: UUID) -> None:
+            # A burst of edits to one job is summed up once, a little after.
+            AgentStore(conn, user_id, cipher).enqueue(
+                "summarizer",
+                "card",
+                employment_id,
+                dedupe_key=f"summarize-{employment_id}",
+                delay_seconds=settings.summary_delay_seconds,
+            )
+
+        hook = sum_up if thinker is not None else None
+        return CardRepository(conn, user_id, cipher, on_job_changed=hook)
 
     def person(user_id: UUID) -> Author:
         return Author("person", str(user_id))
@@ -441,8 +482,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/v1/library")
     def library(user_id: User) -> list[LibraryCard]:
+        """Every card, with the jobs Plytos is about to sum up, or summing up
+        now, marked `writing`. A job with accomplishments and nothing summed up
+        yet is queued the first time it's seen."""
         with db.as_user(user_id) as conn:
-            return repo(conn, user_id).library()
+            cards = repo(conn, user_id).library()
+            if thinker is None:
+                return cards
+            store = agents(conn, user_id)
+            asked = store.runs_about("summarizer", waiting=False)
+            for employment_id in needs_first_summary(cards):
+                if employment_id not in asked:
+                    store.enqueue(
+                        "summarizer",
+                        "card",
+                        employment_id,
+                        dedupe_key=f"summarize-{employment_id}",
+                    )
+            writing = store.runs_about("summarizer", waiting=True)
+            for card in cards:
+                card.writing = card.id in writing
+            return cards
 
     @app.post("/v1/cards/reorder", status_code=status.HTTP_204_NO_CONTENT)
     def reorder(body: Reorder, user_id: User) -> None:
@@ -465,6 +525,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return repo(conn, user_id).save_main_version(
                 card_id, body.base_version_id, body.content, person(user_id)
             )
+
+    @app.post("/v1/cards/{card_id}/summaries")
+    def rewrite_summaries(card_id: UUID, body: Rewrite, user_id: User) -> Rewritten:
+        """Writes an employment's headline and its titles' stories again now,
+        from the accomplishments under them. The person's own words are kept
+        unless `replace_own`; theirs stay in the history either way."""
+        if thinker is None:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE, "Plytos can't write while AI is off."
+            )
+        with db.as_user(user_id) as conn:
+            cards = repo(conn, user_id)
+            if cards.card_detail(card_id).kind != "employment":
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT, "Only a job has a headline to write."
+                )
+            usage = Usage()
+            try:
+                written = summarize(
+                    cards, thinker, card_id, usage, force=True, replace_own=body.replace_own
+                )
+            except SummaryUnavailableError as exc:
+                raise HTTPException(
+                    status.HTTP_502_BAD_GATEWAY, "Plytos couldn't write that just now. Try again."
+                ) from exc
+            finally:
+                if usage.model is not None:
+                    agents(conn, user_id).record_run("summarizer", "card", card_id, usage)
+        return Rewritten(
+            headline=written.headline, stories=written.stories, dropped=written.dropped
+        )
 
     @app.get("/v1/cards/{card_id}/versions")
     def main_history(card_id: UUID, user_id: User) -> list[VersionView]:
