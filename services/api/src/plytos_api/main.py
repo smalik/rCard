@@ -318,7 +318,7 @@ class CheckInsSet(BaseModel):
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
-    db = Database(settings.database_url)
+    db = Database(settings.database_url, min_size=settings.database_pool_min)
     vault = Vault(kek_from_setting(settings.kek, allow_local=settings.dev_shortcuts))
     reader = reader_for(
         settings.ai_provider,

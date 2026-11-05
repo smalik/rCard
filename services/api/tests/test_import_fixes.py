@@ -144,3 +144,24 @@ def test_word_files_have_no_page_places() -> None:
     doc = extract(messy_docx(), "made-up.docx")
     assert doc.facts.page_sizes == []
     assert all(b.box is None for b in doc.blocks)
+
+
+def test_listing_files_reads_each_readings_outline_not_the_reading(
+    make_user, db: Any, vault: Any
+) -> None:
+    result = _result()
+    user = make_user()
+    with db.as_user(user) as conn:
+        store = ImportStore(conn, user, vault.cipher_for(conn, user))
+        import_id = store.create(title_first_text().encode(), "robin.txt", result).id
+        [listed] = store.summaries()
+        assert listed.cards == len(result.cards)
+        assert listed.to_settle == len(store.get(import_id).to_settle)
+
+        # An import read before outlines were kept gets its outline the first
+        # time it's listed, and says the same.
+        conn.execute("update plytos.resume_import set outline_ciphertext = null")
+        assert store.summaries() == [listed]
+        kept = conn.execute("select outline_ciphertext is not null from plytos.resume_import")
+        assert kept.fetchone() == (True,)
+        assert store.summaries() == [listed]

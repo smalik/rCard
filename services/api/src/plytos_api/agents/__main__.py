@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     settings = get_settings()
-    db = Database(settings.database_url)
+    db = Database(settings.database_url, min_size=settings.database_pool_min)
     db.open()
     vault = Vault(kek_from_setting(settings.kek, allow_local=settings.dev_shortcuts))
     reader = reader_for(

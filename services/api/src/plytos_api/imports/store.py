@@ -92,6 +92,18 @@ class ImportProgress(BaseModel):
     corrections: dict[str, int] = Field(default_factory=dict)
 
 
+class ImportOutline(BaseModel):
+    """What a reading holds, in numbers, so listing files needn't open it."""
+
+    cards: int
+    # Positions of the findings the person settles (see to_settle).
+    settle: list[int]
+
+
+def outline_of(result: ImportResult) -> ImportOutline:
+    return ImportOutline(cards=len(result.cards), settle=to_settle(result))
+
+
 class ImportFile(BaseModel):
     format: DocFormat
     size: int
@@ -205,8 +217,9 @@ class ImportStore:
         progress = ImportProgress()
         row = self._conn.execute(
             "insert into plytos.resume_import (id, owner_id, file_format, file_size,"
-            " file_ciphertext, name_ciphertext, result_ciphertext, progress_ciphertext)"
-            " values (%s, %s, %s, %s, %s, %s, %s, %s) returning created_at, updated_at",
+            " file_ciphertext, name_ciphertext, result_ciphertext, progress_ciphertext,"
+            " outline_ciphertext)"
+            " values (%s, %s, %s, %s, %s, %s, %s, %s, %s) returning created_at, updated_at",
             (
                 import_id,
                 self._user_id,
@@ -216,6 +229,7 @@ class ImportStore:
                 self._seal("name", import_id, filename.encode()),
                 self._seal("result", import_id, result.model_dump_json().encode()),
                 self._seal("progress", import_id, progress.model_dump_json().encode()),
+                self._seal_outline(import_id, result),
             ),
         ).fetchone()
         assert row is not None
@@ -288,10 +302,12 @@ class ImportStore:
         longer this attempt's."""
         done = self._conn.execute(
             "update plytos.resume_import set state = 'read', stage = null, locked_until = null,"
-            " error_code = null, result_ciphertext = %s, updated_at = now()"
+            " error_code = null, result_ciphertext = %s, outline_ciphertext = %s,"
+            " updated_at = now()"
             " where id = %s and state = 'reading' and attempts = %s",
             (
                 self._seal("result", import_id, result.model_dump_json().encode()),
+                self._seal_outline(import_id, result),
                 import_id,
                 attempt,
             ),
@@ -554,9 +570,13 @@ class ImportStore:
 
     # -- reading -------------------------------------------------------------
 
+    # The reading itself is fetched only for an import read before outlines
+    # were kept, to write its outline once.
     _SUMMARY = (
         "select id, created_at, updated_at, file_format, file_size, name_ciphertext,"
-        " result_ciphertext, progress_ciphertext, state, stage from plytos.resume_import"
+        " outline_ciphertext, progress_ciphertext, state, stage,"
+        " case when outline_ciphertext is null then result_ciphertext end"
+        " from plytos.resume_import"
     )
 
     def summaries(self) -> list[ImportSummary]:
@@ -568,6 +588,27 @@ class ImportStore:
         if row is None:
             raise ImportNotFoundError(str(import_id))
         return self._summary(row)
+
+    def _seal_outline(self, import_id: UUID, result: ImportResult) -> bytes:
+        return self._seal("outline", import_id, outline_of(result).model_dump_json().encode())
+
+    def _outline(
+        self, import_id: UUID, sealed: bytes | None, reading: bytes | None
+    ) -> ImportOutline:
+        if sealed is not None:
+            return ImportOutline.model_validate_json(self._open("outline", import_id, sealed))
+        if reading is None:
+            return ImportOutline(cards=0, settle=[])
+        # Read before outlines were kept: work it out once, and keep it.
+        outline = outline_of(
+            ImportResult.model_validate_json(self._open("result", import_id, reading))
+        )
+        self._conn.execute(
+            "update plytos.resume_import set outline_ciphertext = %s"
+            " where id = %s and outline_ciphertext is null",
+            (self._seal("outline", import_id, outline.model_dump_json().encode()), import_id),
+        )
+        return outline
 
     def status(self, import_id: UUID) -> ImportStatus:
         """Where a reading is, without opening what was read."""
@@ -590,16 +631,12 @@ class ImportStore:
 
     def _summary(self, r: Sequence[Any]) -> ImportSummary:
         import_id: UUID = r[0]
-        result = (
-            ImportResult.model_validate_json(self._open("result", import_id, r[6]))
-            if r[6] is not None
-            else None
-        )
+        outline = self._outline(import_id, r[6], r[10])
         progress = ImportProgress.model_validate_json(self._open("progress", import_id, r[7]))
         states = [d.state for d in progress.cards.values()]
         unsettled = [
             i
-            for i in to_settle(result)
+            for i in outline.settle
             if (s := progress.settled.get(str(i))) is None or s.answer == "later"
         ]
         return ImportSummary(
@@ -611,7 +648,7 @@ class ImportStore:
             file=ImportFile(
                 format=r[3], size=r[4], name=self._open("name", import_id, r[5]).decode()
             ),
-            cards=len(result.cards) if result is not None else 0,
+            cards=outline.cards,
             approved=states.count("approved"),
             later=states.count("later"),
             dropped=states.count("dropped"),
