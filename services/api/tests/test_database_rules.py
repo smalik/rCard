@@ -53,6 +53,31 @@ def test_cannot_write_rows_for_someone_else(make_user, db: Database) -> None:
         conn.execute("insert into plytos.card (owner_id, kind) values (%s, 'skill')", (alice,))
 
 
+def test_a_request_that_fails_keeps_nothing_and_leaves_no_trace(
+    make_user, repo_for: RepoFor, db: Database
+) -> None:
+    user = make_user()
+
+    class Stop(Exception):
+        pass
+
+    with pytest.raises(Stop), repo_for(user) as repo:
+        repo.create_card("skill", main_content(), ME)
+        raise Stop
+    with repo_for(user) as repo:
+        assert repo.list_cards() == []
+        repo.create_card("skill", main_content(), ME)
+    with db.as_user(user) as conn:
+        assert conn.execute("select count(*) from plytos.card").fetchone() == (1,)
+    # The connection goes back to the pool as it came, with no person set.
+    with db.pool.connection() as conn:
+        assert not conn.autocommit
+        assert conn.execute("select current_setting('plytos.user_id', true)").fetchone() in (
+            (None,),
+            ("",),
+        )
+
+
 def test_app_role_cannot_rewrite_or_delete_versions(
     make_user, repo_for: RepoFor, db: Database
 ) -> None:

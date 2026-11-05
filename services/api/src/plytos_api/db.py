@@ -6,13 +6,13 @@ limits the app role to that person's rows.
 
 The database can be far from the API (a preview database across the
 country), so each request keeps its trips to it few: who a sign-in belongs to
-is remembered, and a transaction's setup goes in one trip with the person's
-wrapped data key, which the Vault then uses without asking again.
+is remembered, and a transaction's begin and setup go in one trip with the
+person's wrapped data key, which the Vault then uses without asking again.
 """
 
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from uuid import UUID
 
@@ -41,20 +41,37 @@ class Database:
 
     @contextmanager
     def as_user(self, user_id: UUID) -> Iterator[psycopg.Connection]:
-        with self.pool.connection() as conn, conn.transaction():
-            # One trip: scope the transaction to the person and fetch their
-            # wrapped data key, which almost every request needs next.
-            with conn.pipeline():
-                conn.execute("select set_config('plytos.user_id', %s, true)", (str(user_id),))
-                key = conn.execute(
-                    "select wrapped_dek from plytos_vault.user_key where user_id = %s", (user_id,)
-                )
-            row = key.fetchone()
-            token = prefetched_keys.set({user_id: bytes(row[0])} if row else {})
+        with self.pool.connection() as conn:
+            # One trip: begin, scope the transaction to the person and fetch
+            # their wrapped data key, which almost every request needs next.
+            # psycopg would send its own BEGIN in a trip of its own, so the
+            # transaction is begun and ended here instead.
+            conn.autocommit = True
             try:
-                yield conn
+                with conn.pipeline():
+                    conn.execute("begin")
+                    conn.execute("select set_config('plytos.user_id', %s, true)", (str(user_id),))
+                    key = conn.execute(
+                        "select wrapped_dek from plytos_vault.user_key where user_id = %s",
+                        (user_id,),
+                    )
+                row = key.fetchone()
+                token = prefetched_keys.set({user_id: bytes(row[0])} if row else {})
+                try:
+                    yield conn
+                finally:
+                    prefetched_keys.reset(token)
+            except BaseException:
+                with suppress(psycopg.Error):
+                    conn.execute("rollback")
+                raise
+            else:
+                conn.execute("commit")
             finally:
-                prefetched_keys.reset(token)
+                # Back to how the pool hands connections out. A broken
+                # connection refuses, and the pool throws it away.
+                with suppress(psycopg.Error):
+                    conn.autocommit = False
 
     def user_id_for_subject(self, subject: str) -> UUID | None:
         known = self._subjects.get(subject)
