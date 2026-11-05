@@ -5,6 +5,7 @@ Everyone here is made up and built in code. Agents think through FakeThinker,
 so nothing calls a model.
 """
 
+import threading
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
@@ -602,6 +603,57 @@ def test_deleting_every_version_deletes_the_resume(make_user, open_: Open) -> No
             assert lines(detail.content) == lines(whole(c))
 
 
+def test_deleting_a_resume_with_its_branch_waits_for_a_save_on_the_branch(
+    make_user, db: Database, open_: Open
+) -> None:
+    user = make_user()
+    with open_(user) as s:
+        c = career(s.cards)
+        mine = s.resumes.create("My resume", whole(c), ME)
+        drop = s.resumes.create(
+            "Drop", whole(c), ME, parent_id=mine.id, synced_parent_version_id=mine.head.id
+        )
+
+    saved = threading.Event()
+    release = threading.Event()
+    errors: list[BaseException] = []
+
+    def save_on_the_branch() -> None:
+        with open_(user) as s:
+            s.resumes.save(drop.id, ResumeContent(), drop.head.id, ME)
+            saved.set()
+            release.wait(5)
+
+    def delete_both() -> None:
+        saved.wait(5)
+        try:
+            with open_(user) as s:
+                s.resumes.delete_versions(
+                    mine.id, 1, mine.head.id, ME, after=True, with_branches=[drop.id]
+                )
+        except BaseException as exc:
+            errors.append(exc)
+
+    saving = threading.Thread(target=save_on_the_branch)
+    deleting = threading.Thread(target=delete_both)
+    saving.start()
+    deleting.start()
+    saved.wait(5)
+    # The deletion is now waiting on the branch's save, which isn't committed yet.
+    threading.Timer(0.3, release.set).start()
+    saving.join(10)
+    deleting.join(10)
+
+    assert errors == []
+    with db.as_user(user) as conn:
+        rows = conn.execute(
+            "select number, content_ciphertext is null from plytos.resume_version"
+            " where resume_id = %s order by number",
+            (drop.id,),
+        ).fetchall()
+    assert rows == [(1, True), (2, True)]
+
+
 # -- how a page reads ----------------------------------------------------------
 
 
@@ -693,6 +745,20 @@ def test_highlights_feature_lines_from_under_their_jobs(make_user, open_: Open) 
         # A line under no job can't be a highlight: it waits for one.
         assert [(i.text, i.where) for i in page.unplaced] == [("Ran the 2022 peak season", "")]
         assert render(whole(c), s.cards).highlights is None
+
+        # A featured line keeps the wording it pinned, even with its job left out.
+        first = s.cards.card_detail(c.forecast).main
+        reworded = first.content.model_copy(
+            update={"framing": Framing(headline="Forecast demand across the network")}
+        )
+        s.cards.save_main_version(c.forecast, first.head.id, reworded, ME)
+        content.entries = [e for e in content.entries if e.card != c.northwind]
+        content.highlights.items = [ResumeItem(card=c.forecast, version=first.head.id)]
+        page = render(content, s.cards)
+        assert page.highlights is not None
+        assert [i.text for i in page.highlights.items] == [
+            "Built the demand forecast, saving $3.1M"
+        ]
 
 
 def test_loose_accomplishments_wait_for_a_job_and_awards_stand_alone(

@@ -72,6 +72,7 @@ import {
   type ResumeContent,
   type ResumeDetail,
   type ResumeHeader,
+  type ResumeHighlights,
   resumeFor,
   type ResumePage,
   type ResumeSummary,
@@ -864,7 +865,6 @@ function HighlightsRail({
   onChange: (next: ResumeContent) => void;
 }) {
   const highlights = content.highlights ?? null;
-  const [paragraph, setParagraph] = useState(highlights?.paragraph ?? "");
   if (!highlights) {
     return (
       <RailCard title="Highlights">
@@ -884,6 +884,26 @@ function HighlightsRail({
       </RailCard>
     );
   }
+  // Removing the section unmounts its editor, so adding it again starts clean.
+  return (
+    <HighlightsEditor content={content} highlights={highlights} page={page} busy={busy} onChange={onChange} />
+  );
+}
+
+function HighlightsEditor({
+  content,
+  highlights,
+  page,
+  busy,
+  onChange,
+}: {
+  content: ResumeContent;
+  highlights: ResumeHighlights;
+  page: RenderedResume;
+  busy: boolean;
+  onChange: (next: ResumeContent) => void;
+}) {
+  const [paragraph, setParagraph] = useState(highlights.paragraph);
   const featured = new Set(highlights.items.map((i) => i.card));
   const full = highlights.items.length >= HIGHLIGHTS_MAX;
   const bullets = highlights.style !== "paragraph";

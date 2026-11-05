@@ -157,7 +157,8 @@ class _Wording:
         target_id: UUID | None,
         proposed: dict[UUID, Framing],
     ) -> None:
-        items = [i for e in content.entries for i in e.items] + list(content.context)
+        featured = content.highlights.items if content.highlights else []
+        items = [i for e in content.entries for i in e.items] + list(content.context) + featured
         self._pins = cards.version_framings([i.version for i in items if i.version])
         targets = {i.wording for i in items if isinstance(i.wording, UUID)}
         if target_id is not None:

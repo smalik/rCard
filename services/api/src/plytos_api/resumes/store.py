@@ -387,6 +387,8 @@ class ResumeStore:
         if plan.deletes_resume:
             self._archive(resume_id)
         for branch_id in with_branches:
+            # Waits out a save in flight on it, so the version it adds is erased too.
+            self._conn.execute("select 1 from plytos.resume where id = %s for update", (branch_id,))
             self._erase([v.id for v in self._versions(branch_id) if not v.redacted])
             self._archive(branch_id)
             self._event(author, "resume.deleted", "resume", branch_id)
