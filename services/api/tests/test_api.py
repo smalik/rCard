@@ -555,6 +555,35 @@ def test_bringing_a_resume_in_again_carries_on_the_same_cards(
     assert refused.status_code == 422
 
 
+def test_going_through_a_job_at_once_over_http(client: TestClient, reads: ImportWorker) -> None:
+    me, other = as_user("api-keep-group"), as_user("api-keep-group-other")
+    imported = upload(client, reads, title_first_text().encode(), "Robin Diaz.txt", me)
+    url = f"/v1/imports/{imported['id']}/keep"
+    body = {
+        "keep": [{"ref": "card-4"}, {"ref": "card-2"}, {"ref": "card-1"}],
+        "leave_out": ["card-3"],
+        "later": ["card-5", "card-6"],
+    }
+    assert client.post(url, json=body, headers=other).status_code == 404
+    kept = client.post(url, json=body, headers=me)
+    assert kept.status_code == 200, kept.text
+    decided = {ref: d["state"] for ref, d in kept.json()["progress"]["cards"].items()}
+    assert decided == {
+        "card-1": "approved",
+        "card-2": "approved",
+        "card-4": "approved",
+        "card-3": "dropped",
+        "card-5": "later",
+        "card-6": "later",
+    }
+    assert len(client.get("/v1/cards", headers=me).json()) == 3
+    # Deciding a card twice in one go, or a ref that isn't one, is refused.
+    twice = client.post(url, json={"keep": [{"ref": "card-7"}], "later": ["card-7"]}, headers=me)
+    assert twice.status_code == 409
+    odd = client.post(url, json={"keep": [{"ref": "card-7; drop"}]}, headers=me)
+    assert odd.status_code == 422
+
+
 def test_resume_flow_over_http(client: TestClient, reads: ImportWorker) -> None:
     me, other = as_user("api-resumes"), as_user("api-resumes-other")
     imported = upload(client, reads, promotions_text().encode(), "Avery Quinn.txt", me)

@@ -62,6 +62,7 @@ from plytos_api.imports.store import (
     ImportStore,
     ImportSummary,
     ImportView,
+    KeepCard,
     MatchChoice,
     find_matches,
 )
@@ -157,6 +158,17 @@ class Approve(BaseModel):
 class Approved(BaseModel):
     card: CardDetail
     progress: ImportProgress
+
+
+class KeepGroup(BaseModel):
+    # Approved in one go, each under the card it sits under.
+    keep: list[KeepCard] = Field(default_factory=list, max_length=500)
+    leave_out: list[Annotated[str, Field(pattern=r"^card-[0-9]{1,4}$")]] = Field(
+        default_factory=list, max_length=500
+    )
+    later: list[Annotated[str, Field(pattern=r"^card-[0-9]{1,4}$")]] = Field(
+        default_factory=list, max_length=500
+    )
 
 
 class Verification(BaseModel):
@@ -614,6 +626,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 import_id, ref, body.content, repo(conn, user_id), person(user_id), body.choice
             )
         return Approved(card=card, progress=progress)
+
+    @app.post("/v1/imports/{import_id}/keep")
+    def keep_cards(import_id: UUID, body: KeepGroup, user_id: User) -> ImportView:
+        """Decides a group of proposed cards at once, as the person goes through
+        a job in the conversation: keeps some, leaves some out, sets some aside.
+        All or nothing. Answers with the import as it now stands, matches too."""
+        with db.as_user(user_id) as conn:
+            store = imports(conn, user_id)
+            cards = repo(conn, user_id)
+            store.keep_group(
+                import_id, body.keep, cards, person(user_id), body.leave_out, body.later
+            )
+            view = store.get(import_id)
+            if view.result is not None:
+                view.matches = find_matches(view.result, view.progress, cards.main_contents())
+            return view
 
     def agents(conn: psycopg.Connection, user_id: UUID) -> AgentStore:
         return AgentStore(conn, user_id, vault.cipher_for(conn, user_id))
