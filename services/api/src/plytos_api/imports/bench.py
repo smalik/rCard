@@ -105,6 +105,7 @@ class Ledger:
         self.path = path
         self.budget = budget
         self.lock = threading.Lock()
+        self.room = threading.Condition(self.lock)
         data = json.loads(path.read_text()) if path.exists() else {}
         self.spent: float = float(data.get("spent_usd", 0.0))
         self.most: float = float(data.get("most_per_resume_usd", 0.0))
@@ -113,15 +114,26 @@ class Ledger:
 
     def may_start(self) -> bool:
         """Whether one more resume fits, counting the ones still running at the most
-        any resume has cost so far."""
-        with self.lock:
-            if self.spent + self.most * (self.in_flight + 1) > self.budget:
-                return False
+        any resume has cost so far. While some are running, waits for them to finish
+        and leave room, so a tight budget is spent to the end rather than skipping
+        resumes; refuses once none are running and there's still no room."""
+        with self.room:
+            while self.spent + self.most * (self.in_flight + 1) > self.budget:
+                if self.in_flight == 0:
+                    return False
+                self.room.wait()
             self.in_flight += 1
             return True
 
+    def release(self) -> None:
+        """A resume that started but had nothing to read, so costs and counts nothing."""
+        with self.room:
+            self.in_flight -= 1
+            self.room.notify_all()
+
     def add(self, cost: float) -> None:
-        with self.lock:
+        with self.room:
+            self.room.notify_all()
             self.in_flight -= 1
             self.spent += cost
             self.most = max(self.most, cost)

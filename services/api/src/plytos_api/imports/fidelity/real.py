@@ -130,6 +130,8 @@ def read_labels(
             return
         result = read_label(career, reader, readings=readings, save=save, layout=layout)
         if result is None:
+            if ledger is not None:
+                ledger.release()
             return
         if ledger is not None:
             ledger.add(result.cost_usd)

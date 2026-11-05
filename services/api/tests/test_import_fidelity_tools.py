@@ -248,3 +248,54 @@ def test_a_shape_can_show_a_label_written_out_as_a_word_file() -> None:
     assert shown.startswith(f"== {MORGAN.key} (word-classic)")
     assert "Reading (100%)" in shown
     assert MORGAN.employments[0].employer.lower() not in shown.lower()
+
+
+def test_a_title_with_how_the_job_was_held_after_it_is_the_same_title() -> None:
+    from plytos_api.imports.fidelity.score import same_title
+
+    assert same_title("Data Analyst", "Data Analyst (Contract)")
+    assert same_title("Data Analyst (Contract)", "Data Analyst (Contract)")
+    assert same_title("", "")
+    assert not same_title("Data Analyst", "Data Analyst (Northwind)")
+    career = Career(
+        key="contract",
+        employments=[job("Data Analyst (Contract)", "2019-03", "2021-01", "Built sales reports.")],
+    )
+    r = Cards()
+    work = r.add("employment", "Company Name", {"employer": "Company Name"})
+    title = r.add(
+        "position",
+        "Data Analyst",
+        {"title": "Data Analyst", "employment_type": "contract", "start": "2019-03"},
+        work,
+    )
+    r.add("accomplishment", "Built sales reports.", None, title)
+    scored = score(career, None, r.result())
+    assert scored.misattributed == 0 and "title lost" not in scored.kinds
+
+
+def test_a_tight_budget_waits_for_room_instead_of_skipping(tmp_path: Path) -> None:
+    import json
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    from plytos_api.imports.bench import Ledger
+
+    path = tmp_path / "spend.json"
+    path.write_text(json.dumps({"spent_usd": 0.0, "most_per_resume_usd": 0.04}))
+    ledger = Ledger(path, budget=0.10)  # room for two at a time
+    read: list[int] = []
+
+    def one(n: int) -> None:
+        if not ledger.may_start():
+            return
+        time.sleep(0.02)
+        ledger.add(0.01)
+        read.append(n)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(one, range(6)))
+    assert sorted(read) == list(range(6))
+    # With nothing running and no room, it says no at once.
+    path.write_text(json.dumps({"spent_usd": 0.09, "most_per_resume_usd": 0.04}))
+    assert not Ledger(path, budget=0.10).may_start()

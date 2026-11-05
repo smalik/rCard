@@ -157,6 +157,21 @@ def card_text(card: ProposedCard) -> str:
 # How alike two texts must be to count as the same words misread.
 NEARLY = 0.9
 
+# "(Contract)" after a title says how the person was employed, which a reading may
+# well file as the job's employment type instead of keeping it in the title.
+_HOW_EMPLOYED = re.compile(
+    r"\s*\((?:contract(?:or)?|freelance|part[- ]time|full[- ]time|internship|intern|"
+    r"temporary|temp|seasonal|interim)\)\s*$",
+    re.IGNORECASE,
+)
+
+
+def same_title(read: str, label: str) -> bool:
+    """Whether a title as read is the label's, with or without how the person was
+    employed after it."""
+    have = norm(read)
+    return have == norm(label) or (bool(have) and have == norm(_HOW_EMPLOYED.sub("", label)))
+
 
 def _share_words(a: str, b: str) -> bool:
     """A cheap test before a slow one: most of a's words are in b."""
@@ -327,7 +342,7 @@ class _Reading:
                 return mine_untitled or untitled
         name = self._fact(card, "title")
         for pool in pools:
-            exact = [p for p in pool if norm(p.title) == name]
+            exact = [p for p in pool if same_title(name, p.title)]
             if exact:
                 return exact
         for pool in pools:
@@ -517,7 +532,7 @@ def score(
             card = read_as[0]
             under, _ = reading.ancestors(card)
             title = card.content.facts.get("title")
-            right_name = norm(title if isinstance(title, str) else "") == norm(position.title)
+            right_name = same_title(title if isinstance(title, str) else "", position.title)
             right_place = stand_ins or reading.employer_of(under) is employment
             if not out.positions.add(len(read_as) == 1 and right_name and right_place):
                 put = reading.employer_of(under)
