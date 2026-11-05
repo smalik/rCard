@@ -178,3 +178,43 @@ def test_a_bullet_typed_against_its_first_word_is_a_bullet() -> None:
     doc = extract("Experience\n•Grew sales 12% in two years.\n".encode(), "resume.txt")
     [line] = [b for b in doc.blocks if b.is_bullet]
     assert line.text == "Grew sales 12% in two years."
+
+
+def _jobs(result: Any) -> list[tuple[str, Any, Any, int]]:
+    """Each position as (kind, title, client, how many accomplishments sit under it)."""
+    under = {
+        c.ref: sum(1 for d in result.cards if d.parent_ref == c.ref and d.kind == "accomplishment")
+        for c in result.cards
+    }
+    return [
+        (c.kind, c.content.facts.get("title"), c.content.facts.get("client"), under[c.ref])
+        for c in result.cards
+        if c.kind in ("position", "engagement")
+    ]
+
+
+def test_an_employer_under_a_dated_title_is_no_client() -> None:
+    result = read(
+        "Pat Lee\nExperience\nNovember 2009 to July 2012 Senior Flight Attendant\n"
+        "Fabrikam Airlines\n• Served 180 passengers a flight.\n• Trained six new crew.\n"
+    )
+    assert _jobs(result) == [("position", "Senior Flight Attendant", None, 2)]
+    employment = next(c for c in result.cards if c.kind == "employment")
+    assert employment.content.facts.get("employer") == "Fabrikam Airlines"
+
+
+def test_a_title_and_employer_under_dates_alone_are_the_job() -> None:
+    result = read(
+        "Pat Lee\nExperience\n2015 to 2017\nSenior Engineer, Contoso Systems\n"
+        "• Cut build times in half.\n"
+    )
+    assert _jobs(result) == [("position", "Senior Engineer", None, 1)]
+
+
+def test_a_client_under_a_title_under_its_employer_is_still_a_client() -> None:
+    result = read(
+        "Pat Lee\nExperience\nBrightline Partners\tJun 2010 – Feb 2014\n"
+        "Consultant (Jun 2010 – Feb 2014)\nFabrikam Health\n• Mapped freight for 120 suppliers.\n"
+    )
+    kinds = [(kind, client, n) for kind, _, client, n in _jobs(result)]
+    assert kinds == [("position", None, 0), ("engagement", "Fabrikam Health", 1)]

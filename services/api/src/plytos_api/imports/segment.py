@@ -654,9 +654,21 @@ def _pieces(text: str) -> list[str]:
     return [p for p in (_tidy(p) for p in _SPLIT_PIECES.split(text)) if p]
 
 
-def _starts_engagement(group: _Group, block: Block) -> bool:
-    """A line under a dated role that names another organization (a client, say)."""
+def _starts_engagement(group: _Group, block: Block, above: _Group | None) -> bool:
+    """A line under a dated role that names another organization (a client, say).
+
+    Only once the role's employer is known, from its own lines or from a bare employer
+    line just above it. Until then the line is more of the role's heading: "2015 - 2017"
+    over "Senior Engineer, Acme Corp", or a dated title over its employer's name."""
     if not group.dated() or find_range(block.text) is not None:
+        return False
+    employer_above = (
+        above is not None
+        and not above.bullets
+        and not above.description
+        and _parse_header(above.header)[0].organization is not None
+    )
+    if not employer_above and _parse_header(group.header)[0].organization is None:
         return False
     pieces = _pieces(block.text)
     if len(pieces) >= 2 and any(_looks_like_role_line(p) for p in pieces):
@@ -692,7 +704,7 @@ def parse_roles(blocks: list[Block], section: SectionKind, *, start: int = 0) ->
                 and current.dated()
                 and bool(strip_range(block.text, line_range))
             )
-            or _starts_engagement(current, block)
+            or _starts_engagement(current, block, groups[-2] if len(groups) > 1 else None)
         )
         if starts_new:
             current = _Group()
