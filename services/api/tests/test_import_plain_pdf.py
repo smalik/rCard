@@ -125,3 +125,43 @@ def test_a_very_tall_scanned_page_is_read_in_page_sized_pieces() -> None:
     for image in doc.images:
         with Image.open(io.BytesIO(image.data)) as piece:
             assert piece.height <= piece.width * 1.7
+
+
+def test_a_school_without_college_in_its_name_is_found_before_its_city() -> None:
+    result = read("Pat Lee\nEducation\nBachelors : Biology , 2010 Penn State - Erie, PA\n")
+    [card] = [c for c in result.cards if c.kind == "education"]
+    assert card.content.facts["institution"] == "Penn State"
+    assert card.content.facts["degree"] == "Bachelors : Biology"
+
+
+def test_accomplishments_with_a_colon_inside_a_job_stay_in_the_job() -> None:
+    result = read(
+        "Pat Lee\nExperience\nStore Manager\nMarch 2019 to Current Fabrikam Retail - Chicago, IL\n"
+        "Accomplishments:\n• Grew sales 12% in two years.\n"
+        "Assistant Manager\n01/2016 to 02/2019 Fabrikam Retail - Chicago, IL\n"
+        "• Trained nine new cashiers.\n"
+    )
+    titles = [c.content.facts.get("title") for c in result.cards if c.kind == "position"]
+    assert titles == ["Store Manager", "Assistant Manager"]
+    grew = next(c for c in result.cards if c.content.framing.headline.startswith("Grew"))
+    assert "workstream" not in grew.content.facts
+
+
+def test_a_date_range_set_over_three_lines_is_one() -> None:
+    doc = extract(
+        plain_pdf(
+            [
+                ("Experience", False),
+                ("May 2019", False),
+                ("to", False),
+                ("January 2021", False),
+                ("Store Manager", False),
+            ]
+        ),
+        "resume.pdf",
+    )
+    assert [b.text for b in doc.blocks] == [
+        "Experience",
+        "May 2019 to January 2021",
+        "Store Manager",
+    ]

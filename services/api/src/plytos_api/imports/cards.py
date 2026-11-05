@@ -17,7 +17,14 @@ from plytos_api.imports.model import (
     ProposedCard,
     Role,
 )
-from plytos_api.imports.segment import _DEGREE, _SCHOOL, is_generic_label, sentences
+from plytos_api.imports.segment import (
+    _DEGREE,
+    _SCHOOL,
+    _STATE_NAMES,
+    _US_STATES,
+    is_generic_label,
+    sentences,
+)
 
 _HEADLINE_MAX = 200
 _BODY_MAX = 5000
@@ -388,6 +395,7 @@ def _dated(facts: dict[str, FactValue], entry: Entry) -> dict[str, FactValue]:
     return facts
 
 
+_STATE = re.compile(rf"(?:{_US_STATES}|{_STATE_NAMES})")
 _DEGREE_WORD = re.compile(
     r"\b(?:Diploma|Certificate|GED|Bachelor|Master|Associate|Doctor|Doctorate)\b", re.I
 )
@@ -414,4 +422,12 @@ def _education_facts(entry: Entry) -> dict[str, FactValue]:
             facts["degree"] = piece
         elif "institution" not in facts and _SCHOOL.search(piece):
             facts["institution"] = piece
+    if "institution" not in facts:
+        # A school with no "College" in its name ("Penn State - State College, PA"):
+        # the piece just before its city and state.
+        tidy = [_DATE_EDGE.sub("", p).strip() for p in pieces]
+        for i, piece in enumerate(tidy[:-2]):
+            if piece and piece != facts.get("degree") and _STATE.fullmatch(tidy[i + 2]):
+                facts["institution"] = piece
+                break
     return _dated(facts, entry)

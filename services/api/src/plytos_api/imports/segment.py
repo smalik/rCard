@@ -404,6 +404,16 @@ def segment(doc: ExtractedDocument) -> ParsedResume:
         if block.where in ("header", "footer") or block.index in markings | boxed_contact:
             continue
         found = heading_kind(block)
+        if (
+            found is not None
+            and current.kind in ("experience", "volunteer")
+            and current.blocks
+            and block.text.rstrip().endswith(":")
+            and is_generic_label(block.text)
+        ):
+            # "Accomplishments:" over a job's bullets, inside the job: a sub-heading,
+            # not the start of another section.
+            found = None
         if found is None and plain_skip(block.text) is not None:
             continue  # A page number, a rule or "References available on request".
         if found is not None:
@@ -993,8 +1003,8 @@ def parse_skills(blocks: list[Block]) -> list[tuple[str, list[str], list[int]]]:
 
 _DEGREE = re.compile(
     r"\b(?:B\.?\s?[AS]\.?|B\.?\s?Sc|BBA|M\.?\s?[AS]\.?|MBA|M\.?\s?Sc|MPA|MPH|MFA|J\.?D\.?|"
-    r"Ph\.?\s?D\.?|Ed\.?D|M\.?D\.?|Associate|Bachelor|Master|Doctor|Doctorate|Diploma|"
-    r"Certificate|High School|GED)\b",
+    r"Ph\.?\s?D\.?|Ed\.?D|M\.?D\.?|Associate'?s?|Bachelor'?s?|Master'?s?|Doctor|Doctorate|"
+    r"Diploma|Certificat(?:e|ion)s?|High School|GED)\b",
     re.IGNORECASE,
 )
 _SCHOOL = re.compile(r"\b(?:University|College|Institute|School|Academy|Polytechnic)\b")

@@ -139,7 +139,9 @@ _FULLWIDTH = {code: code - 0xFEE0 for code in range(0xFF01, 0xFF5F)}
 
 
 def clean(text: str) -> str:
-    text = _unmangle(text.replace(" ", " ").replace("​", "").replace("﻿", ""))
+    text = _unmangle(text)
+    # After the repair: a mangled zero-width space comes back as one.
+    text = text.replace(" ", " ").replace("​", "").replace("﻿", "")
     return text.translate(_FULLWIDTH).replace("‑", "-").strip(" \r")
 
 
@@ -173,7 +175,8 @@ def _unmangle(text: str) -> str:
             # it was a separator (a wide dash or bar); inside a word, leave it be.
             before = match.string[match.start() - 1 : match.start()]
             after = match.string[match.end() : match.end() + 1]
-            return "-" if before in ("", " ") and after in ("", " ") else match.group(0)
+            gap = ("", " ", "\u00a0", "\u200b")
+            return "-" if before in gap and after in gap else match.group(0)
 
     return _MANGLED.sub(fix, text) if _MANGLED.search(text) else text
 
@@ -1066,6 +1069,11 @@ def _add_pdf_line(
     if drawn:
         stripped, glyph = text, "•"
     prev = blocks[-1] if blocks else None
+    # A date range set over three lines in a narrow column ("May 2019" / "to" /
+    # "January 2020") is one line.
+    if glyph is None and prev is not None and prev.page == page and _splits_range(prev.text, text):
+        prev.text = f"{prev.text} {text}"
+        return
     # A section heading never carries a line on, nor is carried on by one, whatever its
     # type: a resume printed in one plain font sets its headings like any other line.
     heading = _is_heading(text)
@@ -1123,6 +1131,24 @@ def _add_pdf_line(
             spaced="\t" in line["text"],
         )
     blocks.append(block)
+
+
+_MONTHS = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?"
+_ENDS_ON_YEAR = re.compile(r"(?:19|20)\d{2}\s*$")
+_RANGE_WORD = re.compile(r"^(?:to|through|until|till|-|–|—)$", re.I)
+_OPEN_RANGE = re.compile(r"(?:19|20)\d{2}\s+(?:to|through|until|till|-|–|—)$", re.I)
+_STARTS_ON_DATE = re.compile(
+    rf"^(?:(?:{_MONTHS}\s+|\d{{1,2}}/)?(?:19|20)\d{{2}}\b|(?:current|present|now)\b)", re.I
+)
+
+
+def _splits_range(above: str, line: str) -> bool:
+    """Whether a line carries on a date range broken over lines: the "to" after a date,
+    or the date after a "to"."""
+    above, line = above.strip(), line.strip()
+    if _RANGE_WORD.match(line):
+        return bool(_ENDS_ON_YEAR.search(above))
+    return bool(_OPEN_RANGE.search(above)) and bool(_STARTS_ON_DATE.match(line))
 
 
 def _is_heading(text: str) -> bool:
