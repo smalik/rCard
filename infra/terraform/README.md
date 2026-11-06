@@ -53,6 +53,47 @@ credential, the Claude API key, lives in Secret Manager.
 7. Run the **Deploy** workflow from the Actions tab. It builds both images,
    runs migrations through the Cloud SQL Auth Proxy, and updates both services.
 
+## Bringing someone over from the Supabase preview
+
+`python -m plytos_api.transfer` copies one person, with everything they have,
+from one database to another. Content moves still encrypted; only their data
+key is unsealed with the preview's key and sealed again with KMS. Both
+databases must be at the same migrations, so deploy first.
+
+1. Sign in to the deployed app once. That makes an empty account under your
+   IAP sign-in, which the copy replaces, and tells you your subject:
+   `select auth_subject from plytos.app_user` on Cloud SQL.
+2. For the length of the copy, let your account reach the database as the
+   migrations account and seal keys with the KMS key:
+
+   ```sh
+   ME=user:you@example.com
+   MIGRATE=plytos-migrate@$PROJECT.iam.gserviceaccount.com
+   gcloud iam service-accounts add-iam-policy-binding "$MIGRATE" \
+     --member "$ME" --role roles/iam.serviceAccountTokenCreator --project "$PROJECT"
+   gcloud kms keys add-iam-policy-binding user-data-kek --keyring plytos \
+     --location us-central1 --member "$ME" \
+     --role roles/cloudkms.cryptoKeyEncrypterDecrypter --project "$PROJECT"
+   cloud-sql-proxy --auto-iam-authn --impersonate-service-account "$MIGRATE" \
+     --port 5433 "$(terraform output -raw sql_connection_name)" &
+   ```
+
+3. Rehearse, then copy. Without `--commit` it does everything and keeps
+   nothing; either way it prints only table names and row counts.
+
+   ```sh
+   export PLYTOS_TRANSFER_SOURCE_URL=...   # the preview's owner connection
+   export PLYTOS_TRANSFER_SOURCE_KEK=...   # the preview's local: key
+   export PLYTOS_TRANSFER_TARGET_URL="postgresql://${MIGRATE%.gserviceaccount.com}@127.0.0.1:5433/plytos?sslmode=disable"
+   export PLYTOS_TRANSFER_TARGET_KEK="gcp-kms:projects/$PROJECT/locations/us-central1/keyRings/plytos/cryptoKeys/user-data-kek"
+   cd ../../services/api
+   uv run --extra gcp python -m plytos_api.transfer --from-subject dev:<you> --to-subject iap:accounts.google.com:<id>
+   uv run --extra gcp python -m plytos_api.transfer --from-subject dev:<you> --to-subject iap:accounts.google.com:<id> --commit
+   ```
+
+4. Stop the proxy and remove both grants (`remove-iam-policy-binding` with
+   the same arguments).
+
 ## What it costs while one person uses it
 
 Everything scales to zero when nobody is using it. The standing costs are the

@@ -48,32 +48,39 @@ def _login_role(conn: psycopg.Connection, name: str, password: str) -> None:
     )
 
 
-@pytest.fixture(scope="session")
-def test_db() -> Iterator[DbUrls]:
-    name = "plytos_test_" + secrets.token_hex(4)
+@contextmanager
+def fresh_database(role_prefix: str = "plytos_test") -> Iterator[DbUrls]:
+    """A new, migrated database, dropped afterwards. Each database needs its
+    own role_prefix, since login roles belong to the whole server."""
+    name = role_prefix + "_" + secrets.token_hex(4)
+    app_role, shredder_role = role_prefix + "_app", role_prefix + "_shredder"
     app_password = secrets.token_hex(16)
     shredder_password = secrets.token_hex(16)
     with psycopg.connect(ADMIN_URL, autocommit=True) as admin:
         admin.execute(sql.SQL("create database {}").format(sql.Identifier(name)))
-        _login_role(admin, "plytos_test_app", app_password)
-        _login_role(admin, "plytos_test_shredder", shredder_password)
+        _login_role(admin, app_role, app_password)
+        _login_role(admin, shredder_role, shredder_password)
     owner_url = make_conninfo(ADMIN_URL, dbname=name)
-    migrate(owner_url, DEFAULT_MIGRATIONS_DIR, ["plytos_test_app"])
+    migrate(owner_url, DEFAULT_MIGRATIONS_DIR, [app_role])
     with psycopg.connect(owner_url, autocommit=True) as owner:
-        owner.execute("grant plytos_shredder to plytos_test_shredder")
+        owner.execute(sql.SQL("grant plytos_shredder to {}").format(sql.Identifier(shredder_role)))
     try:
         yield DbUrls(
             owner_url=owner_url,
-            app_url=make_conninfo(owner_url, user="plytos_test_app", password=app_password),
-            shredder_url=make_conninfo(
-                owner_url, user="plytos_test_shredder", password=shredder_password
-            ),
+            app_url=make_conninfo(owner_url, user=app_role, password=app_password),
+            shredder_url=make_conninfo(owner_url, user=shredder_role, password=shredder_password),
         )
     finally:
         with psycopg.connect(ADMIN_URL, autocommit=True) as admin:
             admin.execute(
                 sql.SQL("drop database if exists {} with (force)").format(sql.Identifier(name))
             )
+
+
+@pytest.fixture(scope="session")
+def test_db() -> Iterator[DbUrls]:
+    with fresh_database() as urls:
+        yield urls
 
 
 @pytest.fixture(scope="session")
