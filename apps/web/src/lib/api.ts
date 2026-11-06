@@ -78,6 +78,9 @@ async function apiRequest(path: string, session: Session, init: RequestInit = {}
   const token = await serviceIdentityToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
   if (process.env.PLYTOS_ENV === "dev") headers.set("X-Plytos-Dev-User", session.subject);
+  // Behind the sign-in gate, the API trusts the person this server verified:
+  // Cloud Run lets only this server's identity call it.
+  else if (process.env.PLYTOS_SIGN_IN === "iap") headers.set("X-Plytos-Subject", session.subject);
 
   const response = await fetch(`${API_URL}${path}`, { ...init, headers, cache: "no-store" });
   if (!response.ok) {

@@ -36,7 +36,8 @@ class Settings(BaseSettings):
     ai_vertex_project: str = ""
     ai_vertex_region: str = "global"
     # Agents (agents/). Inline runs a worker on a thread inside the API, for
-    # development; production runs `python -m plytos_api.agents` as its own service.
+    # development and the one-person cloud setup; with more people, run
+    # `python -m plytos_api.agents` as its own service.
     agents_inline: bool = False
     # Reads uploaded resumes on a thread inside the API, so an upload is read
     # wherever the API runs. Turn it off once a separate worker reads them.
@@ -46,6 +47,14 @@ class Settings(BaseSettings):
     # How long the Summarizer waits after accomplishments change, so a burst of
     # edits to one job is summed up once.
     summary_delay_seconds: int = 20
+
+    # Who is calling, outside dev and test.
+    #   none  every request is refused (until sign-in exists)
+    #   iap   the web app sits behind Google's Identity-Aware Proxy and names
+    #         the person it verified in X-Plytos-Subject. Safe only because
+    #         Cloud Run lets nothing but the web app's service account call
+    #         the API (see infra/terraform/run.tf).
+    sign_in: Literal["none", "iap"] = "none"
 
     @property
     def dev_shortcuts(self) -> bool:

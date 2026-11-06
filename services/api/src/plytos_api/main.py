@@ -363,8 +363,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     # The API reads uploads itself unless told a separate worker does. The agents
-    # run inside it only in development; in production they run as their own
-    # service (python -m plytos_api.agents), which reads uploads too.
+    # run inside it in development and while one person uses the cloud setup;
+    # once more do, they run as their own service (python -m plytos_api.agents),
+    # which reads uploads too.
     background: list[BackgroundWorker] = []
     if settings.agents_inline:
         background.append(BackgroundWorker(Worker(db, vault, crew(settings)), name="agents"))
