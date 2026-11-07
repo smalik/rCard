@@ -62,7 +62,9 @@ databases must be at the same migrations, so deploy first.
 
 1. Sign in to the deployed app once. That makes an empty account under your
    IAP sign-in, which the copy replaces, and tells you your subject:
-   `select auth_subject from plytos.app_user` on Cloud SQL.
+   `select auth_subject from plytos.app_user` on Cloud SQL. The running API
+   remembers that empty account until one request finds it gone, so the
+   first page after the copy may fail once; a reload shows the copy.
 2. For the length of the copy, let your account reach the database as the
    migrations account and seal keys with the KMS key:
 

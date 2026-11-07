@@ -230,13 +230,12 @@ def test_a_person_arrives_whole_and_readable(
 
 
 def test_an_empty_account_made_first_gives_way_and_a_used_one_doesnt(
-    test_db: DbUrls, target_db: DbUrls, source_kek: LocalKek, someone: str
+    test_db: DbUrls, target_db: DbUrls, source: TestClient, source_kek: LocalKek, someone: str
 ) -> None:
     target = Database(target_db.app_url, max_size=2)
     target.open()
     try:
         vault = Vault(TARGET_KEK)
-        early = find_or_create_user(target, vault, "dev:early")
         used = find_or_create_user(target, vault, "dev:used")
         with target.as_user(used) as conn:
             conn.execute(
@@ -247,21 +246,40 @@ def test_an_empty_account_made_first_gives_way_and_a_used_one_doesnt(
     finally:
         target.close()
 
-    with pytest.raises(TransferError, match="already has things"):
-        transfer(
+    app = create_app(
+        Settings(
+            env="test", database_url=target_db.app_url, kek=TARGET_SETTING, imports_inline=False
+        )
+    )
+    with TestClient(app) as running:
+        # Signing in to the new place first makes an empty account, which the
+        # running API remembers.
+        early = running.get("/v1/me", headers=_as("early")).json()["id"]
+        assert running.get("/v1/cards", headers=_as("early")).json() == []
+
+        with pytest.raises(TransferError, match="already has things"):
+            transfer(
+                test_db.owner_url, source_kek, target_db.owner_url, TARGET_KEK,
+                someone, "dev:used", commit=True,
+            )  # fmt: skip
+        report = transfer(
             test_db.owner_url, source_kek, target_db.owner_url, TARGET_KEK,
-            someone, "dev:used", commit=True,
+            someone, "dev:early", commit=True,
         )  # fmt: skip
-    report = transfer(
-        test_db.owner_url, source_kek, target_db.owner_url, TARGET_KEK,
-        someone, "dev:early", commit=True,
-    )  # fmt: skip
-    assert report.replaced_empty_user
-    with psycopg.connect(target_db.owner_url) as conn:
-        ids = conn.execute(
-            "select id from plytos.app_user where auth_subject = 'dev:early'"
-        ).fetchall()
-    assert ids == [(report.user_id,)] and report.user_id != early
+        assert report.replaced_empty_user and str(report.user_id) != early
+        with psycopg.connect(target_db.owner_url) as conn:
+            ids = conn.execute(
+                "select id from plytos.app_user where auth_subject = 'dev:early'"
+            ).fetchall()
+        assert ids == [(report.user_id,)]
+
+        # The API still remembers the empty account for one request, then
+        # looks the sign-in up again and finds the person who came across.
+        assert running.get("/v1/cards", headers=_as("early")).status_code == 410
+        assert (
+            running.get("/v1/cards", headers=_as("early")).json()
+            == source.get("/v1/cards", headers=_as("moving")).json()
+        )
 
 
 def test_nothing_is_copied_when_something_is_off(
