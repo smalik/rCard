@@ -16,4 +16,10 @@ terraform {
 provider "google" {
   project = var.project_id
   region  = var.region
+
+  # Every labelled resource carries the billing code, so the bill can be
+  # split by it as well as by project.
+  default_labels = {
+    billing = var.billing_label
+  }
 }

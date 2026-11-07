@@ -1,2 +1,6 @@
-project_id = "plytos-prod"
+project_id = "rcard-dev"
 region     = "us-central1"
+
+# Who the sign-in gate lets in. With the Google-managed sign-in, these must be
+# accounts in the project's organization.
+app_users = ["user:you@example.com"]

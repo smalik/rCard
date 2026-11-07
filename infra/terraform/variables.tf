@@ -9,6 +9,18 @@ variable "region" {
   default     = "us-central1"
 }
 
+variable "billing_label" {
+  description = "Value of the billing label on every resource that takes labels."
+  type        = string
+  default     = "rcard"
+}
+
+variable "app_users" {
+  description = "Who the sign-in gate lets in, as IAM members such as \"user:you@example.com\". With the Google-managed sign-in, only accounts in the project's organization can be added."
+  type        = list(string)
+  default     = []
+}
+
 variable "github_repository_id" {
   description = "Numeric ID of the GitHub repository allowed to deploy (smalik/rCard). IDs survive renames."
   type        = string
@@ -34,7 +46,7 @@ variable "cloud_sql_proxy_image" {
 }
 
 variable "db_tier" {
-  description = "Cloud SQL machine tier. Shared-core is enough for the alpha."
+  description = "Cloud SQL machine tier. Shared-core is enough while one person uses it; move to a dedicated tier before outside users."
   type        = string
   default     = "db-f1-micro"
 }

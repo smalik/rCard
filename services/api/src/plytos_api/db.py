@@ -83,3 +83,11 @@ class Database:
         if user_id is not None:
             self._subjects[subject] = (user_id, time.monotonic() + _SUBJECT_TTL_SECONDS)
         return user_id
+
+    def forget_user(self, user_id: UUID) -> None:
+        """Drops any sign-in remembered as this person, so the next request
+        looks it up afresh: the person may have been erased, or replaced by a
+        copy from another database (transfer.py)."""
+        for subject, (known, _) in list(self._subjects.items()):
+            if known == user_id:
+                self._subjects.pop(subject, None)

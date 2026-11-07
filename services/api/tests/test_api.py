@@ -1,3 +1,4 @@
+import os
 from collections.abc import Iterator
 from typing import Any
 from urllib.parse import quote, unquote
@@ -14,7 +15,7 @@ from plytos_api.cards.repository import Author
 from plytos_api.config import Settings
 from plytos_api.db import Database
 from plytos_api.imports.worker import ImportWorker
-from plytos_api.keys import Vault
+from plytos_api.keys import CloudKmsKek, LocalKek, Vault
 from plytos_api.main import create_app
 from plytos_api.resumes.model import ResumeContent
 from plytos_api.resumes.store import ResumeStore
@@ -77,6 +78,50 @@ def test_prod_refuses_until_sign_in_exists(test_db: DbUrls) -> None:
         assert prod.get("/v1/cards", headers=as_user("someone")).status_code == 501
         assert prod.get("/docs").status_code == 404
         assert prod.get("/openapi.json").status_code == 404
+
+
+def test_behind_the_sign_in_gate_only_the_web_apps_word_counts(
+    test_db: DbUrls, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Stand in for Cloud KMS with a key held here.
+    kms = LocalKek(os.urandom(32))
+    monkeypatch.setattr(CloudKmsKek, "wrap", lambda _self, dek, aad: kms.wrap(dek, aad))
+    monkeypatch.setattr(CloudKmsKek, "unwrap", lambda _self, wrapped, aad: kms.unwrap(wrapped, aad))
+    settings = Settings(
+        env="prod",
+        database_url=test_db.app_url,
+        kek="gcp-kms:projects/p/locations/us/keyRings/r/cryptoKeys/k",
+        imports_inline=False,
+        sign_in="iap",
+    )
+
+    def signed_in(subject: str) -> dict[str, str]:
+        return {"X-Plytos-Subject": subject}
+
+    with TestClient(create_app(settings)) as prod:
+        # Nobody named, the dev shortcut, and subjects the gate never sends.
+        for headers in (
+            {},
+            as_user("someone"),
+            signed_in("dev:someone"),
+            signed_in("iap:"),
+            signed_in("  "),
+        ):
+            assert prod.get("/v1/cards", headers=headers).status_code == 401
+
+        riley = signed_in("iap:accounts.google.com:1001")
+        sam = signed_in("iap:accounts.google.com:1002")
+        created = prod.post(
+            "/v1/cards",
+            json={"kind": "accomplishment", "content": main_content().model_dump()},
+            headers=riley,
+        )
+        assert created.status_code == 201, created.text
+        card_id = created.json()["id"]
+        assert [c["id"] for c in prod.get("/v1/cards", headers=riley).json()] == [card_id]
+        assert prod.get("/v1/cards", headers=sam).json() == []
+        assert prod.get(f"/v1/cards/{card_id}", headers=sam).status_code == 404
+        assert prod.get("/docs").status_code == 404
 
 
 def test_card_flow_over_http(client: TestClient) -> None:

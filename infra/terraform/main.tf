@@ -6,6 +6,7 @@ locals {
     "cloudresourcemanager.googleapis.com",
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
+    "iap.googleapis.com",
     "run.googleapis.com",
     "secretmanager.googleapis.com",
     "sqladmin.googleapis.com",
@@ -18,6 +19,8 @@ locals {
   api_db_user     = trimsuffix(google_service_account.api.email, ".gserviceaccount.com")
   migrate_db_user = trimsuffix(google_service_account.migrate.email, ".gserviceaccount.com")
 }
+
+data "google_project" "this" {}
 
 resource "google_project_service" "enabled" {
   for_each           = toset(local.services)

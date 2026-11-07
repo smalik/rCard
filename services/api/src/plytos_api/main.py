@@ -1,7 +1,7 @@
 """HTTP API. Only the web app's server calls it; it is never public."""
 
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Annotated, Literal
 from urllib.parse import quote, unquote
 from uuid import UUID
@@ -363,8 +363,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     # The API reads uploads itself unless told a separate worker does. The agents
-    # run inside it only in development; in production they run as their own
-    # service (python -m plytos_api.agents), which reads uploads too.
+    # run inside it in development and while one person uses the cloud setup;
+    # once more do, they run as their own service (python -m plytos_api.agents),
+    # which reads uploads too.
     background: list[BackgroundWorker] = []
     if settings.agents_inline:
         background.append(BackgroundWorker(Worker(db, vault, crew(settings)), name="agents"))
@@ -476,7 +477,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.exception_handler(KeyShreddedError)
-    async def shredded(_: Request, __: KeyShreddedError) -> JSONResponse:
+    async def shredded(_: Request, exc: KeyShreddedError) -> JSONResponse:
+        # A remembered sign-in may point at someone who is gone; the next
+        # request looks it up again.
+        with suppress(ValueError):
+            db.forget_user(UUID(str(exc)))
         return JSONResponse({"detail": "Gone"}, status_code=status.HTTP_410_GONE)
 
     User = Annotated[UUID, Depends(resolve_user)]
