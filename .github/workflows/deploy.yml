@@ -1,7 +1,10 @@
 name: Deploy
 
-# Manual only until there is something to ship. Needs the repository
-# variables that `terraform output github_actions_variables` prints.
+# Manual only until there is something to ship. The cloud names below are
+# what `terraform output github_actions_variables` prints for rcard-dev; none
+# of them is a secret, and only the main branch of this repository can sign
+# in with them. A repository variable of the same name wins, for deploying
+# somewhere else.
 on:
   workflow_dispatch:
 
@@ -14,8 +17,14 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  REGION: ${{ vars.GCP_REGION }}
-  REGISTRY: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/plytos
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'rcard-dev' }}
+  REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+  WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER || 'projects/953092582657/locations/global/workloadIdentityPools/github/providers/plytos-repo' }}
+  DEPLOYER_SA: ${{ vars.GCP_DEPLOYER_SA || 'plytos-deployer@rcard-dev.iam.gserviceaccount.com' }}
+  MIGRATE_SA: ${{ vars.GCP_MIGRATE_SA || 'plytos-migrate@rcard-dev.iam.gserviceaccount.com' }}
+  SQL_INSTANCE: ${{ vars.GCP_SQL_INSTANCE || 'rcard-dev:us-central1:plytos' }}
+  API_DB_USER: ${{ vars.PLYTOS_API_DB_USER || 'plytos-api@rcard-dev.iam' }}
+  MIGRATE_DB_USER: ${{ vars.PLYTOS_MIGRATE_DB_USER || 'plytos-migrate@rcard-dev.iam' }}
   CLOUD_SQL_PROXY_VERSION: v2.14.1
 
 jobs:
@@ -27,10 +36,15 @@ jobs:
 
       - uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
-          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
 
       - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Name the image registry
+        run: echo "REGISTRY=$REGION-docker.pkg.dev/$PROJECT_ID/plytos" >> "$GITHUB_ENV"
 
       - name: Build and push images
         run: |
@@ -45,15 +59,15 @@ jobs:
       - name: Run database migrations
         working-directory: services/api
         env:
-          PLYTOS_DATABASE_URL: postgresql://${{ vars.PLYTOS_MIGRATE_DB_USER }}@127.0.0.1:5432/plytos?sslmode=disable
-          PLYTOS_APP_LOGIN_ROLES: ${{ vars.PLYTOS_API_DB_USER }}
+          PLYTOS_DATABASE_URL: postgresql://${{ env.MIGRATE_DB_USER }}@127.0.0.1:5432/plytos?sslmode=disable
+          PLYTOS_APP_LOGIN_ROLES: ${{ env.API_DB_USER }}
         run: |
           curl -sSfL -o "$RUNNER_TEMP/cloud-sql-proxy" \
             "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/$CLOUD_SQL_PROXY_VERSION/cloud-sql-proxy.linux.amd64"
           chmod +x "$RUNNER_TEMP/cloud-sql-proxy"
           "$RUNNER_TEMP/cloud-sql-proxy" --auto-iam-authn \
-            --impersonate-service-account="${{ vars.GCP_MIGRATE_SA }}" \
-            --address=127.0.0.1 --port=5432 "${{ vars.GCP_SQL_INSTANCE }}" &
+            --impersonate-service-account="$MIGRATE_SA" \
+            --address=127.0.0.1 --port=5432 "$SQL_INSTANCE" &
           for _ in $(seq 1 30); do nc -z 127.0.0.1 5432 && break; sleep 1; done
           uv sync --locked --no-dev
           uv run python -m plytos_api.migrate
