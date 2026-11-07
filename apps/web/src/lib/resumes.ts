@@ -24,10 +24,27 @@ export type ResumeHeader = {
   summary: string;
 };
 
+// Bullets show the featured lines, a paragraph the person's own words.
+export type HighlightStyle = "bullets" | "paragraph" | "both";
+
+export const HIGHLIGHT_STYLES: { value: HighlightStyle; label: string }[] = [
+  { value: "bullets", label: "Bullets" },
+  { value: "paragraph", label: "Paragraph" },
+  { value: "both", label: "Both" },
+];
+
+export const HIGHLIGHTS_MAX = 12;
+export const HIGHLIGHT_PARAGRAPH_MAX = 1500;
+
+// Lines featured again near the top. Each sits under a job first.
+export type ResumeHighlights = { style: HighlightStyle; paragraph: string; items: ResumeItem[] };
+
 export type ResumeContent = {
   header: ResumeHeader;
   entries: ResumeEntry[];
   context: ResumeItem[];
+  // Left out when the resume has no highlights section.
+  highlights?: ResumeHighlights | null;
   note?: string | null;
 };
 
@@ -72,6 +89,8 @@ export type RenderedItem = {
   detail: string;
   wording: "main" | "target" | "pinned";
   date: string;
+  // Where it sits, for a highlight or a line waiting for a job: "Title · Employer".
+  where?: string;
 };
 
 export type RenderedRole = { card: string | null; title: string; dates: string; items: RenderedItem[] };
@@ -90,8 +109,11 @@ export type RenderedEntry = {
 
 export type RenderedSection = { kind: CardKind; label: string; items: RenderedItem[] };
 
+export type RenderedHighlights = { style: HighlightStyle; paragraph: string; items: RenderedItem[] };
+
 export type RenderedResume = {
   header: ResumeHeader;
+  highlights?: RenderedHighlights | null;
   entries: RenderedEntry[];
   sections: RenderedSection[];
   // Employments in the library this resume leaves out.
@@ -99,6 +121,9 @@ export type RenderedResume = {
   // Cards outside the career tree, such as a degree, that it leaves out.
   // Older API answers may not carry it.
   left_out_context?: RenderedItem[];
+  // Accomplishments this resume has outside any job on it. They don't show
+  // until they're under one; `where` names the job a card already sits under.
+  unplaced?: RenderedItem[];
   // Lines whose card is gone, so they can't show.
   missing: number;
 };
@@ -112,6 +137,27 @@ export type ResumeVersionPage = {
 };
 
 export type Resumes = { resumes: ResumeSummary[]; ready: ImportSummary[] };
+
+// A resume made from this one that deleting a version reaches.
+export type DeletionBranch = {
+  id: string;
+  name: string;
+  made_from: number | null;
+  caught_up_with: number | null;
+  // Where it counts from if it stays; null when it will stand on its own.
+  recenters_on: number | null;
+};
+
+export type DeletionPlan = {
+  numbers: number[];
+  // The version the resume goes back to, when the one it's at is deleted.
+  back_to: number | null;
+  deletes_resume: boolean;
+  branches: DeletionBranch[];
+};
+
+// The resume after a deletion; null when its last version went.
+export type Deleted = { resume: ResumePage | null };
 
 export type ResumeChange = { key: string; kind: string; card: string };
 
@@ -151,6 +197,11 @@ export function switchOff(content: ResumeContent, item: string): ResumeContent {
   for (const entry of next.entries) entry.items = entry.items.filter((i) => i.card !== item);
   next.context = next.context.filter((i) => i.card !== item);
   return next;
+}
+
+// The versions still there, newest first; deleted ones keep only their number.
+export function keptVersions(versions: ResumeVersion[]): ResumeVersion[] {
+  return [...versions].reverse().filter((v) => !v.redacted);
 }
 
 // Switches a line on under its employment, at the end.
@@ -245,6 +296,71 @@ export function moveContextLine(
   return next;
 }
 
+// -- highlights ----------------------------------------------------------------
+
+function highlightsOf(content: ResumeContent): ResumeHighlights {
+  return content.highlights ?? { style: "bullets", paragraph: "", items: [] };
+}
+
+// Turns the highlights section on, in bullets, or off. Off forgets what it held.
+export function showHighlights(content: ResumeContent, on: boolean): ResumeContent {
+  const next = copy(content);
+  next.highlights = on ? highlightsOf(next) : null;
+  return next;
+}
+
+export function setHighlightStyle(content: ResumeContent, style: HighlightStyle): ResumeContent {
+  const next = copy(content);
+  next.highlights = { ...highlightsOf(next), style };
+  return next;
+}
+
+export function setHighlightParagraph(content: ResumeContent, paragraph: string): ResumeContent {
+  const next = copy(content);
+  next.highlights = { ...highlightsOf(next), paragraph: paragraph.slice(0, HIGHLIGHT_PARAGRAPH_MAX) };
+  return next;
+}
+
+// Features a line from under a job, at the end, with the wording it has there.
+export function feature(content: ResumeContent, card: string): ResumeContent {
+  const next = copy(content);
+  const highlights = highlightsOf(next);
+  if (highlights.items.length >= HIGHLIGHTS_MAX || highlights.items.some((i) => i.card === card)) {
+    return next;
+  }
+  const there = next.entries.flatMap((e) => e.items).find((i) => i.card === card);
+  highlights.items.push(there ? { ...there } : { card, wording: "auto" });
+  next.highlights = highlights;
+  return next;
+}
+
+export function unfeature(content: ResumeContent, card: string): ResumeContent {
+  const next = copy(content);
+  if (next.highlights) next.highlights.items = next.highlights.items.filter((i) => i.card !== card);
+  return next;
+}
+
+export function moveHighlight(content: ResumeContent, card: string, by: -1 | 1): ResumeContent {
+  const next = copy(content);
+  if (!next.highlights) return next;
+  const group = next.highlights.items.map((i) => i.card);
+  next.highlights.items = reorderIn(next.highlights.items, group, card, by);
+  return next;
+}
+
+// A line that waited outside any job now shows under one: it leaves the
+// context and comes in at the end of that job, bringing the job in if the
+// resume had left it out.
+export function placeLine(content: ResumeContent, card: string, entry: string): ResumeContent {
+  const next = copy(content);
+  const item = next.context.find((i) => i.card === card) ?? { card, wording: "auto" };
+  next.context = next.context.filter((i) => i.card !== card);
+  const target = next.entries.find((e) => e.card === entry);
+  if (!target) next.entries.push({ card: entry, fold_earlier: false, items: [item] });
+  else if (!target.items.some((i) => i.card === card)) target.items.push(item);
+  return next;
+}
+
 export function setHeader(content: ResumeContent, header: ResumeHeader): ResumeContent {
   const next = copy(content);
   next.header = { ...header, links: header.links.filter((l) => l.trim()).slice(0, 5) };
@@ -323,7 +439,7 @@ export function askText(resumeName: string, forWhom: string): string {
 // null if it isn't one. The API checks every field again.
 export function cleanContent(value: unknown): ResumeContent | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  const { header, entries, context } = value as Record<string, unknown>;
+  const { header, entries, context, highlights } = value as Record<string, unknown>;
   if (typeof header !== "object" || header === null || Array.isArray(header)) return null;
   if (!Array.isArray(entries) || !Array.isArray(context)) return null;
   if (entries.length > 200 || context.length > 500) return null;
@@ -334,6 +450,13 @@ export function cleanContent(value: unknown): ResumeContent | null {
     if (!(e as { items: unknown[] }).items.every(isItem)) return null;
   }
   if (!context.every(isItem)) return null;
+  if (highlights !== undefined && highlights !== null) {
+    if (typeof highlights !== "object" || Array.isArray(highlights)) return null;
+    const { style, paragraph, items } = highlights as Record<string, unknown>;
+    if (!HIGHLIGHT_STYLES.some((s) => s.value === style)) return null;
+    if (typeof paragraph !== "string" || paragraph.length > HIGHLIGHT_PARAGRAPH_MAX) return null;
+    if (!Array.isArray(items) || items.length > HIGHLIGHTS_MAX || !items.every(isItem)) return null;
+  }
   return value as ResumeContent;
 }
 

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { type ReactNode, useCallback, useMemo, useState } from "react";
 
-import { AccomplishmentCard, AccomplishmentSheet } from "@/components/cards/accomplishment";
+import { AccomplishmentSheet } from "@/components/cards/accomplishment";
 import {
   type CardActions,
   CardActionsProvider,
@@ -11,12 +11,14 @@ import {
   type Rewritten,
 } from "@/components/cards/actions";
 import { ExperienceCard } from "@/components/cards/experience-card";
+import { PlacePicker } from "@/components/cards/place-picker";
 import {
   ActivityCard,
   AwardCard,
   ContactCard,
   CredentialCard,
   EducationCard,
+  HighlightsCard,
   OtherCard,
   ProjectCard,
   SkillsCard,
@@ -27,13 +29,14 @@ import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   buildLibrary,
+  headline,
   type LibraryCard,
   type LibraryContent,
   listFact,
   relativeTime,
   withOrder,
 } from "@/lib/library";
-import type { ResumeHeader } from "@/lib/resumes";
+import type { RenderedHighlights, ResumeHeader } from "@/lib/resumes";
 import { cn } from "@/lib/utils";
 
 export type Contact = {
@@ -41,6 +44,7 @@ export type Contact = {
   resumeName: string;
   baseVersionId: string;
   header: ResumeHeader;
+  highlights: RenderedHighlights | null;
 };
 
 async function failure(response: Response): Promise<Error> {
@@ -109,6 +113,70 @@ function Section({
       </h2>
       <div className="flex flex-col gap-4">{children}</div>
     </section>
+  );
+}
+
+/** Accomplishments that sit on no job yet. An accomplishment means most under
+ * the job it's from, so each one waits here, in a row of its own, to be
+ * placed; only then can a resume feature it in Highlights. */
+function Unplaced({
+  cards,
+  library,
+  onOpen,
+  onPlace,
+}: {
+  cards: LibraryCard[];
+  library: LibraryCard[];
+  onOpen: (card: LibraryCard) => void;
+  onPlace: (card: LibraryCard, parent: string) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-[14px] text-muted-foreground">
+        Put each one under the job it&apos;s from. Then any resume can feature it in its Highlights.
+      </p>
+      {error && (
+        <p role="alert" className="text-[13.5px] text-destructive">
+          {error}
+        </p>
+      )}
+      <ul className="flex flex-col gap-1.5">
+        {cards.map((card) => (
+          <li
+            key={card.id}
+            className="flex flex-col gap-2 rounded-card border bg-card p-2 shadow-sheet sm:flex-row sm:items-center"
+          >
+            <button
+              type="button"
+              onClick={() => onOpen(card)}
+              className="min-w-0 flex-1 rounded-inset px-2 py-1 text-left text-[14.5px] leading-[1.45] transition-colors hover:bg-accent/60 focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none"
+            >
+              {headline(card)}
+            </button>
+            <div className="shrink-0 self-end sm:self-center">
+              <PlacePicker
+                cards={library}
+                line={headline(card)}
+                busy={busy !== null}
+                onPlace={async (place) => {
+                  setBusy(card.id);
+                  setError(null);
+                  try {
+                    await onPlace(card, place.card);
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : "That didn't move. Try again.");
+                  } finally {
+                    setBusy(null);
+                  }
+                }}
+              />
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -210,7 +278,6 @@ export function LibraryScreen({
     { id: "skills", purpose: "skill" as const, title: "Skills", cards: view.skills },
     { id: "projects", purpose: "project" as const, title: "Projects", cards: view.projects },
     { id: "activities", purpose: "activity" as const, title: "Activities", cards: view.activities },
-    { id: "highlights", purpose: "highlight" as const, title: "Highlights", cards: view.highlights },
     { id: "other", purpose: "highlight" as const, title: "More cards", cards: view.other },
   ].filter((s) => s.cards.length > 0);
 
@@ -228,10 +295,8 @@ export function LibraryScreen({
         return <ProjectCard key={card.id} card={card} />;
       case "activities":
         return <ActivityCard key={card.id} card={card} />;
-      case "other":
-        return <OtherCard key={card.id} card={card} />;
       default:
-        return <AccomplishmentCard key={card.id} card={card} />;
+        return <OtherCard key={card.id} card={card} />;
     }
   };
 
@@ -244,6 +309,18 @@ export function LibraryScreen({
             node: (
               <Section key="contact" id="contact" purpose="contact" title="Contact">
                 <ContactCard header={contact.header} from={contact.resumeName} onSave={saveContact} />
+              </Section>
+            ),
+          },
+          {
+            weight: 1 + (contact.highlights?.items.length ?? 0) * 0.5,
+            node: (
+              <Section key="highlights" id="highlights" purpose="highlight" title="Highlights">
+                <HighlightsCard
+                  highlights={contact.highlights}
+                  from={contact.resumeName}
+                  href={`/resumes/${encodeURIComponent(contact.resumeId)}`}
+                />
               </Section>
             ),
           },
@@ -272,7 +349,13 @@ export function LibraryScreen({
 
   const jumps = [
     ...(view.experience.length ? [{ id: "experience", label: "Experience" }] : []),
-    ...(contact ? [{ id: "contact", label: "Contact" }] : []),
+    ...(view.unplaced.length ? [{ id: "unplaced", label: "Not placed" }] : []),
+    ...(contact
+      ? [
+          { id: "contact", label: "Contact" },
+          { id: "highlights", label: "Highlights" },
+        ]
+      : []),
     ...context.map((s) => ({ id: s.id, label: s.title.split(" ")[0]! })),
   ];
   const empty = cards.length === 0;
@@ -334,6 +417,23 @@ export function LibraryScreen({
                     {view.experience.map((x) => (
                       <ExperienceCard key={x.card.id} view={x} onOpen={(c) => setOpenId(c.id)} />
                     ))}
+                  </Section>
+                )}
+                {view.unplaced.length > 0 && (
+                  <Section
+                    id="unplaced"
+                    purpose="highlight"
+                    title="Not under a job yet"
+                    count={view.unplaced.length}
+                  >
+                    <Unplaced
+                      cards={view.unplaced}
+                      library={cards}
+                      onOpen={(c) => setOpenId(c.id)}
+                      onPlace={(card, parent) =>
+                        card.content ? save(card, { ...card.content, parent }) : Promise.resolve()
+                      }
+                    />
                   </Section>
                 )}
               </div>

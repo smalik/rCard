@@ -1,8 +1,10 @@
 import {
   askForVersion,
   copyResume,
+  deleteVersions,
   nameResumeVersion,
   parentChanges,
+  planDeletion,
   previewResume,
   renameResume,
   restoreResume,
@@ -44,7 +46,8 @@ export async function GET(request: Request, { params }: Params): Promise<Respons
 }
 
 // Changes to a resume: preview, save, restore, name, rename, take changes,
-// copy, or ask Plytos for a version.
+// copy, ask Plytos for a version, or delete versions (first seeing what
+// deleting would do).
 export async function POST(request: Request, { params }: Params): Promise<Response> {
   const session = await guard(request, "Sign in to change your resumes.");
   if (session instanceof Response) return session;
@@ -70,6 +73,28 @@ export async function POST(request: Request, { params }: Params): Promise<Respon
         const base = baseId(body.base_version_id);
         if (!number || !base) return problem(422, "Pick a version to bring back.");
         return ok(await restoreResume(session, id, number, base), 201);
+      }
+      case "deletion": {
+        const number = versionNumber(body.number);
+        if (!number) return problem(422, "Pick a version to delete.");
+        return ok(await planDeletion(session, id, number, body.after === true));
+      }
+      case "delete": {
+        const number = versionNumber(body.number);
+        const base = baseId(body.base_version_id);
+        const branches = body.with_branches ?? [];
+        if (
+          !number ||
+          !base ||
+          !Array.isArray(branches) ||
+          branches.length > 100 ||
+          !branches.every((b) => baseId(b) !== null)
+        ) {
+          return problem(422, "Pick a version to delete.");
+        }
+        return ok(
+          await deleteVersions(session, id, number, base, body.after === true, branches as string[]),
+        );
       }
       case "name": {
         const number = versionNumber(body.number);

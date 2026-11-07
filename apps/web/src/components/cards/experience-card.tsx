@@ -9,7 +9,7 @@ import {
   MapPin,
   Pencil,
 } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useId, useState } from "react";
 
 import { AccomplishmentPeek, AccomplishmentRow } from "@/components/cards/accomplishment";
 import { useCardActions } from "@/components/cards/actions";
@@ -106,6 +106,69 @@ function SectionLabel({ children, className }: { children: ReactNode; className?
     >
       {children}
     </span>
+  );
+}
+
+/** A title's accomplishments, under its story: a section of row cards, one
+ * per accomplishment, that folds into a small stack. */
+function AccomplishmentRows({
+  items,
+  label,
+  heading,
+  arranging,
+  onOpen,
+  onReorder,
+}: {
+  items: LibraryCard[];
+  // What a screen reader calls the list, such as "Accomplishments as Director".
+  label: string;
+  heading: string;
+  arranging: boolean;
+  onOpen: (card: LibraryCard) => void;
+  onReorder: (ids: string[]) => void;
+}) {
+  const { fresh } = useCardActions();
+  const [open, setOpen] = useState(true);
+  const shown = open || arranging;
+  const regionId = useId();
+  return (
+    <div className="flex flex-col gap-1.5 pl-5">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={shown}
+        aria-controls={regionId}
+        disabled={arranging}
+        className="flex items-center gap-2 self-start rounded-md text-left focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none"
+      >
+        <DisclosureTriangle open={shown} />
+        <SectionLabel>{heading}</SectionLabel>
+        <span className="text-[12px] text-muted-foreground tabular-nums">{items.length}</span>
+      </button>
+      <div id={regionId}>
+        {shown ? (
+          <SortableList
+            items={items}
+            id={(c) => c.id}
+            name={headline}
+            arranging={arranging}
+            label={label}
+            onReorder={(next) => onReorder(next.map((c) => c.id))}
+            className="flex flex-col gap-1.5"
+            render={(card) => (
+              <AccomplishmentRow
+                card={card}
+                onOpen={onOpen}
+                fresh={fresh.has(card.id)}
+                compact={arranging}
+              />
+            )}
+          />
+        ) : (
+          <AccomplishmentPeek items={items} onExpand={() => setOpen(true)} />
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -246,25 +309,14 @@ function RoleBlock({
               </div>
             )}
             {block.items.length > 0 ? (
-              <div className="rounded-inset bg-muted/55 p-1 dark:bg-muted/40">
-                <SortableList
-                  items={block.items}
-                  id={(c) => c.id}
-                  name={headline}
-                  arranging={arranging}
-                  label={`Accomplishments as ${title}`}
-                  onReorder={(next) => void reorder(block.card.id, next.map((c) => c.id))}
-                  className="flex flex-col"
-                  render={(card) => (
-                    <AccomplishmentRow
-                      card={card}
-                      onOpen={onOpen}
-                      fresh={fresh.has(card.id)}
-                      compact={arranging}
-                    />
-                  )}
-                />
-              </div>
+              <AccomplishmentRows
+                items={block.items}
+                heading="Accomplishments"
+                label={`Accomplishments as ${title}`}
+                arranging={arranging}
+                onOpen={onOpen}
+                onReorder={(ids) => void reorder(block.card.id, ids)}
+              />
             ) : (
               <p className="pl-5 text-[13px] text-muted-foreground">No accomplishments here yet.</p>
             )}
@@ -328,7 +380,6 @@ export function ExperienceCard({
     () => new Set(blocks.slice(0, 1).map((b) => b.card.id)),
   );
   const [folded, setFolded] = useState(false);
-  const [acrossOpen, setAcrossOpen] = useState(true);
   const [arranging, setArranging] = useState(false);
   const [rewriting, setRewriting] = useState(false);
   const card = view.card;
@@ -538,45 +589,15 @@ export function ExperienceCard({
               )}
 
               {view.items.length > 0 && (
-                <div className="border-t pt-3">
-                  <button
-                    type="button"
-                    onClick={() => setAcrossOpen(!acrossOpen)}
-                    aria-expanded={acrossOpen}
-                    aria-controls={`${sectionsId}-across`}
-                    className="mb-1.5 flex items-center gap-2 rounded-md text-left focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none"
-                  >
-                    <DisclosureTriangle open={acrossOpen} />
-                    <SectionLabel>Across titles</SectionLabel>
-                    <span className="text-[12px] text-muted-foreground tabular-nums">
-                      {view.items.length}
-                    </span>
-                  </button>
-                  <div id={`${sectionsId}-across`}>
-                    {acrossOpen ? (
-                      <div className="rounded-inset bg-muted/55 p-1 dark:bg-muted/40">
-                        <SortableList
-                          items={view.items}
-                          id={(c) => c.id}
-                          name={headline}
-                          arranging={arranging}
-                          label={`Accomplishments across titles at ${employer}`}
-                          onReorder={(next) => void reorder(card.id, next.map((c) => c.id))}
-                          className="flex flex-col"
-                          render={(item) => (
-                            <AccomplishmentRow
-                              card={item}
-                              onOpen={onOpen}
-                              fresh={fresh.has(item.id)}
-                              compact={arranging}
-                            />
-                          )}
-                        />
-                      </div>
-                    ) : (
-                      <AccomplishmentPeek items={view.items} onExpand={() => setAcrossOpen(true)} />
-                    )}
-                  </div>
+                <div className="-ml-5 border-t pt-3">
+                  <AccomplishmentRows
+                    items={view.items}
+                    heading="Across titles"
+                    label={`Accomplishments across titles at ${employer}`}
+                    arranging={arranging}
+                    onOpen={onOpen}
+                    onReorder={(ids) => void reorder(card.id, ids)}
+                  />
                 </div>
               )}
             </div>

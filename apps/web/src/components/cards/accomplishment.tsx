@@ -62,9 +62,9 @@ function Skills({ card, className }: { card: LibraryCard; className?: string }) 
   );
 }
 
-/** One accomplishment as a line on its job: just its words, so the job reads
- * as one clean flow. Its skills and evidence show on the card itself, which
- * tapping the line opens. */
+/** One accomplishment on its job: a row card holding just its words, so the
+ * job reads as one clean flow. Its skills and evidence show on the card
+ * itself, which tapping the row lifts out. */
 export function AccomplishmentRow({
   card,
   onOpen,
@@ -82,12 +82,11 @@ export function AccomplishmentRow({
       type="button"
       onClick={() => onOpen(card)}
       className={cn(
-        "group flex w-full items-start gap-2.5 rounded-inset px-2 text-left transition-colors hover:bg-accent/60 focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none",
-        compact ? "py-1.5" : "py-2",
+        "group flex w-full items-start rounded-inset border bg-card px-3 text-left shadow-sheet transition-colors hover:border-foreground/15 hover:bg-accent/40 focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none",
+        compact ? "py-1.5" : "py-2.5",
         fresh && "animate-live-glow",
       )}
     >
-      <span aria-hidden className="mt-[9px] size-[5px] shrink-0 rounded-full bg-foreground/45" />
       <span
         className={cn(
           "min-w-0 flex-1 text-[14.5px] leading-[1.45] text-foreground/90",
@@ -188,7 +187,16 @@ export function AccomplishmentCard({ card, className }: { card: LibraryCard; cla
           </div>
         </div>
       }
-      back={() => <CardBack card={card} fields={fields} />}
+      back={() => (
+        // An accomplishment has no headline: its own words are the card.
+        <CardBack
+          card={card}
+          fields={fields}
+          headlineLabel={
+            purpose === "award" ? "The award" : card.kind === "project" ? "The project" : "The accomplishment"
+          }
+        />
+      )}
     />
   );
 }

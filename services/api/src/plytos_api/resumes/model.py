@@ -22,6 +22,13 @@ An employment left out of ``entries`` is left out of the resume; the cards
 stay in the person's library either way.
 
 ``header`` is the top of the page: name, contact details and a short summary.
+
+``highlights`` (schema version 2) features again, near the top, lines that
+already sit under a job in the career tree: as bullets, as a paragraph in the
+person's own words, or both, as they choose. An accomplishment is meaningful
+under its job first, so one that sits under no job can't be a highlight; it
+waits to be placed. Left out (None), the resume has no highlights section, and
+its content hashes exactly as it did in schema version 1.
 """
 
 from __future__ import annotations
@@ -32,7 +39,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-RESUME_SCHEMA_VERSION = 1
+RESUME_SCHEMA_VERSION = 2
 
 Wording = Literal["auto", "main"] | UUID
 
@@ -78,12 +85,30 @@ class ResumeHeader(BaseModel):
     summary: str = Field(default="", max_length=1500)
 
 
+HighlightStyle = Literal["bullets", "paragraph", "both"]
+
+HIGHLIGHTS_MAX = 12
+
+
+class ResumeHighlights(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    style: HighlightStyle = "bullets"
+    # The person's own words, shown when the style has a paragraph.
+    paragraph: str = Field(default="", max_length=1500)
+    # Lines featured again, each from under a job, shown when the style has bullets.
+    items: list[ResumeItem] = Field(default_factory=list, max_length=HIGHLIGHTS_MAX)
+
+
 class ResumeContent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     header: ResumeHeader = Field(default_factory=ResumeHeader)
     entries: list[ResumeEntry] = Field(default_factory=list)
     context: list[ResumeItem] = Field(default_factory=list)
+    # Left out when there are none, so such a resume reads, and hashes, as it
+    # did before highlights existed.
+    highlights: ResumeHighlights | None = Field(default=None, exclude_if=lambda v: v is None)
     # What this version did that a list of changes can't show, such as
     # "Back to version 2".
     note: str | None = Field(default=None, max_length=200)
@@ -91,6 +116,7 @@ class ResumeContent(BaseModel):
 
 ChangeKind = Literal[
     "header",
+    "highlights",
     "entry_added",
     "entry_removed",
     "fold",
@@ -121,7 +147,8 @@ def keep_wording(content: ResumeContent, target_id: UUID) -> ResumeContent:
     pinned to that target's wording, so a copy made for another target reads
     the same until the person changes it."""
     out = content.model_copy(deep=True)
-    for item in [i for e in out.entries for i in e.items] + list(out.context):
+    featured = out.highlights.items if out.highlights else []
+    for item in [i for e in out.entries for i in e.items] + list(out.context) + featured:
         if item.wording == "auto" and item.version is None:
             item.wording = target_id
     return out
@@ -138,6 +165,9 @@ def diff(base: ResumeContent, head: ResumeContent) -> list[ResumeChange]:
     if base.header != head.header:
         # The header has no card; the key just needs to be stable.
         changes.append(ResumeChange(key="header", kind="header", card=UUID(int=0)))
+    if base.highlights != head.highlights:
+        # Taken as one: their style, words and lines go together.
+        changes.append(ResumeChange(key="highlights", kind="highlights", card=UUID(int=0)))
     before = {e.card: e for e in base.entries}
     after = {e.card: e for e in head.entries}
     for card, entry in after.items():
@@ -225,6 +255,10 @@ def still_to_take(
             if mine.header != theirs.header:
                 out.append(change)
             continue
+        if change.kind == "highlights":
+            if mine.highlights != theirs.highlights:
+                out.append(change)
+            continue
         if change.kind == "entry_added" and change.card in entries:
             continue
         if change.kind == "entry_removed" and change.card not in entries:
@@ -268,6 +302,10 @@ def apply(mine: ResumeContent, theirs: ResumeContent, take: list[ResumeChange]) 
     for change in take:
         if change.kind == "header":
             result.header = theirs.header.model_copy(deep=True)
+        elif change.kind == "highlights":
+            result.highlights = (
+                theirs.highlights.model_copy(deep=True) if theirs.highlights else None
+            )
         elif change.kind == "entry_added":
             entry = next(e for e in theirs.entries if e.card == change.card)
             order = [e.card for e in theirs.entries]

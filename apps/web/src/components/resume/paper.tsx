@@ -23,6 +23,7 @@ import type { DiffEntry, DiffLine, HeaderChange, ResumeDiff } from "@/lib/resume
 import {
   lineParts,
   type RenderedEntry,
+  type RenderedHighlights,
   type RenderedItem,
   type RenderedResume,
   type ResumeHeader,
@@ -38,6 +39,8 @@ export type PaperEdits = {
   moveEntry: (entry: string, by: -1 | 1) => void;
   moveLine: (entry: string, group: string[], card: string, by: -1 | 1) => void;
   moveContext: (group: string[], card: string, by: -1 | 1) => void;
+  unfeature: (card: string) => void;
+  moveHighlight: (card: string, by: -1 | 1) => void;
   editHeader: () => void;
 };
 
@@ -173,6 +176,8 @@ type LineProps = {
   // For moving it among the lines shown with it.
   up?: () => void;
   down?: () => void;
+  // Takes it off this list; by default, off the resume.
+  remove?: () => void;
 };
 
 /** A bullet drawn on the line's first row; list markers drift on lines that
@@ -181,7 +186,16 @@ function Bullet() {
   return <span aria-hidden className="mt-[0.62em] size-[4.5px] shrink-0 rounded-full bg-paper-ink/55" />;
 }
 
-function Line({ item, dated, bullet, edit, onOpen, up, down }: LineProps & { bullet: boolean }) {
+function Line({
+  item,
+  dated,
+  bullet,
+  edit,
+  onOpen,
+  up,
+  down,
+  remove,
+}: LineProps & { bullet: boolean }) {
   const { text, detail } = lineParts(item);
   // The page reads as one clean flow; which lines carry this version's own
   // wording shows only while editing.
@@ -227,9 +241,9 @@ function Line({ item, dated, bullet, edit, onOpen, up, down }: LineProps & { bul
               </PaperButton>
             )}
             <PaperButton
-              label={`Leave out: ${text}`}
+              label={remove ? `Stop featuring: ${text}` : `Leave out: ${text}`}
               disabled={edit.busy}
-              onClick={() => edit.switchOff(item.card)}
+              onClick={remove ?? (() => edit.switchOff(item.card))}
             >
               <X />
             </PaperButton>
@@ -247,6 +261,7 @@ function Lines({
   onOpen,
   canOpen,
   move,
+  remove,
   bullets = true,
   dated = false,
 }: {
@@ -255,6 +270,7 @@ function Lines({
   onOpen?: (card: string) => void;
   canOpen?: (card: string) => boolean;
   move?: (group: string[], card: string, by: -1 | 1) => void;
+  remove?: (card: string) => void;
   bullets?: boolean;
   dated?: boolean;
 }) {
@@ -272,6 +288,7 @@ function Lines({
           onOpen={onOpen && (!canOpen || canOpen(item.card)) ? onOpen : undefined}
           up={move && i > 0 ? () => move(group, item.card, -1) : undefined}
           down={move && i < items.length - 1 ? () => move(group, item.card, 1) : undefined}
+          remove={remove ? () => remove(item.card) : undefined}
         />
       ))}
     </ul>
@@ -387,6 +404,49 @@ function OnFile({ entry, edit }: { entry: RenderedEntry; edit: PaperEdits }) {
   );
 }
 
+/** Lines featured again near the top, in the style the person picked: their
+ * own paragraph, the featured lines as bullets, or both. */
+function Highlights({
+  highlights,
+  edit,
+  onOpen,
+  canOpen,
+}: {
+  highlights: RenderedHighlights;
+  edit?: PaperEdits;
+  onOpen?: (card: string) => void;
+  canOpen?: (card: string) => boolean;
+}) {
+  const paragraph = highlights.style !== "bullets" ? highlights.paragraph.trim() : "";
+  const items = highlights.style !== "paragraph" ? highlights.items : [];
+  if (!paragraph && items.length === 0) {
+    return edit ? (
+      <section aria-label="Highlights">
+        <SectionHeading>Highlights</SectionHeading>
+        <p className="rounded-inset border border-dashed border-paper-rule px-3 py-2.5 text-[12.5px] text-paper-soft print:hidden">
+          {highlights.style === "bullets"
+            ? "Feature lines from your jobs with the panel beside the page."
+            : "Write the paragraph in the panel beside the page."}
+        </p>
+      </section>
+    ) : null;
+  }
+  return (
+    <section aria-label="Highlights">
+      <SectionHeading>Highlights</SectionHeading>
+      {paragraph && <p className="leading-relaxed whitespace-pre-line">{paragraph}</p>}
+      <Lines
+        items={items}
+        edit={edit}
+        onOpen={onOpen}
+        canOpen={canOpen}
+        move={edit ? (_, card, by) => edit.moveHighlight(card, by) : undefined}
+        remove={edit ? edit.unfeature : undefined}
+      />
+    </section>
+  );
+}
+
 export function Paper({
   page,
   edit,
@@ -402,6 +462,10 @@ export function Paper({
   return (
     <PaperSheet aria-label="Resume">
       <Top header={page.header} edit={edit} />
+
+      {page.highlights && (
+        <Highlights highlights={page.highlights} edit={edit} onOpen={onOpen} canOpen={canOpen} />
+      )}
 
       {page.entries.length > 0 && <SectionHeading>Experience</SectionHeading>}
       <div className="flex flex-col gap-4">
@@ -593,30 +657,64 @@ function TopChanges({ changes }: { changes: HeaderChange[] }) {
 }
 
 export function DiffPaper({ diff, header }: { diff: ResumeDiff; header: ResumeHeader }) {
+  const featured = diff.sections.find((s) => s.kind === "highlights") ?? null;
+  const highlighted = featured !== null || diff.paragraph !== "" || diff.paragraphChange !== null;
   return (
     <PaperSheet aria-label="Resume, with changes marked">
       <Top header={header} />
       <TopChanges changes={diff.header} />
+      {highlighted && (
+        <section aria-label="Highlights">
+          <SectionHeading>Highlights</SectionHeading>
+          <ParagraphView diff={diff} />
+          {featured && <DiffLines lines={featured.lines} />}
+        </section>
+      )}
       {diff.entries.length > 0 && <SectionHeading>Experience</SectionHeading>}
       <div className="flex flex-col gap-4">
         {diff.entries.map((entry) => (
           <DiffJob key={entry.card} entry={entry} />
         ))}
       </div>
-      {diff.sections.map((section) => (
-        <section key={section.kind} aria-label={section.label}>
-          <SectionHeading>
-            {section.label}
-            {section.presence === "added" && <Mark kind="added">Added</Mark>}
-            {section.presence === "removed" && <Mark kind="removed">Left out</Mark>}
-          </SectionHeading>
-          <DiffLines
-            lines={section.lines}
-            bullets={section.kind === "accomplishment" || section.kind === "project"}
-            dated
-          />
-        </section>
-      ))}
+      {diff.sections
+        .filter((s) => s.kind !== "highlights")
+        .map((section) => (
+          <section key={section.kind} aria-label={section.label}>
+            <SectionHeading>
+              {section.label}
+              {section.presence === "added" && <Mark kind="added">Added</Mark>}
+              {section.presence === "removed" && <Mark kind="removed">Left out</Mark>}
+            </SectionHeading>
+            <DiffLines
+              lines={section.lines}
+              bullets={section.kind === "accomplishment" || section.kind === "project"}
+              dated
+            />
+          </section>
+        ))}
     </PaperSheet>
+  );
+}
+
+/** The highlights paragraph, marked when it's new or its words changed. */
+function ParagraphView({ diff }: { diff: ResumeDiff }) {
+  const change = diff.paragraphChange;
+  if (!diff.paragraph && !change) return null;
+  return (
+    <div
+      className={cn(
+        "-mx-1.5 rounded-[4px] px-1.5",
+        change && !change.was && "bg-paper-added",
+        change && !change.now && "bg-paper-removed/[0.06]",
+      )}
+    >
+      {diff.paragraph && <p className="leading-relaxed whitespace-pre-line">{diff.paragraph}</p>}
+      {change?.was && (
+        <p className="mt-0.5 text-[12px] text-paper-soft">
+          <span className="font-medium">{change.now ? "Reworded." : "Left out."}</span> It read:{" "}
+          <span className="line-through decoration-paper-soft/60">{change.was}</span>
+        </p>
+      )}
+    </div>
   );
 }
