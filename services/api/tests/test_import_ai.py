@@ -122,7 +122,9 @@ def good_reading() -> dict[str, Any]:
             ),
         ],
         "skills": [],
-        "entries": [{"kind": "education", "lines": [16], "dates": "2010"}],
+        "entries": [
+            {"kind": "education", "lines": [16], "dates": "2010", "school": "", "degree": ""}
+        ],
         "skipped": [],
     }
 
@@ -467,3 +469,79 @@ def test_a_title_outside_the_employer_tenure_is_flagged() -> None:
     # The moved date now overlaps the job before; titles inside Northwind never count.
     [overlap] = [f for f in result.findings if f.rule == "dates.overlap"]
     assert "Brightline Partners" in overlap.detail
+
+
+SCHOOLED = (
+    "Pat Lee\n"
+    "Experience\n"
+    "Store Manager, Fabrikam Retail, 2019 - 2021\n"
+    "Grew sales 12% in two years by reworking the floor plan.\n"
+    "Leadership\n"
+    "• Led a team of 40.\n"
+    "• Opened the store on weekends.\n"
+    "Education\n"
+    "Bachelor of Science : Business Administration , 2015 Lakeshore College Springfield , IL\n"
+)
+
+
+def _schooled(school: str, degree: str) -> dict[str, Any]:
+    return {
+        "name": "Pat Lee",
+        "contact_lines": [0],
+        "sections": [
+            {"kind": "contact", "heading_line": -1, "lines": [0]},
+            {"kind": "experience", "heading_line": 1, "lines": [2, 3, 4, 5, 6]},
+            {"kind": "education", "heading_line": 7, "lines": [8]},
+        ],
+        "summary_lines": [],
+        "employments": [],
+        "roles": [
+            _role(
+                title="Store Manager",
+                employer="Fabrikam Retail",
+                dates="2019 - 2021",
+                header_lines=[2],
+                # The sentence taken for a sub-heading, as a reading may.
+                subheading_lines=[3, 4],
+                bullet_lines=[5, 6],
+            )
+        ],
+        "skills": [],
+        "entries": [
+            {"kind": "education", "lines": [8], "dates": "2015", "school": school, "degree": degree}
+        ],
+        "skipped": [],
+    }
+
+
+def _read_schooled(school: str, degree: str) -> ImportResult:
+    reader = FakeReader(_schooled(school, degree))
+    return import_resume(SCHOOLED.encode(), "pat.txt", today=TODAY, reader=reader)
+
+
+def test_the_school_and_degree_are_as_claude_names_them() -> None:
+    result = _read_schooled("Lakeshore College", "Bachelor of Science : Business Administration")
+    [school] = [c for c in result.cards if c.kind == "education"]
+    assert school.content.facts["institution"] == "Lakeshore College"
+    assert school.content.facts["degree"] == "Bachelor of Science : Business Administration"
+
+
+def test_a_school_the_line_doesnt_name_is_not_taken() -> None:
+    result = _read_schooled("Harvard University", "")
+    [school] = [c for c in result.cards if c.kind == "education"]
+    assert school.content.facts.get("institution") != "Harvard University"
+    assert school.content.facts["degree"] == "Bachelor of Science : Business Administration"
+
+
+def test_a_sentence_taken_for_a_sub_heading_is_an_accomplishment() -> None:
+    result = _read_schooled("Lakeshore College", "")
+    done = {
+        c.content.framing.headline: c.content.facts.get("workstream")
+        for c in result.cards
+        if c.kind == "accomplishment"
+    }
+    assert done == {
+        "Grew sales 12% in two years by reworking the floor plan.": None,
+        "Led a team of 40.": "Leadership",
+        "Opened the store on weekends.": "Leadership",
+    }

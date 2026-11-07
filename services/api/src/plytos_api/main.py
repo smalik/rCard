@@ -60,6 +60,7 @@ from plytos_api.db import Database
 from plytos_api.imports.ai import reader_for
 from plytos_api.imports.extract import MAX_BYTES, UnsupportedFileError, detect_format
 from plytos_api.imports.matching import CardMatch
+from plytos_api.imports.pictures import page_picture
 from plytos_api.imports.store import (
     ImportConflictError,
     ImportNotFoundError,
@@ -150,6 +151,7 @@ class SaveVariantVersion(BaseModel):
 
 
 CardRef = Annotated[str, Path(pattern=r"^card-[0-9]{1,4}$")]
+PageNumber = Annotated[int, Path(ge=1, le=999)]
 
 
 class Settle(BaseModel):
@@ -710,6 +712,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content=data,
             media_type=ORIGINAL_TYPES[info.format],
             headers={FILENAME_HEADER: quote(info.name)},
+        )
+
+    @app.get("/v1/imports/{import_id}/pages/{page}")
+    def get_page(import_id: UUID, page: PageNumber, user_id: User) -> Response:
+        """A page of the person's PDF as a picture, to check what was read from a scan
+        against. Drawn from the kept file each time; nothing is stored."""
+        with db.as_user(user_id) as conn:
+            info, data = imports(conn, user_id).original(import_id)
+        picture = page_picture(data, page) if info.format == "pdf" else None
+        if picture is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "That page isn't in this file.")
+        return Response(
+            content=picture, media_type="image/jpeg", headers={"Cache-Control": "no-store"}
         )
 
     @app.delete("/v1/imports/{import_id}", status_code=status.HTTP_204_NO_CONTENT)

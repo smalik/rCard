@@ -81,8 +81,8 @@ def reading() -> dict[str, Any]:
         ],
         "skills": [],
         "entries": [
-            {"kind": "education", "lines": [16], "dates": "2012"},
-            {"kind": "activity", "lines": [18], "dates": "2022"},
+            {"kind": "education", "lines": [16], "dates": "2012", "school": "", "degree": ""},
+            {"kind": "activity", "lines": [18], "dates": "2022", "school": "", "degree": ""},
         ],
         "skipped": [{"line": 14, "reason": "page_number"}, {"line": 19, "reason": "references"}],
     }
@@ -229,7 +229,9 @@ def _workstream_reading(subheadings: list[int], experience: list[int]) -> dict[s
             )
         ],
         "skills": [],
-        "entries": [{"kind": "education", "lines": [11], "dates": "2015"}],
+        "entries": [
+            {"kind": "education", "lines": [11], "dates": "2015", "school": "", "degree": ""}
+        ],
         "skipped": [],
     }
 
@@ -376,9 +378,9 @@ def test_entries_listed_under_a_year_take_that_year() -> None:
         "roles": [],
         "skills": [],
         "entries": [
-            {"kind": "activity", "lines": [4], "dates": "2019"},
-            {"kind": "activity", "lines": [5], "dates": "2019"},
-            {"kind": "activity", "lines": [7], "dates": "2017"},
+            {"kind": "activity", "lines": [4], "dates": "2019", "school": "", "degree": ""},
+            {"kind": "activity", "lines": [5], "dates": "2019", "school": "", "degree": ""},
+            {"kind": "activity", "lines": [7], "dates": "2017", "school": "", "degree": ""},
         ],
         "skipped": [],
     }
@@ -396,3 +398,93 @@ def test_entries_listed_under_a_year_take_that_year() -> None:
     # The year lines head the entries under them.
     assert result.lines is not None
     assert result.lines.guessed == [] and {3, 6} <= set(result.lines.headings)
+
+
+def test_a_workstream_read_as_another_title_is_folded_back() -> None:
+    # The second label read as a title of its own, undated, under the same employer.
+    found = _workstream_reading([4], [3, 4, 5, 6, 7, 8, 9])
+    found["roles"][0]["bullet_lines"] = [5, 6]
+    found["roles"].append(_role(title="Workforce Strategies", header_lines=[7], bullet_lines=[8]))
+    found["employments"] = [
+        {
+            "employer": "Contoso Motors",
+            "location": "Plano, TX",
+            "dates": "",
+            "header_lines": [],
+            "description_lines": [],
+        }
+    ]
+    found["roles"][0]["employment"] = 0
+    result = _import_workstreams(found)
+    _all_lines_placed(result)
+    assert [c.content.facts.get("title") for c in result.cards if c.kind == "position"] == [
+        "Consultant"
+    ]
+    assert _workstreams(result) == {
+        5: "Enterprise AI",
+        6: "Enterprise AI",
+        8: "Workforce Strategies",
+    }
+
+
+def test_an_undated_title_under_a_dated_one_stays_a_title() -> None:
+    text = "\n".join(
+        [
+            "Casey Morgan",
+            "casey.morgan@example.com | 555-0100",
+            "EXPERIENCE",
+            "Consultant, Contoso Motors, Plano, TX\tAug 2025 – Present",
+            "• Built a document search assistant used by 400 analysts.",
+            "Senior Consultant",
+            "• Modeled staffing needs for 6 plants.",
+        ]
+    )
+    found = _workstream_reading([], [3, 4, 5, 6])
+    found["sections"] = found["sections"][:2]
+    found["contact_lines"] = [0, 1]
+    found["entries"] = []
+    found["roles"][0].update(subheading_lines=[], bullet_lines=[4])
+    found["roles"].append(_role(title="Senior Consultant", header_lines=[5], bullet_lines=[6]))
+    result = import_resume(text.encode(), "casey.txt", today=TODAY, reader=FakeReader(found))
+    titles = [c.content.facts.get("title") for c in result.cards if c.kind == "position"]
+    assert titles == ["Consultant", "Senior Consultant"]
+
+
+def test_a_bold_line_under_a_plain_dated_title_is_a_workstream_even_named_like_one() -> None:
+    import io
+
+    from docx import Document
+
+    doc = Document()
+    doc.add_paragraph("Casey Morgan")
+    doc.add_paragraph("casey.morgan@example.com | 555-0100")
+    doc.add_paragraph().add_run("EXPERIENCE").bold = True
+    doc.add_paragraph().add_run("Contoso Motors, Plano, TX\tAug 2020 – Present").bold = True
+    doc.add_paragraph("Consultant\tAug 2020 – Present")
+    doc.add_paragraph("Built a document search assistant.", style="List Bullet")
+    doc.add_paragraph().add_run("Analytics Lead").bold = True
+    doc.add_paragraph("Modeled staffing needs for 6 plants.", style="List Bullet")
+    out = io.BytesIO()
+    doc.save(out)
+    found = _workstream_reading([], [3, 4, 5, 6, 7])
+    found["sections"] = found["sections"][:2]
+    found["entries"] = []
+    found["contact_lines"] = [0, 1]
+    found["employments"] = [
+        {
+            "employer": "Contoso Motors",
+            "location": "Plano, TX",
+            "dates": "Aug 2020 – Present",
+            "header_lines": [3],
+            "description_lines": [],
+        }
+    ]
+    found["roles"] = [
+        _role(title="Consultant", dates="Aug 2020 – Present", header_lines=[4], bullet_lines=[5]),
+        # Read as a title, with the employer's line given as one of its own.
+        _role(title="Analytics Lead", header_lines=[6, 3], bullet_lines=[7]),
+    ]
+    result = import_resume(out.getvalue(), "casey.docx", today=TODAY, reader=FakeReader(found))
+    titles = [c.content.facts.get("title") for c in result.cards if c.kind == "position"]
+    assert titles == ["Consultant"]
+    assert _workstreams(result)[7] == "Analytics Lead"

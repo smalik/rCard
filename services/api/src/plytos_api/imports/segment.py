@@ -2,11 +2,12 @@
 
 import re
 
-from plytos_api.imports.dates import find_range, strip_range
+from plytos_api.imports.dates import find_range, only_dates, strip_range
 from plytos_api.imports.model import (
     Block,
     Bullet,
     Contact,
+    DateRange,
     Entry,
     ExtractedDocument,
     ParsedResume,
@@ -18,6 +19,23 @@ from plytos_api.imports.model import (
 
 # Standard headings an applicant tracking system expects, by what they hold.
 HEADINGS: dict[str, SectionKind] = {
+    # Headings a resume builder sets; a page printed without styling has nothing else
+    # to tell them from any other line.
+    "executive profile": "summary",
+    "career overview": "summary",
+    "career focus": "summary",
+    "core qualifications": "skills",
+    "skill highlights": "skills",
+    "summary of skills": "skills",
+    "computer skills": "skills",
+    "core strengths": "skills",
+    "core accomplishments": "highlights",
+    "selected achievements": "highlights",
+    "activities and honors": "awards",
+    "educational background": "education",
+    "military experience": "experience",
+    "personal information": "contact",
+    "additional information": "other",
     "contact": "contact",
     "contact information": "contact",
     "contact info": "contact",
@@ -95,6 +113,12 @@ HEADINGS: dict[str, SectionKind] = {
     "publications": "publications",
     "presentations": "publications",
     "publications and presentations": "publications",
+    "talks": "publications",
+    "speaking": "publications",
+    "speaking engagements": "publications",
+    "talks and presentations": "publications",
+    "presentations and talks": "publications",
+    "conference talks": "publications",
     "volunteer": "volunteer",
     "volunteering": "volunteer",
     "volunteer experience": "volunteer",
@@ -133,6 +157,8 @@ _HEADING_KEYWORDS: list[tuple[str, SectionKind]] = [
     ("highlight", "highlights"),
     ("volunteer", "volunteer"),
     ("publication", "publications"),
+    ("presentation", "publications"),
+    ("speaking", "publications"),
     ("affiliation", "affiliations"),
     ("membership", "affiliations"),
     ("reference", "references"),
@@ -204,8 +230,11 @@ _STATE_NAMES = (
     "West Virginia|Wisconsin|Wyoming"
 )
 LOCATION = re.compile(
-    rf"(?:\b[A-Z][A-Za-z.'\-]+(?:\s+[A-Z][A-Za-z.'\-]+){{0,3}},\s*(?:(?:{_US_STATES})\b|"
+    rf"(?:\b[A-Z][A-Za-z.'\-]+(?:\s+[A-Z][A-Za-z.'\-]+){{0,3}}\s*,\s*(?:(?:{_US_STATES})\b|"
     rf"(?:{_STATE_NAMES})\b)(?:\s+\d{{5}}(?:-\d{{4}})?)?)"
+    # With a ZIP code after it, a city and state need no comma: "Springfield IL 62701".
+    rf"|(?:\b[A-Z][A-Za-z.'\-]+(?:\s+[A-Z][A-Za-z.'\-]+){{0,2}}\s+(?:{_US_STATES})"
+    r"\s+\d{5}(?:-\d{4})?\b)"
     r"|\b(?:Remote|Hybrid)\b",
 )
 EMAIL = re.compile(r"[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)+")
@@ -231,6 +260,42 @@ _SKILL_SPLIT = re.compile(r"\s*(?:[,;|•·▪◦\t]|\s{3,})\s*")
 
 
 _REFERENCES_LINE = re.compile(r"^references?\b.*\b(?:request|available)\b", re.IGNORECASE)
+
+
+# Sub-headings inside a job that only say what kind of lines follow. They group
+# nothing a person would name, so they're not a workstream.
+GENERIC_LABELS = {
+    "responsibilities",
+    "key responsibilities",
+    "main responsibilities",
+    "duties",
+    "duties and responsibilities",
+    "responsibilities and duties",
+    "responsibilities and achievements",
+    "achievements",
+    "key achievements",
+    "notable achievements",
+    "accomplishments",
+    "key accomplishments",
+    "major accomplishments",
+    "selected accomplishments",
+    "highlights",
+    "key highlights",
+    "results",
+    "key results",
+    "contributions",
+    "key contributions",
+    "role",
+    "overview",
+    "description",
+    "job description",
+    "summary",
+    "tasks",
+}
+
+
+def is_generic_label(text: str | None) -> bool:
+    return text is not None and normalize_heading(text.strip().rstrip(":")) in GENERIC_LABELS
 
 
 def normalize_heading(text: str) -> str:
@@ -342,6 +407,16 @@ def segment(doc: ExtractedDocument) -> ParsedResume:
         if block.where in ("header", "footer") or block.index in markings | boxed_contact:
             continue
         found = heading_kind(block)
+        if (
+            found is not None
+            and current.kind in ("experience", "volunteer")
+            and current.blocks
+            and block.text.rstrip().endswith(":")
+            and is_generic_label(block.text)
+        ):
+            # "Accomplishments:" over a job's bullets, inside the job: a sub-heading,
+            # not the start of another section.
+            found = None
         if found is None and plain_skip(block.text) is not None:
             continue  # A page number, a rule or "References available on request".
         if found is not None:
@@ -395,6 +470,17 @@ def segment(doc: ExtractedDocument) -> ParsedResume:
         section_blocks = [by_index[i] for i in section.blocks]
         kind = section.holds or section.kind
         if kind in ("experience", "volunteer"):
+            # Prose before the first job is the summary, written under this heading.
+            lead = 0
+            while lead < len(section_blocks) and (
+                not section_blocks[lead].is_bullet and _is_description(section_blocks[lead])
+            ):
+                lead += 1
+            if 0 < lead < len(section_blocks) and kind == "experience":
+                text = " ".join(_strip_inline(b.text) for b in section_blocks[:lead])
+                parsed.summary = f"{parsed.summary} {text}".strip() if parsed.summary else text
+                parsed.summary_blocks += [b.index for b in section_blocks[:lead]]
+                section_blocks = section_blocks[lead:]
             roles = parse_roles(section_blocks, kind, start=role_count)
             role_count += len(roles)
             parsed.roles.extend(roles)
@@ -414,6 +500,8 @@ def segment(doc: ExtractedDocument) -> ParsedResume:
             parsed.projects += parse_entries(section_blocks, grouped=True)
         elif kind == "awards":
             parsed.awards += parse_entries(section_blocks, grouped=False)
+        elif kind in ("publications", "affiliations"):
+            parsed.activities += parse_listed(section_blocks)
         elif kind == "highlights":
             parsed.highlights += parse_entries(section_blocks, grouped=False)
     return parsed
@@ -456,6 +544,28 @@ def _strip_inline(text: str) -> str:
 
 # --- Contact ------------------------------------------------------------------
 
+# A number written another way than 555-555-5555: "+44 20 7946 0958", "(0161) 496 0000",
+# "98450 12345". Looked for only on lines already taken for contact details.
+_NUMBER_RUN = re.compile(r"(?<![\w+])\+?\s?\(?\d[\d\s().\-]{6,22}\d(?![\w])")
+_YEAR = re.compile(r"(?:19|20)\d\d")
+
+
+def _phones_written_otherwise(text: str) -> list[str]:
+    found = []
+    for m in _NUMBER_RUN.finditer(text):
+        run = m.group(0).strip()
+        groups = re.findall(r"\d+", run)
+        digits = sum(len(g) for g in groups)
+        if not 10 <= digits <= 15 or find_range(run) is not None:
+            continue
+        # Each part a few figures long, unless it's one long run after a "+".
+        if any(len(g) > 5 for g in groups) and not (run.startswith("+") and len(groups) == 1):
+            continue
+        if all(_YEAR.fullmatch(g) for g in groups):
+            continue
+        found.append(run)
+    return found
+
 
 def parse_contact(blocks: list[Block]) -> Contact:
     contact = Contact(blocks=[b.index for b in blocks])
@@ -465,7 +575,7 @@ def parse_contact(blocks: list[Block]) -> Contact:
         for email in EMAIL.findall(text):
             if email not in contact.emails:
                 contact.emails.append(email)
-        for phone in PHONE.findall(text):
+        for phone in PHONE.findall(text) or _phones_written_otherwise(text):
             if phone.strip() not in contact.phones:
                 contact.phones.append(phone.strip())
         for link in [*block.links, *LINK.findall(text)]:
@@ -479,13 +589,26 @@ def parse_contact(blocks: list[Block]) -> Contact:
         if contact.location is None:
             m = LOCATION.search(EMAIL.sub(" ", text))
             if m:
-                contact.location = m.group(0).strip()
+                contact.location = _city_state(m.group(0))
         name = _name(text)
         if name is not None:
             names.append((-max(block.font_sizes, default=0.0), block.index, name))
     if names:
         contact.name = sorted(names)[0][2]
     return contact
+
+
+_STREET_WORD = re.compile(
+    r"(?:St|Street|Ave|Avenue|Rd|Road|Blvd|Boulevard|Dr|Drive|Ln|Lane|Way|Ct|Court|Pl|Place|"
+    r"Cir|Circle|Pkwy|Parkway|Ter|Terrace|Hwy|Highway|Trl|Trail|Loop|Apt|Suite|Ste|Unit)\.?,?"
+)
+
+
+def _city_state(found: str) -> str:
+    """A location as found, without the street it may follow on an address line."""
+    words = re.sub(r"\s+,", ",", found.strip()).split()
+    last = max((i for i, w in enumerate(words) if _STREET_WORD.fullmatch(w)), default=-1)
+    return " ".join(words[last + 1 :] if 0 <= last < len(words) - 2 else words)
 
 
 def _name(text: str) -> str | None:
@@ -526,13 +649,53 @@ class _Group:
         return any(re.search(r"\bclients?\b", b.text, re.IGNORECASE) for b in self.header)
 
 
+def _carries_on(group: _Group, block: Block) -> bool:
+    """A line that carries on the sentence above it, wrapped onto a line of its own:
+    it starts in lower case and the line above didn't end the sentence."""
+    lines = group.bullets or group.description
+    text = block.text.strip()
+    if not lines or not text or find_range(text) is not None:
+        return False
+    return text[0].islower() and not lines[-1].text.rstrip().endswith((".", "!", "?", ":"))
+
+
+# A full stop that ends a company's name, not a sentence: "Acme Widget Company Inc."
+_NAME_STOP = re.compile(r"\b(?:inc|co|corp|ltd|llc|llp|plc|l\.l\.c|l\.p|n\.a)\.$", re.IGNORECASE)
+
+
+def _opens_description(group: _Group, block: Block) -> bool:
+    """A short sentence under a dated title and employer, before its bullets: what the
+    job was ("Ran a store of 40 people."), not more of its heading."""
+    text = block.text.strip()
+    return (
+        group.dated()
+        and not group.bullets
+        and len(text.split()) >= 4
+        and text.endswith((".", "!"))
+        and not _NAME_STOP.search(text)
+        and find_range(text) is None
+    )
+
+
 def _pieces(text: str) -> list[str]:
     return [p for p in (_tidy(p) for p in _SPLIT_PIECES.split(text)) if p]
 
 
-def _starts_engagement(group: _Group, block: Block) -> bool:
-    """A line under a dated role that names another organization (a client, say)."""
+def _starts_engagement(group: _Group, block: Block, above: _Group | None) -> bool:
+    """A line under a dated role that names another organization (a client, say).
+
+    Only once the role's employer is known, from its own lines or from a bare employer
+    line just above it. Until then the line is more of the role's heading: "2015 - 2017"
+    over "Senior Engineer, Acme Corp", or a dated title over its employer's name."""
     if not group.dated() or find_range(block.text) is not None:
+        return False
+    employer_above = (
+        above is not None
+        and not above.bullets
+        and not above.description
+        and _parse_header(above.header)[0].organization is not None
+    )
+    if not employer_above and _parse_header(group.header)[0].organization is None:
         return False
     pieces = _pieces(block.text)
     if len(pieces) >= 2 and any(_looks_like_role_line(p) for p in pieces):
@@ -541,6 +704,7 @@ def _starts_engagement(group: _Group, block: Block) -> bool:
 
 
 def parse_roles(blocks: list[Block], section: SectionKind, *, start: int = 0) -> list[Role]:
+    texts = {b.index: b.text for b in blocks}
     groups: list[_Group] = []
     current: _Group | None = None
     for block in blocks:
@@ -550,7 +714,11 @@ def parse_roles(blocks: list[Block], section: SectionKind, *, start: int = 0) ->
                 groups.append(current)
             current.bullets.append(block)
             continue
-        if current is not None and _is_description(block):
+        if current is not None and (
+            _is_description(block)
+            or _carries_on(current, block)
+            or _opens_description(current, block)
+        ):
             (current.bullets if current.bullets else current.description).append(block)
             continue
         line_range = find_range(block.text)
@@ -563,7 +731,7 @@ def parse_roles(blocks: list[Block], section: SectionKind, *, start: int = 0) ->
                 and current.dated()
                 and bool(strip_range(block.text, line_range))
             )
-            or _starts_engagement(current, block)
+            or _starts_engagement(current, block, groups[-2] if len(groups) > 1 else None)
         )
         if starts_new:
             current = _Group()
@@ -587,22 +755,25 @@ def parse_roles(blocks: list[Block], section: SectionKind, *, start: int = 0) ->
     result: list[Role] = []
     parents: dict[int, Role] = {}
     parent: Role | None = None
-    # The role that opened the current employer line, while titles follow it.
+    # The role that opened the current employer line, while titles follow it, and
+    # the tenure written on that line.
     employer: Role | None = None
+    tenure: DateRange | None = None
     for role in roles:
         prev = result[-1] if result else None
         label = role.title if role.organization is None else None
-        # A short undated label over bullets ("Workforce Strategies") is a
-        # workstream inside the role above, not a role of its own.
+        # A short undated label over bullets ("Workforce Strategies"), or over a
+        # paragraph, is a workstream inside the role above, not a role of its own.
         if (
             prev is not None
             and role.dates is None
             and label is not None
             and _score(label) <= 0
             and len(label.split()) <= 5
-            and role.bullets
-            and not role.description
+            and bool(role.bullets) != bool(role.description)
         ):
+            _prose_as_lines(role, texts)
+            _prose_as_lines(prev, texts)
             for bullet in role.bullets:
                 bullet.group = label
             prev.bullets += role.bullets
@@ -621,18 +792,63 @@ def parse_roles(blocks: list[Block], section: SectionKind, *, start: int = 0) ->
                 parents[id(role)] = parent
                 result.append(role)
                 continue
-        # An employer line followed by a title line: "Acme Corp" then "Analyst 2019-2021".
+        # An employer line with its place and tenure, read as a title and employer
+        # because no word marks either ("Fabrikam Retail, Toronto, Ontario  2016 -
+        # Present"), over a dated title within that tenure: the line names the
+        # employer first, then where it is.
         if (
             prev is not None
+            and len(prev.header_blocks) == 1
+            and prev.title is not None
+            and prev.organization is not None
+            and _score(prev.title) <= 0
+            and not prev.bullets
+            and not prev.description
+            and role.title is not None
             and role.organization is None
+            and _within(role.dates, prev.dates)
+            and prev.dates is not None
+        ):
+            pieces = _pieces(strip_range(prev.header_text or "", prev.dates))
+            if len(pieces) >= 2:
+                prev.organization, prev.title = pieces[0], None
+                prev.location = prev.location or ", ".join(pieces[1:])
+                prev.confidence = "high"
+        # An employer line with its tenure over a title within it, when the employer's
+        # name has no word that marks it as one: "Tailspin Freight, Milwaukee, WI
+        # 2014 - 2018" over "Operations Manager 2015 - 2018". Two jobs in a row don't
+        # nest like that; a title under its employer's tenure does.
+        if (
+            prev is not None
+            and prev.organization is None
+            and prev.title is not None
+            # "Senior Software Engineer 2019 - Present" over "Team Lead 2021 - Present"
+            # is two titles: a line with title words is no employer.
+            and _score(prev.title) <= 0
+            and not prev.bullets
+            and not prev.description
+            and role.title is not None
+            and _within(role.dates, prev.dates)
+            and (role.organization is None or _label_line(role) is not None)
+        ):
+            prev.organization, prev.title = prev.title, None
+            _org_as_label(role, texts)
+        # An employer line followed by a title line: "Acme Corp" then "Analyst 2019-2021".
+        # A short line under the title is then a workstream label, the employer known.
+        if (
+            prev is not None
             and role.title is not None
             and prev.organization is not None
             and prev.title is None
             and not prev.bullets
             and not prev.description
+            and (role.organization is None or _org_as_label(role, texts))
         ):
+            tenure = prev.dates
             role.organization = prev.organization
-            role.organization_inferred = True
+            # Read off the line above, not guessed, when that line's tenure holds the
+            # title's dates: nothing to ask the person.
+            role.organization_inferred = not _within(role.dates, tenure)
             result.pop()
             role.employer_block = prev.header_blocks[0] if prev.header_blocks else None
             role.header_blocks = prev.header_blocks + role.header_blocks
@@ -645,17 +861,17 @@ def parse_roles(blocks: list[Block], section: SectionKind, *, start: int = 0) ->
             employer is not None
             and prev is not None
             and prev.employer_block == employer.employer_block
-            and role.organization is None
             and role.title is not None
             and role.dates is not None
-            and _score(role.title) > 0
+            and (_score(role.title) > 0 or _within(role.dates, tenure))
+            and (role.organization is None or _org_as_label(role, texts))
         ):
             role.organization = employer.organization
             role.organization_inferred = True
             role.employer_block = employer.employer_block
             role.location = role.location or employer.location
         else:
-            employer = None
+            employer = tenure = None
         if role.dates is not None:
             parent = role
         result.append(role)
@@ -665,6 +881,58 @@ def parse_roles(blocks: list[Block], section: SectionKind, *, start: int = 0) ->
         if id(role) in parents:
             role.parent_ref = parents[id(role)].ref
     return result
+
+
+def _within(inner: DateRange | None, outer: DateRange | None) -> bool:
+    """Whether one date range lies inside another, both written."""
+    if inner is None or outer is None or inner.start is None or outer.start is None:
+        return False
+    if inner.start.ordinal() < outer.start.ordinal():
+        return False
+    if outer.current:
+        return True
+    if inner.current or inner.end is None or outer.end is None:
+        return False
+    return inner.end.ordinal(end=True) <= outer.end.ordinal(end=True)
+
+
+def _label_line(role: Role) -> str | None:
+    """The organization a role's header gave it, when it came from a short undated
+    line under the title: a workstream label, once the employer is known."""
+    if role.organization is None or len(role.header_blocks) < 2 or not role.header_text:
+        return None
+    last = role.header_text.split("\n")[-1].strip()
+    if find_range(last) is not None or len(last.split()) > 5 or _tidy(last) != role.organization:
+        return None
+    # "Globex Inc." under a title is a client, not a label.
+    return role.organization if _score(role.organization) >= 0 else None
+
+
+def _prose_as_lines(role: Role, texts: dict[int, str]) -> None:
+    """A role written as a paragraph, as unmarked lines in place of bullets, so a
+    workstream can sit beside it; each sentence still becomes its own card."""
+    if not role.description or role.bullets:
+        return
+    role.bullets = [
+        Bullet(block=i, text=texts[i], bullet_char=None) for i in role.description_blocks
+    ]
+    role.description = None
+    role.description_blocks = []
+
+
+def _org_as_label(role: Role, texts: dict[int, str]) -> bool:
+    """Moves a workstream label taken for the organization onto the lines it heads."""
+    label = _label_line(role)
+    if label is None:
+        return False
+    _prose_as_lines(role, texts)
+    for bullet in role.bullets:
+        bullet.group = bullet.group or label
+    role.organization = None
+    role.subheading_blocks += role.header_blocks[-1:]
+    role.header_blocks = role.header_blocks[:-1]
+    role.header_text = "\n".join(role.header_text.split("\n")[:-1])
+    return True
 
 
 def _score(piece: str) -> int:
@@ -693,14 +961,61 @@ def _tidy(piece: str) -> str:
     return piece if any(c.isalpha() for c in piece) else ""
 
 
+# Words that end an organization's name, so it can stand before a title on a line:
+# "Fabrikam Bank Senior Analyst", but not "Health Information Technology Specialist".
+_NAME_ENDS = _wordset(
+    """
+    inc inc. llc llc. llp lp ltd ltd. corp corp. corporation company co co. group bank
+    university college school hospital partners plc gmbh ag foundation institute
+    association agency labs laboratories industries holdings enterprises studios
+    ministry council authority commission church clinic center centre trust fund
+    ventures department dept army navy marines county
+    """
+)
+_JOINS = _wordset("of for and & in at to the on with")
+
+
+def _run_together(piece: str) -> tuple[str, str, bool] | None:
+    """A title and its employer run together on one line with nothing between them,
+    as when a tab or a column is lost: "Senior Software Engineer Contoso Systems" is
+    the title, then the employer. The title, the employer, and whether the title came
+    first; or nothing when the words don't divide cleanly."""
+    words = piece.split()
+    bare = [w.strip(",.()&").lower() for w in words]
+    titles = [i for i, w in enumerate(bare) if w in TITLE_WORDS]
+    if not titles:
+        return None
+    is_org = [w in ORG_WORDS or w.rstrip(".") in ORG_WORDS for w in bare]
+    ends = [i for i, w in enumerate(bare) if w in _NAME_ENDS or w.rstrip(".") in _NAME_ENDS]
+    last = titles[-1]
+    # The title first, up to its last title word; then words that name an employer.
+    if last < len(words) - 1 and any(is_org[last + 1 :]) and not [i for i in ends if i <= last]:
+        cut, title_first = last + 1, True
+        title, org = words[:cut], words[cut:]
+    # The employer first, ending on a word that ends a name; then the title.
+    elif last == len(words) - 1 and [i for i in ends if i < titles[0]]:
+        cut, title_first = max(i for i in ends if i < titles[0]) + 1, False
+        org, title = words[:cut], words[cut:]
+        if len(org) < 2:
+            return None
+    else:
+        return None
+    if bare[cut] in _JOINS or not words[cut][:1].isupper() or not org[0][:1].isupper():
+        return None
+    return " ".join(title), " ".join(org), title_first
+
+
 def _parse_header(header: list[Block]) -> tuple[Role, str | None]:
     """The role a header describes, and a workstream label under it if there is one."""
     role = Role(ref="", header_blocks=[b.index for b in header])
     role.header_text = "\n".join(b.text for b in header)
     pieces: list[tuple[int, str]] = []  # (line number, text) in reading order
+    dated: set[int] = set()  # the lines with a date range on them
     for line_no, block in enumerate(header):
         text = block.text
         found = find_range(text)
+        if found is not None:
+            dated.add(line_no)
         if found is not None and (role.dates is None or found.separator is not None):
             role.dates = found
             text = strip_range(text, found)
@@ -728,6 +1043,15 @@ def _parse_header(header: list[Block]) -> tuple[Role, str | None]:
         return role, label
     if len(pieces) == 1:
         piece = pieces[0][1]
+        # Only a line of its own, under its dates: a dated title line ("Benefits
+        # Specialist Health Services  2009 - 2012") usually has its employer below it,
+        # and an undated one is a title of the job above it.
+        run_together = _run_together(piece) if dated and pieces[0][0] not in dated else None
+        if run_together is not None:
+            role.title, role.organization, role.title_first = run_together
+            # Nothing between them on the page: a guess the person should see.
+            role.confidence = "low"
+            return role, label
         if _score(piece) > 0:
             role.title = piece
         elif _score(piece) < 0:
@@ -771,11 +1095,32 @@ def _parse_header(header: list[Block]) -> tuple[Role, str | None]:
 # --- Skills and entries -----------------------------------------------------------
 
 
+# A line that ends on one of these runs on to the next.
+_RUNS_ON = re.compile(
+    r"(?:[,&/–-]|\b(?:and|or|of|the|a|an|to|for|with|in|on|at|by|from|as|into|across))$",
+    re.IGNORECASE,
+)
+
+
+def _runs_on(above: str, text: str) -> bool:
+    """Whether a line carries on the one above it, wrapped in a narrow column: the
+    line above stops mid-phrase, or this one starts in lower case."""
+    above, text = above.rstrip(), text.lstrip()
+    if not above or not text or above.endswith((".", "!", "?", ":", ";")):
+        return False
+    return text[0].islower() or _RUNS_ON.search(above) is not None
+
+
 def parse_skills(blocks: list[Block]) -> list[tuple[str, list[str], list[int]]]:
     groups: list[tuple[str, list[str], list[int]]] = []
+    above = ""
     for block in blocks:
         category = "Skills"
         text = block.text
+        if groups and ":" not in text and _runs_on(above, text):
+            # "Operations: Lean, Six Sigma," wrapping onto "S&OP, Network design".
+            category = groups[-1][0]
+        above = text
         if ":" in text:
             head, rest = text.split(":", 1)
             if 0 < len(head.split()) <= 5 and rest.strip():
@@ -784,24 +1129,65 @@ def parse_skills(blocks: list[Block]) -> list[tuple[str, list[str], list[int]]]:
             re.sub(r"^(?:and|&)\s+", "", item).strip(" .") for item in _SKILL_SPLIT.split(text)
         ]
         items = [i for i in items if i and len(i) <= 60]
-        if items:
+        if items and groups and category == groups[-1][0] and category != "Skills":
+            groups[-1][1].extend(items)
+            groups[-1][2].append(block.index)
+        elif items:
             groups.append((category, items, [block.index]))
     return groups
 
 
 _DEGREE = re.compile(
     r"\b(?:B\.?\s?[AS]\.?|B\.?\s?Sc|BBA|M\.?\s?[AS]\.?|MBA|M\.?\s?Sc|MPA|MPH|MFA|J\.?D\.?|"
-    r"Ph\.?\s?D\.?|Ed\.?D|M\.?D\.?|Associate|Bachelor|Master|Doctor|Doctorate|Diploma|"
-    r"Certificate|High School|GED)\b",
+    r"Ph\.?\s?D\.?|Ed\.?D|M\.?D\.?|Associate'?s?|Bachelor'?s?|Master'?s?|Doctor|Doctorate|"
+    r"Diploma|Certificat(?:e|ion)s?|High School|GED)\b",
     re.IGNORECASE,
 )
 _SCHOOL = re.compile(r"\b(?:University|College|Institute|School|Academy|Polytechnic)\b")
+
+
+def parse_listed(blocks: list[Block]) -> list[Entry]:
+    """Entries one to a line, the way talks and memberships are listed. A line that
+    wraps joins the one above; a year on a line of its own dates the lines under it."""
+    entries: list[Entry] = []
+    year: DateRange | None = None
+    year_block: int | None = None
+    for block in blocks:
+        text = _strip_inline(block.text)
+        if only_dates(text):
+            year, year_block = find_range(text), block.index
+            continue
+        if entries and _runs_on(entries[-1].text, text):
+            entries[-1].text = f"{entries[-1].text} {text.strip()}"
+            entries[-1].blocks.append(block.index)
+            entries[-1].dates = entries[-1].dates or find_range(text)
+            continue
+        entry = Entry(text=text, blocks=[block.index], dates=find_range(text) or year)
+        if year_block is not None and entry.dates is year:
+            # The year's own line goes with the first line it dates.
+            entry.blocks.insert(0, year_block)
+            year_block = None
+        entries.append(entry)
+    return entries
 
 
 def parse_entries(blocks: list[Block], *, grouped: bool) -> list[Entry]:
     entries: list[Entry] = []
     for block in blocks:
         text = _strip_inline(block.text)
+        if (
+            not grouped
+            and entries
+            and (
+                _runs_on(entries[-1].text, text)
+                # "President's Award, Northwind" wrapping onto "Logistics, 2022".
+                or (entries[-1].dates is None and len(text.split()) <= 3 and find_range(text))
+            )
+        ):
+            entries[-1].text = f"{entries[-1].text} {text.strip()}"
+            entries[-1].blocks.append(block.index)
+            entries[-1].dates = entries[-1].dates or find_range(text)
+            continue
         starts = (
             not grouped
             or not entries
@@ -825,12 +1211,15 @@ def _continues(entry: Entry, text: str) -> bool:
     """A school line after a degree line (or the reverse) belongs to the same entry."""
     if entry.details:
         return False
+    # "May 2015" under its school, however much the line above names. ("Lincoln High
+    # School, 2008" names a school: it's dated, but it's a school of its own.)
+    names = _SCHOOL.search(text) or _DEGREE.search(text)
+    if find_range(text) is not None and len(text.split()) <= 4 and not names:
+        return True
     first_degree = bool(_DEGREE.search(entry.text))
     first_school = bool(_SCHOOL.search(entry.text))
     if first_degree and first_school:
         return False
-    return (
-        (first_degree and bool(_SCHOOL.search(text)) and not _DEGREE.search(text))
-        or (first_school and bool(_DEGREE.search(text)) and not _SCHOOL.search(text))
-        or (find_range(text) is not None and len(text.split()) <= 4)
+    return (first_degree and bool(_SCHOOL.search(text)) and not _DEGREE.search(text)) or (
+        first_school and bool(_DEGREE.search(text)) and not _SCHOOL.search(text)
     )

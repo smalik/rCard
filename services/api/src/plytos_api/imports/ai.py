@@ -57,6 +57,7 @@ from plytos_api.imports.model import (
 )
 from plytos_api.imports.segment import (
     HEADINGS,
+    TITLE_WORDS,
     _strip_inline,
     is_marking,
     normalize_heading,
@@ -118,6 +119,8 @@ class AiEntry(BaseModel):
     kind: str
     lines: list[int]
     dates: str
+    school: str
+    degree: str
 
 
 class AiSkip(BaseModel):
@@ -285,7 +288,12 @@ or "Core Qualifications"), not entries.
 listed apart from the roles) or activity (a talk, publication, board seat, \
 membership, volunteer work that isn't a job, or interest), with all of its lines and \
 its date or date range as written (for entries listed under a year written on a line \
-of its own, that year). kind is one of: {", ".join(ENTRY_KINDS)}.
+of its own, that year). kind is one of: {", ".join(ENTRY_KINDS)}. Schooling is \
+education (a degree, diploma or course of study at a school), even with a paragraph \
+under it. For education, school is the school's name alone, without its city, state \
+or dates, and degree is the degree and field of study as written (for example \
+"Bachelor of Science : Business Administration"), each copied exactly from its lines; \
+"" when it isn't written, and for other entries.
 - skipped: lines with nothing to keep, each with a reason: page_number; page_header \
 (the name or contact details repeated on a later page); decoration (rules or symbols); \
 references ("References available on request"). Never skip a line that says anything \
@@ -878,7 +886,10 @@ def _roles(
         if employment is not None and role.organization is None:
             role.organization = employment.organization
         role.title_first = _title_first(role, own_text)
-        subheadings = lines(ai.subheading_lines)
+        claimed = lines(ai.subheading_lines)
+        # A line called a sub-heading that reads as a bullet or a sentence is one: a
+        # bullet's lead-in isn't a workstream.
+        subheadings = [i for i in claimed if _names_a_group(blocks[i])]
         role.subheading_blocks = subheadings
         role.bullets = [
             Bullet(
@@ -887,7 +898,7 @@ def _roles(
                 bullet_char=blocks[i].bullet_char,
                 group=_group(subheadings, i, blocks),
             )
-            for i in lines(ai.bullet_lines)
+            for i in sorted({*lines(ai.bullet_lines), *(set(claimed) - set(subheadings))})
         ]
         description = lines(ai.description_lines)
         if description:
@@ -915,7 +926,63 @@ def _roles(
             role.organization = role.organization or parent.organization
             # Client work sits in the employment of the agency job it was done in.
             role.employment_ref = role.employment_key = parent.employment_ref
-    return roles
+    employers = {e.ref: set(e.header_blocks) for e in employments}
+    return _fold_subheadings(roles, blocks, employers)
+
+
+def _fold_subheadings(
+    roles: list[Role], blocks: dict[int, Block], shared: dict[str, set[int]]
+) -> list[Role]:
+    """A short undated line inside a dated title, read as another title of the same
+    employment ("Planning & Process Improvement" over some bullets), is a workstream
+    of the title above it: its bullets stay with that title, under its name. A title
+    ends on a word like Manager or Lead; a workstream doesn't, unless it's set apart
+    from the title above it, in bold where the title isn't."""
+    parents = {r.parent_ref for r in roles if r.parent_ref}
+    kept: list[Role] = []
+    above: dict[str, Role] = {}  # the last title kept in each employment
+
+    def own(role: Role) -> list[int]:
+        """A role's own header lines, without its employer's."""
+        theirs = shared.get(role.employment_ref or "", set())
+        return [i for i in role.header_blocks if i not in theirs and i in blocks]
+
+    for role in roles:
+        home = above.get(role.employment_ref or "")
+        mine = own(role)
+        line = mine[0] if len(mine) == 1 else None
+        words = (role.title or "").split()
+        titled = bool(words) and words[-1].strip(",.():").lower() in TITLE_WORDS
+        home_lines = own(home) if home is not None else []
+        set_apart = (
+            line is not None
+            and blocks[line].bold
+            and bool(home_lines)
+            and not any(blocks[i].bold for i in home_lines)
+        )
+        if (
+            home is not None
+            and line is not None
+            and not role.client
+            and role.ref not in parents
+            and role.dates is None
+            and home.dates is not None
+            and role.bullets
+            and not role.description
+            and role.title is not None
+            and _norm(blocks[line].text) == _norm(role.title)
+            and _names_a_group(blocks[line])
+            and (not titled or set_apart)
+            and role.organization in (None, home.organization)
+        ):
+            label = _norm(blocks[line].text).rstrip(":")
+            home.subheading_blocks += [line, *role.subheading_blocks]
+            home.bullets += [b.model_copy(update={"group": b.group or label}) for b in role.bullets]
+            continue
+        if not role.client:
+            above[role.employment_ref or ""] = role
+        kept.append(role)
+    return kept
 
 
 def _file_roles(roles: list[Role], employments: list[Employment]) -> list[Employment]:
@@ -950,6 +1017,15 @@ def _file_roles(roles: list[Role], employments: list[Employment]) -> list[Employ
     for role in roles:
         role.employment_ref = role.employment_key = names.get(role.employment_ref or "")
     return ordered
+
+
+def _names_a_group(block: Block) -> bool:
+    """Whether a line can head a group of bullets: short, and neither a bullet nor a
+    sentence."""
+    text = block.text.strip()
+    return (
+        not block.is_bullet and len(text.split()) <= 8 and not text.endswith((".", "!", "?", ";"))
+    )
 
 
 def _group(subheadings: list[int], line: int, blocks: dict[int, Block]) -> str | None:
@@ -1032,6 +1108,8 @@ def _entries(found: list[AiEntry], blocks: dict[int, Block], lines: _Claim) -> l
             Entry(
                 text=texts[0],
                 blocks=own,
+                school=verbatim(_given(ai.school), texts),
+                degree=verbatim(_given(ai.degree), texts),
                 dates=_dates(given, texts)
                 or find_range(" ".join(texts))
                 or _dates(given, _year_above(own[0], blocks)),

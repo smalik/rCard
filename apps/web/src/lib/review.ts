@@ -260,6 +260,26 @@ export function groupIntro(group: ReviewGroup, review: Review, first: boolean): 
   return size ? `${lead}${name}: ${size}.` : `${lead}${name}.`;
 }
 
+// The pages of the file these cards were read from as pictures (a scanned page,
+// a screenshot of bullets), for the person to check the wording against once,
+// rather than on every line. Null when none was read from a picture; no pages
+// when the picture has none to show (one inside a Word file).
+export function picturePages(cards: Proposal[]): number[] | null {
+  const lines = cards.flatMap((c) => c.source.filter((s) => s.picture));
+  if (lines.length === 0) return null;
+  const pages = new Set(lines.flatMap((s) => (s.page ? [s.page] : [])));
+  return [...pages].sort((a, b) => a - b);
+}
+
+// What Plytos says about checking a group read from pictures.
+export function pictureCheck(pages: number[]): string {
+  if (pages.length === 0) {
+    return "Some of this I read from a picture in your file, so check that the wording matches it.";
+  }
+  const which = pages.length === 1 ? `page ${pages[0]}` : `pages ${join(pages.map(String))}`;
+  return `I read this from a picture of ${which}, so check that the wording matches.`;
+}
+
 // How many of a group's cards are already the person's own (bringing a resume
 // in again), and of those, how many this adds something to.
 export function groupMatches(

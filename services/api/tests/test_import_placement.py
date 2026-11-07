@@ -267,7 +267,7 @@ def test_one_line_jobs_and_later_sections_raise_no_questions() -> None:
             ),
         ],
         "skills": [],
-        "entries": [{"kind": "award", "lines": [11], "dates": "2016"}],
+        "entries": [{"kind": "award", "lines": [11], "dates": "2016", "school": "", "degree": ""}],
         "skipped": [],
     }
     reader = FakeReader(found, [])
@@ -321,7 +321,9 @@ def _title_first_reading(employer: str) -> dict[str, Any]:
             _role(employment=1, title="Database Developer", header_lines=[7], bullet_lines=[9]),
         ],
         "skills": [],
-        "entries": [{"kind": "education", "lines": [11], "dates": "2002"}],
+        "entries": [
+            {"kind": "education", "lines": [11], "dates": "2002", "school": "", "degree": ""}
+        ],
         "skipped": [],
     }
 

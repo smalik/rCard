@@ -10,6 +10,7 @@ import zipfile
 from datetime import date
 
 import pytest
+from docx import Document
 
 from plytos_api.cards.model import MainContent
 from plytos_api.imports import audit as audit_module
@@ -49,6 +50,12 @@ def rules(result: ImportResult) -> set[str]:
         ("Summer 2020 – Fall 2020", "2020-06", "2020-09", False, "Season YYYY"),
         ("Aug '19 — Dec '21", "2019-08", "2021-12", False, "Mon 'YY"),
         ("2019/04 - 2020/11", "2019-04", "2020-11", False, "YYYY/MM"),
+        # Files converted from PDF that lost the dash between two dates.
+        ("Jan 2018  Dec 2020", "2018-01", "2020-12", False, "Mon YYYY"),
+        ("1/2018  12/2020", "2018-01", "2020-12", False, "M/YYYY"),
+        ("Jan 2018  Present", "2018-01", None, True, "Mon YYYY"),
+        ("Sales Manager 20182020", "2018", "2020", False, "YYYY"),
+        ("Fabrikam 2019/---", "2019", None, True, "YYYY"),
     ],
 )
 def test_date_ranges_in_many_formats(
@@ -60,6 +67,55 @@ def test_date_ranges_in_many_formats(
     assert (found.end.iso() if found.end else None) == end
     assert found.current is current
     assert found.start_format == fmt
+
+
+def test_two_dates_with_only_a_gap_are_a_range_only_in_order() -> None:
+    found = find_range("Lakeshore College 2015  2012")
+    assert found is not None and found.separator is None
+    assert found.start is not None and found.start.iso() == "2012"
+
+
+def converted_docx(lines: list[str]) -> bytes:
+    """A Word file the way PDF-to-Word converters write one: a paragraph whose lines
+    are joined by line breaks, bullets' marks lost."""
+    document = Document()
+    document.add_paragraph("Pat Lee")
+    document.add_paragraph("Experience")
+    paragraph = document.add_paragraph()
+    for i, line in enumerate(lines):
+        run = paragraph.add_run(line)
+        if i < len(lines) - 1:
+            run.add_break()
+    out = io.BytesIO()
+    document.save(out)
+    return out.getvalue()
+
+
+def test_a_bullet_whose_mark_was_lost_in_conversion_is_still_an_item() -> None:
+    data = converted_docx(
+        [
+            "Store Manager, Fabrikam Retail",
+            "Jan 2018  Dec 2020",
+            " Grew sales 12% in two years by reworking the floor plan",
+            " Trained nine new cashiers",
+            "Fabrikam Outlet, Springfield",
+        ]
+    )
+    blocks = extract(data, "resume.docx").blocks
+    marked = [(b.text, b.is_bullet, b.bullet_char) for b in blocks[2:]]
+    assert marked == [
+        ("Store Manager, Fabrikam Retail", False, None),
+        ("Jan 2018  Dec 2020", False, None),
+        ("Grew sales 12% in two years by reworking the floor plan", True, ""),
+        ("Trained nine new cashiers", True, ""),
+        ("Fabrikam Outlet, Springfield", False, None),
+    ]
+    result = import_resume(data, "resume.docx", today=TODAY, reader=None)
+    items = [c.content.framing.headline for c in result.cards if c.kind == "accomplishment"]
+    assert items == [
+        "Grew sales 12% in two years by reworking the floor plan",
+        "Trained nine new cashiers",
+    ]
 
 
 def test_strip_range_leaves_the_rest_of_the_line() -> None:

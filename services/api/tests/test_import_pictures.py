@@ -9,6 +9,7 @@ from typing import Any
 
 import anthropic
 import httpx2
+import pytest
 from docx import Document
 from docx.shared import Pt
 from PIL import Image
@@ -16,7 +17,7 @@ from PIL import Image
 from plytos_api.imports.ai import AiPictures, AiResume, ClaudeReader
 from plytos_api.imports.extract import _prepared, extract
 from plytos_api.imports.model import ExtractedDocument, PictureImage
-from plytos_api.imports.pictures import PICTURE_CHECK, add_picture_lines
+from plytos_api.imports.pictures import add_picture_lines, page_picture
 from plytos_api.imports.pipeline import import_resume
 from tests.resume_samples import _png, consultant_docx, pictured_pdf, scanned_pdf
 
@@ -115,9 +116,8 @@ def test_words_in_a_screenshot_become_lines_after_the_line_above_it() -> None:
 
     card = next(c for c in result.cards if at in c.source_blocks)
     assert card.kind == "accomplishment"
-    assert PICTURE_CHECK in card.needs_check
-    others = [c for c in result.cards if at not in c.source_blocks]
-    assert all(PICTURE_CHECK not in c.needs_check for c in others)
+    # Read from a picture, it's checked against the page once, not asked about here.
+    assert card.needs_check == []
 
     big = next(f for f in result.findings if f.rule == "ats.large_image")
     assert "holds 1 line of text. Plytos read them" in big.detail
@@ -163,7 +163,18 @@ def test_a_scanned_resume_is_read_from_its_picture() -> None:
     assert {c.content.framing.headline for c in results} >= {
         "Cut shipping errors by 40% in a year."
     }
-    assert all(PICTURE_CHECK in c.needs_check for c in result.cards if c.source_blocks)
+    # The page is checked as a whole beside its cards, not a question on every card.
+    asked = [q for c in result.cards for q in c.needs_check]
+    assert not any("picture" in q for q in asked)
+
+
+def test_a_page_is_drawn_to_check_its_cards_against() -> None:
+    picture = page_picture(scanned_pdf(), 1)
+    assert picture is not None
+    with Image.open(io.BytesIO(picture)) as page:
+        assert page.format == "JPEG" and page.width == 1000
+    assert page_picture(scanned_pdf(), 2) is None
+    assert page_picture(b"not a pdf", 1) is None
 
 
 def test_a_scan_with_no_reader_still_says_it_has_no_text() -> None:
@@ -221,3 +232,29 @@ def test_claude_reads_pictures_at_low_effort_with_each_one_labelled() -> None:
     assert content[0] == {"type": "text", "text": "Picture 1: an image placed in the resume."}
     assert content[1]["type"] == "image"
     assert content[1]["source"]["media_type"] == "image/png"
+
+
+def test_a_scan_whose_pictures_hold_no_words_is_unreadable() -> None:
+    from plytos_api.imports.extract import UnsupportedFileError
+
+    class Blind:
+        name = "blind"
+
+        def read(self, doc: Any) -> None:
+            return None
+
+        def read_pictures(self, images: Any) -> AiPictures:
+            return AiPictures.model_validate({"pictures": []})
+
+    with pytest.raises(UnsupportedFileError):
+        import_resume(scanned_pdf(), "scan.pdf", today=TODAY, reader=Blind())  # type: ignore[arg-type]
+
+
+def test_pages_drawn_from_many_threads_at_once_all_come_back() -> None:
+    # PDFium can't draw from two threads at once; requests come in on many.
+    from concurrent.futures import ThreadPoolExecutor
+
+    data = scanned_pdf()
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        drawn = list(pool.map(lambda _: page_picture(data, 1), range(18)))
+    assert all(d is not None and d.startswith(b"\xff\xd8") for d in drawn)

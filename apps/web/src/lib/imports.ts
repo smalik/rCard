@@ -58,7 +58,8 @@ export type Finding = {
 };
 
 // One line of the resume a card came from, so the person can see its source.
-export type SourceLine = { block: number; page: number | null; text: string };
+// `picture`: read from a picture in the file (a scanned page, a screenshot).
+export type SourceLine = { block: number; page: number | null; text: string; picture: boolean };
 
 // A question about where a card belongs, asked when the checks disagree
 // with how the resume was read. The person answers before it's saved.
@@ -244,7 +245,7 @@ type RawImport = {
       phones?: unknown[];
       location?: string | null;
     };
-    blocks?: { index: number; text: string; page?: number | null }[];
+    blocks?: { index: number; text: string; page?: number | null; where?: string }[];
     read_by?: string | null;
     cards?: (Omit<Proposal, "source" | "placement"> & {
       source_blocks?: number[];
@@ -276,6 +277,8 @@ function emptyProgress(): Progress {
   return { settled: {}, cards: {}, edits: {}, moves: {} };
 }
 
+const OLD_PICTURE_CHECK = "Plytos read this from a picture in your resume. Check the wording.";
+
 // Picks what the screens need from the API's import. Only the lines cards
 // came from travel with them; the rest of the text, the contact details and
 // the parse stay on the server.
@@ -305,9 +308,12 @@ export function toReview(raw: unknown): Review {
         source_blocks: sourceBlocks,
         source: sourceBlocks.flatMap((i) => {
           const block = blocks.get(i);
-          return block ? [{ block: i, page: block.page ?? null, text: block.text }] : [];
+          if (!block) return [];
+          const picture = block.where === "image";
+          return [{ block: i, page: block.page ?? null, text: block.text, picture }];
         }),
-        needs_check: card.needs_check ?? [],
+        // Imports read before scans were checked a page at a time asked on every card.
+        needs_check: (card.needs_check ?? []).filter((q) => q !== OLD_PICTURE_CHECK),
         placement: card.placement ?? null,
       };
     }),

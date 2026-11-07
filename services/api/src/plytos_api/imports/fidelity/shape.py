@@ -1,0 +1,226 @@
+"""The shape of a real resume, its label and a reading of it, without its words.
+
+    python -m plytos_api.imports.fidelity.shape --labels DIR [--readings DIR]
+        [--as-layout LAYOUT] KEY...
+
+Shows where a reading went wrong on a resume that can't leave its machine: each line's
+place and kind, and each word only as its kind (W a capitalized word, w a lowercase
+one, A one in capitals, 9 one with a figure), with its punctuation. Section headings
+and month names are shown as the import names them, since they say nothing about the
+person. Then the label's jobs and accomplishments, by the lines they're on, and the
+reading's cards, by the lines they came from, with the misses marked on each.
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+from plytos_api.imports.dates import find_range
+from plytos_api.imports.extract import extract
+from plytos_api.imports.fidelity.layouts import Layout, layouts
+from plytos_api.imports.fidelity.real import file_id, load_labels
+from plytos_api.imports.fidelity.score import norm, score
+from plytos_api.imports.fidelity.truth import Career
+from plytos_api.imports.model import ImportResult, ProposedCard
+from plytos_api.imports.segment import HEADINGS, normalize_heading
+
+_MONTH_WORDS = (
+    "jan feb mar apr may jun jul aug sep sept oct nov dec january february march april "
+    "june july august september october november december present current"
+)
+_MONTHS = {m: m.title() for m in _MONTH_WORDS.split(" ")}
+_EDGE = re.compile(r"^(\W*)(.*?)(\W*)$")
+
+
+def skeleton(text: str, most: int = 24) -> str:
+    """A line's words as their kinds: "Grew sales 12%." is "W w 9."."""
+    out = []
+    words = text.split()
+    for word in words[:most]:
+        lead, core, tail = _EDGE.match(word).groups()  # type: ignore[union-attr]
+        if not core:
+            out.append(re.sub(r"[A-Za-z0-9]", "", word) or "·")
+            continue
+        if core.lower().rstrip(".") in _MONTHS:
+            kind = _MONTHS[core.lower().rstrip(".")]
+        elif any(c.isdigit() for c in core):
+            kind = "9"
+        elif core.isupper() and len(core) > 1:
+            kind = "A"
+        elif core[0].isupper():
+            kind = "W"
+        else:
+            kind = "w"
+        out.append(f"{lead}{kind}{tail}")
+    if len(words) > most:
+        out.append(f"+{len(words) - most}")
+    return " ".join(out)
+
+
+def _heading(text: str) -> str | None:
+    kind = HEADINGS.get(normalize_heading(text))
+    return f"[{kind} heading: {normalize_heading(text)}]" if kind else None
+
+
+def _when(start: str | None, end: str | None) -> str:
+    """A label's dates by their form only: "2019-03" is "9999-99"."""
+    return "-".join(re.sub(r"\d", "9", d) if d else "?" for d in (start, end))
+
+
+def _lines_of(words: str, lines: dict[int, str], after: int = -1) -> list[int]:
+    """The lines a label's words are on: the first that holds their start, and those
+    after it that go on holding them. Looked for after the line of the item before
+    first, since the same words can be written under more than one job."""
+    return _find_lines(words, lines, after) or _find_lines(words, lines, -1)
+
+
+def _find_lines(words: str, lines: dict[int, str], after: int) -> list[int]:
+    want = norm(words)
+    found: list[int] = []
+    for index, text in lines.items():
+        if index <= after:
+            continue
+        have = norm(text)
+        if not have:
+            continue
+        if (found and have in want) or (not found and want.startswith(have[:40])):
+            found.append(index)
+        elif want[:40] in have:
+            return [index]
+        elif found:
+            break
+    return found
+
+
+def show(career: Career, reading: ImportResult | None, layout: Layout | None = None) -> str:
+    """The shape of a label's file, or of the label written out in a layout."""
+    source = Path(career.source or "")
+    if layout is not None:
+        data, filename, folder = layout.render(career), f"resume{layout.suffix}", layout.name
+    else:
+        data, filename, folder = source.read_bytes(), source.name, source.parent.name
+        if file_id(data) != career.key:
+            return f"{career.key}: the label is for another file\n"
+    # The reading's own lines when there's a reading (a scan's were read from its
+    # pictures), so the lines its cards name are these.
+    blocks = reading.blocks if reading is not None else extract(data, filename).blocks
+    out = [f"== {career.key} ({folder})", "", "Lines"]
+    lines: dict[int, str] = {}
+    for block in blocks:
+        lines[block.index] = block.text
+        marks = "".join(
+            m
+            for m, on in (("•", block.is_bullet), ("B", block.bold), ("D", find_range(block.text)))
+            if on
+        )
+        place = "" if block.where == "body" else f" {block.where}"
+        out.append(
+            f"  {block.index:3} p{block.page or 1}{place} {marks:3} "
+            + (_heading(block.text) or skeleton(block.text))
+        )
+    out += ["", "Label"]
+    last = -1
+    for e, employment in enumerate(career.employments, 1):
+        when = _when(employment.start, employment.end)
+        out.append(f"  E{e} employer {skeleton(employment.employer)} {when}")
+        for t, position in enumerate(employment.positions, 1):
+            title = skeleton(position.title or "")
+            out.append(f"    T{e}.{t} {title} {_when(position.start, position.end)}")
+            for group in position.groups:
+                label = f" under {skeleton(group.label)}" if group.label else ""
+                for item in group.items:
+                    on = _lines_of(item, lines, last)
+                    last = on[-1] if on else last
+                    out.append(f"      item {len(item.split())}w{label} on {on}")
+    for school in career.education:
+        out.append(
+            f"  school {skeleton(school.school)} | degree {skeleton(school.degree)}"
+            f" | field {skeleton(school.field)} | {_when(school.year, None)}"
+        )
+    for skills in career.skills:
+        out.append(f"  skills {skeleton(skills.category)}: {len(skills.items)} of them")
+    if career.location:
+        out.append(f"  location {skeleton(career.location)}")
+    if reading is None:
+        return "\n".join(out) + "\n"
+    scored = score(career, layout, reading, kind="?", name="?")
+    found = reading.contact
+    out += [
+        "",
+        f"Contact on {found.blocks}: location "
+        + (skeleton(found.location) if found.location else "none"),
+    ]
+    for card in reading.cards:
+        if card.kind == "skill":
+            listed = card.content.facts.get("skills")
+            category = card.content.facts.get("category")
+            out.append(
+                f"  skills {skeleton(category) if isinstance(category, str) else '-'}: "
+                f"{len(listed) if isinstance(listed, list) else 0} of them"
+            )
+    out += ["", f"Reading ({100 * scored.fidelity:.0f}%)"]
+    number = {c.ref: n for n, c in enumerate(reading.cards, 1)}
+    by_ref = {c.ref: c for c in reading.cards}
+
+    def depth(card: ProposedCard) -> int:
+        d, at = 0, card
+        while at.parent_ref in by_ref and d < 6:
+            at, d = by_ref[at.parent_ref], d + 1
+        return d
+
+    for card in reading.cards:
+        facts = card.content.facts
+        stream = facts.get("workstream")
+        out.append(
+            "  " * (depth(card) + 1)
+            + f"c{number[card.ref]} {card.kind} "
+            + (f"(in c{number[card.parent_ref]}) " if card.parent_ref in number else "")
+            + skeleton(card.content.framing.headline, 12)
+            + f" on {card.source_blocks}"
+            + (f" workstream {skeleton(stream)}" if isinstance(stream, str) else "")
+            + f" facts {sorted(k for k in facts if k != 'workstream')}"
+            + "".join(
+                f" | {key} {skeleton(str(facts[key]))}"
+                for key in ("institution", "degree")
+                if card.kind in ("education", "credential") and facts.get(key)
+            )
+            + (f" MISS {scored.marks[card.ref]}" if card.ref in scored.marks else "")
+        )
+    lost = {k: v for k, v in scored.kinds.items() if "lost" in k}
+    if lost:
+        out.append(f"  lost: {lost}")
+    return "\n".join(out) + "\n"
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="python -m plytos_api.imports.fidelity.shape")
+    parser.add_argument("--labels", type=Path, required=True, metavar="DIR")
+    parser.add_argument("--readings", type=Path, metavar="DIR", help="saved readings")
+    parser.add_argument(
+        "--as-layout", metavar="LAYOUT", help="the label written out in this layout instead"
+    )
+    parser.add_argument("keys", nargs="+", help="file ids, or their first characters")
+    args = parser.parse_args(argv)
+    layout = None
+    if args.as_layout:
+        layout = next((lay for lay in layouts() if lay.name == args.as_layout), None)
+        if layout is None:
+            parser.error(f"no layout named {args.as_layout}")
+    careers, _ = load_labels(args.labels)
+    for want in args.keys:
+        for career in (c for c in careers if c.key.startswith(want)):
+            reading = None
+            if args.readings is not None:
+                key = career.key if layout is None else f"{career.key}-{layout.name}"
+                saved = args.readings / f"{key}.json"
+                if saved.exists():
+                    reading = ImportResult.model_validate_json(saved.read_text())
+            sys.stdout.write(show(career, reading, layout) + "\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

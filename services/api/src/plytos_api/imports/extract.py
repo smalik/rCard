@@ -11,11 +11,14 @@ read them before the lines are sorted (imports/pictures.py).
 """
 
 import io
+import itertools
+import math
 import re
+import threading
 import zipfile
 from collections import Counter
 from collections.abc import Iterable, Iterator
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 import docx
 import pdfplumber
@@ -25,6 +28,7 @@ from docx.text.run import Run
 from lxml import etree
 from PIL import Image
 
+from plytos_api.imports.dates import find_range, only_dates
 from plytos_api.imports.model import (
     Block,
     DocFormat,
@@ -33,6 +37,7 @@ from plytos_api.imports.model import (
     Picture,
     PictureImage,
 )
+from plytos_api.imports.segment import HEADINGS, normalize_heading
 
 MAX_BYTES = 5 * 1024 * 1024
 MAX_PAGES = 12
@@ -87,6 +92,11 @@ _SYMBOL_BULLETS = {
     "o": "◦",
 }
 _LEADING_BULLET = re.compile(rf"^\s*([{re.escape(_BULLET_GLYPHS)}-])\s+(?=\S)")
+# A bullet typed hard against its first word ("•Managed", "-Trained"): only glyphs
+# that start no word, and a dash only before a capital ("-2%" is a figure).
+# One space, where a bullet's mark was, at the start of a line after a line break.
+_LOST_BULLET = re.compile(r" (?=[^\s])")
+_TIGHT_BULLET = re.compile(r"^\s*(?:([•●▪■◦►▸▶➢➤✓✔❖◆∙])(?=[\w“\"‘'(])|(-)(?=[A-Z][a-z]))")
 
 
 class UnsupportedFileError(ValueError):
@@ -130,16 +140,61 @@ def extract(data: bytes, filename: str) -> ExtractedDocument:
     return _read_text(data.decode("utf-8"), filename)
 
 
+# Fullwidth letters and punctuation, as their plain forms.
+_FULLWIDTH = {code: code - 0xFEE0 for code in range(0xFF01, 0xFF5F)}
+
+
 def clean(text: str) -> str:
+    text = _unmangle(text)
+    # After the repair: a mangled zero-width space comes back as one.
     text = text.replace(" ", " ").replace("​", "").replace("﻿", "")
-    return text.replace("‑", "-").strip(" \r")
+    return text.translate(_FULLWIDTH).replace("‑", "-").strip(" \r")
+
+
+# A character's UTF-8 bytes read one by one as Windows-1252: a lead byte, then one to
+# three continuation bytes (an en dash comes out as three odd letters).
+_CONTINUATION = (
+    "\u0080-\u00bf\u20ac\u201a\u0192\u201e\u2026\u2020\u2021\u02c6"
+    "\u2030\u0160\u2039\u0152\u017d\u2018\u2019\u201c\u201d\u2022\u2013"
+    "\u2014\u02dc\u2122\u0161\u203a\u0153\u017e\u0178"
+)
+_MANGLED = re.compile(f"[\u00c2-\u00f4][{_CONTINUATION}]{{1,3}}")
+
+
+def _unmangle(text: str) -> str:
+    """Puts back characters whose UTF-8 bytes were read as Windows-1252, as some PDF
+    makers write them. Only a run that decodes as UTF-8 is changed."""
+
+    def fix(match: re.Match[str]) -> str:
+        raw = bytearray()
+        for char in match.group(0):
+            try:
+                raw += char.encode("cp1252")
+            except UnicodeEncodeError:
+                if ord(char) > 0xFF:
+                    return match.group(0)
+                raw.append(ord(char))
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            # A character that lost a byte on the way. Standing alone between words,
+            # it was a separator (a wide dash or bar); inside a word, leave it be.
+            before = match.string[match.start() - 1 : match.start()]
+            after = match.string[match.end() : match.end() + 1]
+            gap = ("", " ", "\u00a0", "\u200b")
+            return "-" if before in gap and after in gap else match.group(0)
+
+    return _MANGLED.sub(fix, text) if _MANGLED.search(text) else text
 
 
 def split_bullet(text: str) -> tuple[str, str | None]:
     """Splits a typed bullet off the front of a line."""
     m = _LEADING_BULLET.match(text)
     if not m:
-        return text, None
+        tight = _TIGHT_BULLET.match(text)
+        if not tight:
+            return text, None
+        return text[tight.end() :], tight.group(1) or tight.group(2)
     glyph = m.group(1)
     return text[m.end() :], _SYMBOL_BULLETS.get(glyph, glyph)
 
@@ -325,8 +380,8 @@ class _DocxReader:
                 [link for line in lines for link in line[5]],
             )
             lines = [merged]
-        for text, bold, caps, fonts, sizes, links in lines:
-            text = clean(text)
+        for line, (text, bold, caps, fonts, sizes, links) in enumerate(lines):
+            raw, text = text, clean(text)
             if not text:
                 continue
             is_bullet, bullet_char = bullet is not None, bullet
@@ -334,6 +389,11 @@ class _DocxReader:
                 stripped, typed = split_bullet(text)
                 if typed is not None:
                     text, is_bullet, bullet_char = stripped, True, typed
+                elif line > 0 and _LOST_BULLET.match(raw):
+                    # A PDF turned into Word keeps each bullet's line after a line
+                    # break, and one space where its mark was: an item, with no
+                    # mark written ("" rather than a glyph it doesn't have).
+                    is_bullet, bullet_char = True, ""
             self.blocks.append(
                 Block(
                     index=len(self.blocks),
@@ -626,6 +686,7 @@ def _app_pages(app_xml: bytes) -> int | None:
 def _read_pdf(data: bytes, filename: str) -> ExtractedDocument:
     blocks: list[Block] = []
     bullet_x: dict[int, tuple[float, float]] = {}
+    flow: dict[int, _Flow] = {}
     images = 0
     columns = 1
     pictures: list[Picture] = []
@@ -646,10 +707,14 @@ def _read_pdf(data: bytes, filename: str) -> ExtractedDocument:
             before = len(blocks) - 1 if blocks else None
             if not words:
                 if page.images and len(kept) < MAX_PICTURES:
-                    # A scanned page: keep the whole page as a picture to read.
-                    image = _render(page, None, 150)
-                    if image is not None:
-                        scanned.append(number)
+                    # A scanned page: keep the whole page as a picture to read, in
+                    # pieces when it's too tall to read whole.
+                    for box in _tiles(page)[: MAX_PICTURES - len(kept)]:
+                        image = _render(page, box, 150)
+                        if image is None:
+                            continue
+                        if number not in scanned:
+                            scanned.append(number)
                         kept.append(
                             PictureImage(
                                 after_block=before, page=number, media_type=image[0], data=image[1]
@@ -664,14 +729,27 @@ def _read_pdf(data: bytes, filename: str) -> ExtractedDocument:
             else:
                 regions = [words]
             tops: list[tuple[int, float]] = []  # (block, top) of each line on this page
+            marks = _bullet_marks(page)
             for region in regions:
-                for line in _pdf_lines(region):
+                lines = list(_pdf_lines(region))
+                for line in lines:
+                    line["marked"] = _marked(line, marks)
+                # The region's right margin: where the longest line of running text
+                # stops. Dates set against a tab stop can reach past it.
+                running = [
+                    line
+                    for line in lines
+                    if "\t" not in line["text"] and not _ends_on_date(line["text"])
+                ] or lines
+                right = max(float(w["x1"]) for line in running for w in line["words"])
+                for line in lines:
                     count = len(blocks)
-                    _add_pdf_line(blocks, line, number, bullet_x)
+                    _add_pdf_line(blocks, line, number, bullet_x, flow, right)
                     if len(blocks) > count:
                         tops.append((blocks[-1].index, line["top"]))
             for img in page.images:
                 _pdf_picture(page, img, words, number, before, tops, pictures, kept)
+    _mark_running_lines(blocks)
     facts = _facts(
         "pdf",
         filename,
@@ -684,6 +762,46 @@ def _read_pdf(data: bytes, filename: str) -> ExtractedDocument:
         pictures=pictures,
     )
     return ExtractedDocument(facts=facts, blocks=blocks, images=kept)
+
+
+# A page's number, where a running header or footer writes it: "Page 2 of 3", a
+# number alone ("2", "- 2 -", "2/3"), or one set off at the end ("Pat Lee | 2").
+_PAGE_NUMBER = re.compile(
+    r"\bpage\s*\d+(?:\s*(?:of|/)\s*\d+)?\b"
+    r"|^[-–—\s]*\d{1,3}(?:\s*(?:of|/)\s*\d{1,3})?[-–—\s]*$"
+    r"|\s*[|—–·•-]\s*\d{1,3}\s*$",
+    re.IGNORECASE,
+)
+
+
+def _mark_running_lines(blocks: list[Block]) -> None:
+    """Marks a line repeated at the top or foot of the pages, as a running header or
+    footer is, the way a Word file marks its own. Otherwise a header printed again at
+    the top of page 2 reads as part of whatever section it lands in."""
+    pages = sorted({b.page for b in blocks if b.page is not None})
+    if len(pages) < 2:
+        return
+    by_page = {page: [b for b in blocks if b.page == page] for page in pages}
+
+    def key(block: Block) -> str:
+        # "Page 1 of 2" and "Page 2 of 2" are the same line; "2019 - 2021" and
+        # "2016 - 2018" aren't.
+        return _PAGE_NUMBER.sub(" # ", block.text.strip().lower()).strip()
+
+    marks: list[tuple[Literal["header", "footer"], slice]] = [
+        ("header", slice(0, 2)),
+        ("footer", slice(-2, None)),
+    ]
+    for where, ends in marks:
+        seen: dict[str, set[int]] = {}
+        for page, on_page in by_page.items():
+            for block in on_page[ends]:
+                seen.setdefault(key(block), set()).add(page)
+        repeated = {k for k, on in seen.items() if len(on) >= 2}
+        for on_page in by_page.values():
+            for block in on_page[ends]:
+                if key(block) in repeated and block.where == "body":
+                    block.where = where
 
 
 def _pdf_picture(
@@ -735,13 +853,69 @@ def _pdf_picture(
         )
 
 
+# A page taller than this for its width (a long resume saved as one endless page) is
+# read in pieces: shrunk whole to what Claude reads, its words would be too small.
+_TALLEST = 1.6
+
+
+# PDFium, which draws a PDF's pages, can't be used from two threads at once, and
+# requests (and the bench's workers) run in threads: pages are drawn one at a time.
+_DRAWING = threading.Lock()
+
+
+def draw(page: Any, resolution: float) -> Image.Image:
+    """A PDF page, or a part of one, drawn as a picture."""
+    with _DRAWING:
+        image: Image.Image = page.to_image(resolution=resolution).original
+        return image
+
+
+def _tiles(page: Any) -> list[tuple[float, float, float, float] | None]:
+    """The parts of a scanned page to read one at a time: the whole page, or slices of
+    about a page each, cut where a row is blank so no line is cut in two."""
+    width, height = float(page.width), float(page.height)
+    if height <= width * _TALLEST:
+        return [None]
+    count = math.ceil(height / (width * 1.3))
+    try:
+        shade = draw(page, 36).convert("L")
+    except Exception:  # a page that won't render is cut evenly
+        shade = None
+    cuts = [0.0]
+    for k in range(1, count):
+        want = height * k / count
+        cuts.append(_blank_row_near(shade, want, height, height / count * 0.15))
+    cuts.append(height)
+    return [(0.0, top, width, bottom) for top, bottom in itertools.pairwise(cuts)]
+
+
+def _blank_row_near(shade: Image.Image | None, want: float, height: float, reach: float) -> float:
+    """The y nearest `want`, within `reach`, where the page is blank all the way across."""
+    if shade is None:
+        return want
+    scale = shade.height / height
+    rows = range(
+        max(0, int((want - reach) * scale)), min(shade.height, int((want + reach) * scale) + 1)
+    )
+    blank = [row for row in rows if _darkest(shade.crop((0, row, shade.width, row + 1))) > 200]
+    if not blank:
+        return want
+    best = min(blank, key=lambda row: abs(row / scale - want))
+    return best / scale
+
+
+def _darkest(strip: Image.Image) -> int:
+    low = strip.getextrema()[0]
+    return int(low if isinstance(low, int | float) else low[0])
+
+
 def _render(
     page: Any, box: tuple[float, float, float, float] | None, dpi: int
 ) -> tuple[Literal["image/png", "image/jpeg"], bytes] | None:
     """A page, or part of one, as a picture."""
     try:
         area = page.crop(box) if box is not None else page
-        return _prepared(area.to_image(resolution=dpi).original)
+        return _prepared(draw(area, dpi))
     except Exception:  # a picture that won't render is left unread
         return None
 
@@ -769,33 +943,60 @@ def _cluster_lines(words: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     return [sorted(line, key=lambda w: float(w["x0"])) for line in lines]
 
 
+# The narrowest clear strip, in points, that can part two columns. The gaps between
+# words can line up down a few lines of a paragraph, but they're narrower than this.
+_GUTTER = 8.0
+
+
 def _gutter(words: list[dict[str, Any]], width: float) -> float | None:
     """The x of an empty vertical strip that splits the page into two columns.
 
-    Right-aligned dates also leave a strip empty, so both sides must carry a
-    real share of the words before the page counts as two columns.
+    A strip only counts when it's wider than a gap between words, and when there are
+    columns on both sides of it: lines of more than dates, each side's starting at
+    one left edge, and a fair share of the words. Dates set against the right margin
+    leave a strip clear too, and a column of them is no column of text.
     """
     lines = _cluster_lines(words)
     if len(lines) < 12:
         return None
-    total = len(words)
-    best: tuple[float, float] | None = None
+    half = _GUTTER / 2
+    scored: list[tuple[float, float]] = []
     for x in range(int(width * 0.2), int(width * 0.8), 2):
         crossing = sum(
-            1 for line in lines if any(float(w["x0"]) < x < float(w["x1"]) for w in line)
+            1
+            for line in lines
+            if any(float(w["x0"]) < x + half and float(w["x1"]) > x - half for w in line)
         )
         if crossing > len(lines) * 0.1:
             continue
-        left_words = sum(1 for w in words if float(w["x1"]) <= x)
-        right_words = sum(1 for w in words if float(w["x0"]) >= x)
-        left_lines = sum(1 for line in lines if any(float(w["x1"]) <= x for w in line))
-        right_lines = sum(1 for line in lines if any(float(w["x0"]) >= x for w in line))
-        if min(left_words, right_words) < total * 0.2 or min(left_lines, right_lines) < 6:
+        sides = [
+            _column_text([[w for w in line if float(w["x1"]) <= x] for line in lines]),
+            _column_text([[w for w in line if float(w["x0"]) >= x] for line in lines]),
+        ]
+        if any(len(side) < 6 or _aligned(side) < 6 for side in sides):
             continue
-        score = min(left_words, right_words) - crossing * 10
-        if best is None or score > best[1]:
-            best = (float(x), float(score))
-    return best[0] if best else None
+        counts = [sum(len(part) for part in side) for side in sides]
+        if min(counts) < len(words) * 0.08:
+            continue
+        scored.append((float(x), float(min(counts) - crossing * 10)))
+    if not scored:
+        return None
+    # The middle of the clearest strip, so the fewest words sit across it.
+    top = max(score for _, score in scored)
+    clearest = [x for x, score in scored if score == top]
+    return clearest[len(clearest) // 2]
+
+
+def _column_text(parts: list[list[dict[str, Any]]]) -> list[list[dict[str, Any]]]:
+    """One side's piece of each line, leaving out empty pieces and ones that are only
+    dates."""
+    return [p for p in parts if p and not only_dates(" ".join(str(w["text"]) for w in p))]
+
+
+def _aligned(parts: list[list[dict[str, Any]]]) -> int:
+    """How many of the pieces start at the most common left edge, give or take 2 points."""
+    starts = Counter(round(float(p[0]["x0"])) for p in parts)
+    return max(sum(n for s, n in starts.items() if abs(s - edge) <= 2) for edge in starts)
 
 
 def _split_columns(words: list[dict[str, Any]], gutter: float) -> list[list[dict[str, Any]]]:
@@ -806,6 +1007,25 @@ def _split_columns(words: list[dict[str, Any]], gutter: float) -> list[list[dict
     above = [w for w in spanning if float(w["top"]) <= first_column_top]
     below = [w for w in spanning if float(w["top"]) > first_column_top]
     return [r for r in (above, left, right, below) if r]
+
+
+def _bullet_marks(page: Any) -> list[tuple[float, float, float]]:
+    """Bullets drawn rather than typed, as a browser prints a list: small dots and
+    squares, as (right edge, top, bottom)."""
+    marks: list[tuple[float, float, float]] = []
+    for shape in [*page.curves, *page.rects]:
+        width, height = float(shape["width"]), float(shape["height"])
+        if 1.5 <= width <= 8 and 1.5 <= height <= 8 and abs(width - height) <= 1.5:
+            marks.append((float(shape["x1"]), float(shape["top"]), float(shape["bottom"])))
+    return marks
+
+
+def _marked(line: dict[str, Any], marks: list[tuple[float, float, float]]) -> bool:
+    """Whether a drawn bullet sits just left of a line, level with its first words."""
+    return any(
+        0 <= line["x0"] - right <= 20 and top >= line["top"] - 2 and bottom <= line["bottom"] + 2
+        for right, top, bottom in marks
+    )
 
 
 def _pdf_lines(words: list[dict[str, Any]]) -> Iterator[dict[str, Any]]:
@@ -827,16 +1047,54 @@ def _pdf_lines(words: list[dict[str, Any]]) -> Iterator[dict[str, Any]]:
         }
 
 
+class _Flow(NamedTuple):
+    """Where a plain PDF line sat, to tell whether the next line carries it on."""
+
+    x0: float
+    x1: float
+    bottom: float
+    fonts: tuple[str, ...]
+    size: float
+    # Text set apart on the line, such as dates against the right margin.
+    spaced: bool
+
+
+def _wraps_from(above: _Flow, line: dict[str, Any], text: str, right: float) -> bool:
+    """Whether a line is the one above carried on: it starts at the same left edge
+    just below, in the same type, and its first word wouldn't have fit at the end of
+    the line above, so the line above was full. A line that ends a sentence or on a
+    date, or one that starts "Label:", stands on its own."""
+    words = line["words"]
+    first = words[0]
+    size = float(first["size"])
+    fonts = tuple(sorted({str(w["fontname"]) for w in words}))
+    if (
+        above.spaced
+        or "\t" in line["text"]
+        or abs(above.x0 - line["x0"]) > 2
+        or line["top"] - above.bottom > size * 0.9
+        or fonts != above.fonts
+        or abs(size - above.size) > 0.1
+    ):
+        return False
+    room = right - above.x1
+    fits = float(first["x1"]) - float(first["x0"]) + size * 0.25 <= room + 1
+    return not fits and not re.match(r"^\S+(?:\s+\S+){0,2}:\s", text)
+
+
 def _add_pdf_line(
     blocks: list[Block],
     line: dict[str, Any],
     page: int,
     bullet_x: dict[int, tuple[float, float]],
+    flow: dict[int, _Flow],
+    right: float,
 ) -> None:
-    """Adds a PDF line as a block, or joins it to the bullet it wraps from.
+    """Adds a PDF line as a block, or joins it to the bullet or the line it wraps from.
 
     bullet_x maps a bullet block's index to the x where its text starts and
-    the bottom of its last line, so wrapped lines can be found.
+    the bottom of its last line, so wrapped lines can be found. flow does the same
+    for plain lines, which carry on only from a line that filled the column.
     """
     words = line["words"]
     text = clean(line["text"])
@@ -844,14 +1102,47 @@ def _add_pdf_line(
         return
     raw_fonts = [str(w["fontname"]) for w in words]
     stripped, glyph = split_bullet(text)
+    drawn = glyph is None and bool(line.get("marked"))
+    if drawn:
+        stripped, glyph = text, "•"
     prev = blocks[-1] if blocks else None
-    if glyph is None and prev is not None and prev.page == page and prev.index in bullet_x:
+    # A date range set over three lines in a narrow column ("May 2019" / "to" /
+    # "January 2020") is one line.
+    if glyph is None and prev is not None and prev.page == page and _splits_range(prev.text, text):
+        prev.text = f"{prev.text} {text}"
+        return
+    # A section heading never carries a line on, nor is carried on by one, whatever its
+    # type: a resume printed in one plain font sets its headings like any other line.
+    heading = _is_heading(text)
+    if (
+        glyph is None
+        and not heading
+        and prev is not None
+        and prev.page == page
+        and prev.index in bullet_x
+    ):
         text_x, bottom = bullet_x[prev.index]
         size = float(words[0]["size"])
         if abs(text_x - line["x0"]) <= 3 and line["top"] - bottom < size * 1.2:
             prev.text = f"{prev.text} {text}"
             bullet_x[prev.index] = (text_x, line["bottom"])
             return
+    line_x1 = max(float(w["x1"]) for w in words)
+    if (
+        glyph is None
+        and prev is not None
+        and prev.page == page
+        and prev.index in flow
+        and not heading
+        and not _is_heading(prev.text)
+        and not prev.text.rstrip().endswith((".", "!", "?"))
+        and not _ends_on_date(prev.text)
+        and _wraps_from(flow[prev.index], line, text, right)
+    ):
+        prev.text = f"{prev.text} {text}"
+        above = flow[prev.index]
+        flow[prev.index] = above._replace(x1=line_x1, bottom=float(line["bottom"]))
+        return
     block = Block(
         index=len(blocks),
         text=stripped if glyph is not None else text,
@@ -864,9 +1155,46 @@ def _add_pdf_line(
         page=page,
     )
     if glyph is not None:
-        text_x = float(words[1]["x0"]) if len(words) > 1 else line["x0"]
+        typed = not drawn and len(words) > 1
+        text_x = float(words[1]["x0"]) if typed else line["x0"]
         bullet_x[block.index] = (text_x, line["bottom"])
+    else:
+        flow[block.index] = _Flow(
+            x0=float(line["x0"]),
+            x1=line_x1,
+            bottom=float(line["bottom"]),
+            fonts=tuple(sorted(set(raw_fonts))),
+            size=float(words[0]["size"]),
+            spaced="\t" in line["text"],
+        )
     blocks.append(block)
+
+
+_MONTHS = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?"
+_ENDS_ON_YEAR = re.compile(r"(?:19|20)\d{2}\s*$")
+_RANGE_WORD = re.compile(r"^(?:to|through|until|till|-|–|—)$", re.I)
+_OPEN_RANGE = re.compile(r"(?:19|20)\d{2}\s+(?:to|through|until|till|-|–|—)$", re.I)
+_STARTS_ON_DATE = re.compile(
+    rf"^(?:(?:{_MONTHS}\s+|\d{{1,2}}/)?(?:19|20)\d{{2}}\b|(?:current|present|now)\b)", re.I
+)
+
+
+def _splits_range(above: str, line: str) -> bool:
+    """Whether a line carries on a date range broken over lines: the "to" after a date,
+    or the date after a "to"."""
+    above, line = above.strip(), line.strip()
+    if _RANGE_WORD.match(line):
+        return bool(_ENDS_ON_YEAR.search(above))
+    return bool(_OPEN_RANGE.search(above)) and bool(_STARTS_ON_DATE.match(line))
+
+
+def _is_heading(text: str) -> bool:
+    return normalize_heading(text.strip().rstrip(":")) in HEADINGS
+
+
+def _ends_on_date(text: str) -> bool:
+    found = find_range(text)
+    return found is not None and text.rstrip(" )").endswith(found.raw.rstrip(" )"))
 
 
 # --- Plain text ---------------------------------------------------------------

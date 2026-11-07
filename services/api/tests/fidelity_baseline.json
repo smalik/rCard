@@ -1,0 +1,172 @@
+{
+ "morgan/word-classic": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "sam/word-classic": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "morgan/word-title-first": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "sam/word-title-first": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "morgan/word-one-line": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "sam/word-one-line": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "morgan/word-header-contact": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "sam/word-header-contact": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "morgan/word-sidebar": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "sam/word-sidebar": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "morgan/word-typed-bullets": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "sam/word-typed-bullets": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "morgan/word-paragraphs": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "sam/word-paragraphs": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "morgan/word-summary-in-experience": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "sam/word-summary-in-experience": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "morgan/word-year-dates": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "sam/word-year-dates": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "morgan/pdf-classic": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "sam/pdf-classic": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "morgan/pdf-title-first": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "sam/pdf-title-first": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "morgan/pdf-one-line": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "sam/pdf-one-line": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "morgan/pdf-two-column": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "sam/pdf-two-column": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "morgan/pdf-wrapped": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "sam/pdf-wrapped": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "morgan/pdf-no-breaks": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "sam/pdf-no-breaks": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "morgan/pdf-year-dates": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "sam/pdf-year-dates": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "morgan/pdf-web-print": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ },
+ "sam/pdf-web-print": {
+  "fidelity": 1.0,
+  "wrong_place": 0,
+  "missing": 0
+ }
+}

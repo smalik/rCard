@@ -193,6 +193,9 @@ class Entry(BaseModel):
     blocks: list[int] = Field(default_factory=list)
     dates: DateRange | None = None
     details: list[str] = Field(default_factory=list)
+    # For schooling read by Claude: the school's name and the degree, as written.
+    school: str | None = None
+    degree: str | None = None
 
 
 SectionKind = Literal[
