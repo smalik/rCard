@@ -83,7 +83,9 @@ resource "google_cloud_run_v2_service" "api" {
     }
 
     # Signs in to Postgres as the API's service account. The connection
-    # from the API to the proxy never leaves the instance.
+    # from the API to the proxy never leaves the instance: Postgres listens on
+    # loopback only. Cloud Run's probes don't arrive over loopback, so the
+    # proxy answers its health checks on a separate port.
     containers {
       name  = "cloud-sql-proxy"
       image = var.cloud_sql_proxy_image
@@ -92,12 +94,16 @@ resource "google_cloud_run_v2_service" "api" {
         "--structured-logs",
         "--address=127.0.0.1",
         "--port=5432",
+        "--health-check",
+        "--http-address=0.0.0.0",
+        "--http-port=9090",
         google_sql_database_instance.main.connection_name,
       ]
 
       startup_probe {
-        tcp_socket {
-          port = 5432
+        http_get {
+          path = "/startup"
+          port = 9090
         }
         period_seconds    = 1
         failure_threshold = 30
