@@ -92,7 +92,8 @@ databases must be at the same migrations, so deploy first.
    ```sh
    export PLYTOS_TRANSFER_SOURCE_URL=...   # the preview's owner connection
    export PLYTOS_TRANSFER_SOURCE_KEK=...   # the preview's local: key
-   export PLYTOS_TRANSFER_TARGET_URL="postgresql://${MIGRATE%.gserviceaccount.com}@127.0.0.1:5433/plytos?sslmode=disable"
+   DB_USER=${MIGRATE%.gserviceaccount.com}   # its @ is escaped in the URL below
+   export PLYTOS_TRANSFER_TARGET_URL="postgresql://${DB_USER//@/%40}@127.0.0.1:5433/plytos?sslmode=disable"
    export PLYTOS_TRANSFER_TARGET_KEK="gcp-kms:projects/$PROJECT/locations/us-central1/keyRings/plytos/cryptoKeys/user-data-kek"
    cd ../../services/api
    uv run --extra gcp python -m plytos_api.transfer --from-subject dev:<you> --to-subject iap:accounts.google.com:<id>
