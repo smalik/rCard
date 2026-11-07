@@ -45,13 +45,19 @@ credential, the Claude API key, lives in Secret Manager.
    terraform apply
    ```
 
-   Commit the generated `.terraform.lock.hcl`.
+   Commit the generated `.terraform.lock.hcl`. If the last apply stops with
+   "Provider produced inconsistent final plan" for `plytos-web`, run
+   `terraform apply` again: the web app's API address isn't known until the
+   API exists, and the provider trips over that on a first build.
 
-6. Copy each value from `terraform output github_actions_variables` into the
-   repository's Actions variables (Settings, Secrets and variables, Actions,
-   Variables), and create a `production` environment there.
-7. Run the **Deploy** workflow from the Actions tab. It builds both images,
-   runs migrations through the Cloud SQL Auth Proxy, and updates both services.
+6. Check that `terraform output github_actions_variables` matches the names
+   at the top of `.github/workflows/deploy.yml`. They are written there for
+   rcard-dev; for another project, set each one as a repository variable of
+   the same name (Settings, Secrets and variables, Actions, Variables), which
+   wins over what the file says.
+7. Run the **Deploy** workflow on `main` from the Actions tab. It builds both
+   images, runs migrations through the Cloud SQL Auth Proxy, and updates both
+   services. Its first run creates the `production` environment.
 
 ## Bringing someone over from the Supabase preview
 

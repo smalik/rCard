@@ -52,7 +52,7 @@ variable "db_tier" {
 }
 
 variable "deletion_protection" {
-  description = "Guards the database and services against accidental terraform destroy."
+  description = "Guards the database against accidental terraform destroy."
   type        = bool
   default     = true
 }
