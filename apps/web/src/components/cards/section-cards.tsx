@@ -1,6 +1,7 @@
 "use client";
 
-import { Check, Globe, Mail, MapPin, Phone } from "lucide-react";
+import { Check, Globe, Mail, MapPin, Pencil, Phone } from "lucide-react";
+import Link from "next/link";
 import { type FormEvent, type ReactNode, useState } from "react";
 
 import { useCardActions } from "@/components/cards/actions";
@@ -14,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { type CardKind, KIND_LABELS } from "@/lib/cards";
 import { cardDates, fact, headline, type LibraryCard, listFact } from "@/lib/library";
-import type { ResumeHeader } from "@/lib/resumes";
+import { HIGHLIGHT_STYLES, type RenderedHighlights, type ResumeHeader } from "@/lib/resumes";
 
 function live(card: LibraryCard) {
   return {
@@ -390,5 +391,86 @@ function ContactBack({
         )}
       </div>
     </form>
+  );
+}
+
+/** Highlights, as one resume shows them: lines already under their jobs,
+ * featured again, as bullets, the person's own paragraph, or both. */
+export function HighlightsCard({
+  highlights,
+  from,
+  href,
+  className,
+}: {
+  highlights: RenderedHighlights | null;
+  // The resume they come from, and where to change them.
+  from: string;
+  href: string;
+  className?: string;
+}) {
+  const { now } = useCardActions();
+  const paragraph = highlights && highlights.style !== "bullets" ? highlights.paragraph.trim() : "";
+  const items = highlights && highlights.style !== "paragraph" ? highlights.items : [];
+  const style = HIGHLIGHT_STYLES.find((s) => s.value === highlights?.style)?.label;
+  const change = (
+    <Button asChild variant="outline" size="sm" className="self-start">
+      <Link href={href}>
+        <Pencil /> {highlights ? "Change them on the resume" : "Add highlights to the resume"}
+      </Link>
+    </Button>
+  );
+  return (
+    <StrengthCard
+      purpose="highlight"
+      title="Highlights"
+      label="Highlights"
+      now={now}
+      className={className}
+      front={
+        <div className="flex flex-col gap-3">
+          {paragraph || items.length > 0 ? (
+            <>
+              {paragraph && (
+                <p className="text-[15px] leading-relaxed whitespace-pre-line text-foreground/90">
+                  {paragraph}
+                </p>
+              )}
+              {items.length > 0 && (
+                <ul className="flex flex-col gap-1.5">
+                  {items.map((item) => (
+                    <li key={item.card} className="flex items-start gap-2.5 text-[14.5px] leading-[1.45]">
+                      <span aria-hidden className="mt-[9px] size-[5px] shrink-0 rounded-full bg-foreground/45" />
+                      <span className="min-w-0">
+                        {item.text}
+                        {item.where && (
+                          <span className="block text-[12.5px] text-muted-foreground">{item.where}</span>
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          ) : (
+            <p className="text-[14.5px] text-muted-foreground">
+              Once your accomplishments sit under their jobs, feature the strongest again here: as
+              bullets, a paragraph in your own words, or both.
+            </p>
+          )}
+          <p className="text-[12px] text-muted-foreground">
+            From your “{from}” resume{style ? ` · ${style}` : ""}
+          </p>
+        </div>
+      }
+      back={() => (
+        <div className="flex flex-col gap-3 text-[14px]">
+          <p>
+            Highlights belong to a resume, so each version can feature different lines. A line has
+            to sit under its job before it can be featured.
+          </p>
+          {change}
+        </div>
+      )}
+    />
   );
 }

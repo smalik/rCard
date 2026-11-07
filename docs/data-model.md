@@ -16,7 +16,7 @@ across hundreds of tailored variants. These rules make that hold. The schema is
 | Version | `plytos.card_version` | One permanent snapshot on a line. Content encrypted; hashes in clear |
 | Event | `plytos.event` | Append-only history: who did what to which record, never the content |
 | Resume import | `plytos.resume_import` | A resume the person brought in: the original file, what was read from it, and their progress approving its cards. All encrypted; only the format, size, times and where the reading is (state, stage, tries, a short error code) are clear. Schema in [`0002_resume_import.sql`](../services/api/migrations/0002_resume_import.sql) and [`0009_import_reading.sql`](../services/api/migrations/0009_import_reading.sql) |
-| Resume, resume version | `plytos.resume`, `plytos.resume_version`, `plytos.resume_version_name` | A resume is a selection over cards, with its own line of versions. Name and content encrypted; hashes in clear. Schema in [`0007_resumes.sql`](../services/api/migrations/0007_resumes.sql) and [`0008_resume_proposals.sql`](../services/api/migrations/0008_resume_proposals.sql). See "Resumes" below |
+| Resume, resume version | `plytos.resume`, `plytos.resume_version`, `plytos.resume_version_name` | A resume is a selection over cards, with its own line of versions. Name and content encrypted; hashes in clear. Schema in [`0007_resumes.sql`](../services/api/migrations/0007_resumes.sql), [`0008_resume_proposals.sql`](../services/api/migrations/0008_resume_proposals.sql) and [`0012_resume_deletion.sql`](../services/api/migrations/0012_resume_deletion.sql). See "Resumes" below |
 | Message, tidbit, proposal, agent run | `plytos.message`, `plytos.tidbit`, `plytos.proposal`, `plytos.agent_run` | The conversation with Plytos, the notes it keeps, what agents offer, and the work they did. Content encrypted. See [agents.md](agents.md) |
 | Check-in plan | `plytos.check_in_plan` | When Plytos checks in, once a month: a week of the month, a weekday, a local time and a time zone. No content. See [agents.md](agents.md) |
 
@@ -136,6 +136,16 @@ show as headings under their employment, latest first; `fold_earlier` folds
 every title but the latest into one line. Facts always come from the card as
 it is now, so a corrected date shows in every resume at once.
 
+**An accomplishment sits under its job first.** On the page, an
+accomplishment shows under the job it's from; one that sits under no job
+doesn't show until the person places it there (`unplaced` on the page, "Not
+under a job yet" on the cards screen). Awards are the exception: they stand
+on their own, under Awards. Once a line is under its job, the resume can
+feature it again near the top in **Highlights** (content schema version 2),
+in the style the person picks: the featured lines as bullets, a paragraph in
+their own words, or both. A resume without highlights leaves the field out,
+so its content reads and hashes as it did in schema version 1.
+
 **Each line names its wording.** `auto` uses the card's variant for the
 resume's target if there is one, and the card's own wording otherwise. `main`
 always uses the card's own wording, and a target ID picks that target's.
@@ -148,6 +158,18 @@ resume moved on (409). Restoring version 2 makes a new version with
 version 2's content and the note "Back to version 2"; nothing in between is
 lost. A version can carry names the person gives it, such as "Sent to
 Contoso".
+
+**A version can be deleted.** The person deletes one version, or a version
+and every one after it. Deleting erases the content and the names given to
+it; the row, its number, date and hashes stay (the redaction the version
+table already allowed), so the chain still verifies and later versions keep
+their whole pages. What stays re-centers (`resumes/store.py`): deleting the
+version the resume is at brings back the nearest earlier version that stays,
+as a new version; a resume made from this one that had caught up with a
+deleted version counts from the nearest earlier version that stays (or the
+first one after), so it's offered only what it doesn't already show. Deleting
+every version deletes the resume; the resumes made from it stay and stand on
+their own, unless the person chooses to delete them with it.
 
 **Versions for a target are made from a resume.** The first resume comes
 from the person's own file: once they keep its cards, "as written" lays them

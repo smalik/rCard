@@ -106,7 +106,7 @@ describe("buildLibrary", () => {
 
     expect(view.education).toEqual([school]);
     expect(view.awards).toEqual([award]);
-    expect(view.highlights).toEqual([loose]);
+    expect(view.unplaced).toEqual([loose]);
     expect(view.credentials).toEqual([cert]);
     expect(view.skills).toEqual([skills]);
     expect(view.projects).toEqual([project]);

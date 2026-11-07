@@ -3,9 +3,15 @@
 Content is a selection over cards (resumes/model.py); this reads the cards as
 they are now. Employments show their employer, place and tenure; their
 positions show as titles, latest first, each with the accomplishments
-switched on under it. Wording comes from the item's choice: a pinned card
-version, the card's own wording, or the wording made for a target. Facts
-always come from the card's main line.
+switched on under it. Highlights feature lines from under jobs again, near
+the top, in the style the person picked. Wording comes from the item's
+choice: a pinned card version, the card's own wording, or the wording made
+for a target. Facts always come from the card's main line.
+
+An accomplishment that sits under no job doesn't show on the page: it's
+meaningful under its job first. Such lines come back in ``unplaced``, for the
+person to put under the job they're from. Awards are the exception: they
+stand on their own and show under Awards.
 """
 
 from __future__ import annotations
@@ -23,6 +29,7 @@ from plytos_api.resumes.model import (
     CONTEXT_KINDS,
     ENTRY_KINDS,
     ITEM_KINDS,
+    HighlightStyle,
     ResumeChange,
     ResumeContent,
     ResumeHeader,
@@ -36,7 +43,8 @@ SECTION_LABELS: dict[str, str] = {
     "education": "Education",
     "credential": "Certifications",
     "activity": "Activities",
-    "accomplishment": "Highlights",
+    # Only awards: other accomplishments show under their job.
+    "accomplishment": "Awards",
     "project": "Projects",
     "story": "Stories",
 }
@@ -52,6 +60,8 @@ class RenderedItem(BaseModel):
     # Whose wording shows: the card's own, the target's, or one pinned here.
     wording: Literal["main", "target", "pinned"] = "main"
     date: str = ""
+    # Where it sits, for a highlight or a line waiting for a job: "Title · Employer".
+    where: str = ""
 
 
 class RenderedRole(BaseModel):
@@ -81,6 +91,12 @@ class RenderedSection(BaseModel):
     items: list[RenderedItem]
 
 
+class RenderedHighlights(BaseModel):
+    style: HighlightStyle
+    paragraph: str
+    items: list[RenderedItem]
+
+
 class LeftOut(BaseModel):
     card: UUID
     employer: str
@@ -89,6 +105,7 @@ class LeftOut(BaseModel):
 
 class RenderedResume(BaseModel):
     header: ResumeHeader
+    highlights: RenderedHighlights | None = None
     entries: list[RenderedEntry]
     sections: list[RenderedSection]
     # Employments in the library this resume leaves out.
@@ -96,6 +113,10 @@ class RenderedResume(BaseModel):
     # Cards outside the career tree, such as a degree or a skills list, that
     # this resume leaves out, so the person can bring them in.
     left_out_context: list[RenderedItem] = []
+    # Accomplishments this resume has outside any job on it, which don't show
+    # until they're under one; ``where`` names the job a card already sits
+    # under, empty when it sits under none.
+    unplaced: list[RenderedItem] = []
     # Items whose card is gone (archived), so they can't show.
     missing: int
 
@@ -136,7 +157,8 @@ class _Wording:
         target_id: UUID | None,
         proposed: dict[UUID, Framing],
     ) -> None:
-        items = [i for e in content.entries for i in e.items] + list(content.context)
+        featured = content.highlights.items if content.highlights else []
+        items = [i for e in content.entries for i in e.items] + list(content.context) + featured
         self._pins = cards.version_framings([i.version for i in items if i.version])
         targets = {i.wording for i in items if isinstance(i.wording, UUID)}
         if target_id is not None:
@@ -209,9 +231,14 @@ def render(
         )
 
     sections: dict[str, RenderedSection] = {}
+    unplaced: list[RenderedItem] = []
     for item in content.context:
         view = item_view(item)
         if view is None:
+            continue
+        if view.kind == "accomplishment" and not _award(library[item.card]):
+            view.where = _where(item.card, library)
+            unplaced.append(view)
             continue
         section = sections.setdefault(
             view.kind,
@@ -240,19 +267,75 @@ def render(
         and card_id not in in_context
         # The summary shows in the header, not as a line.
         and card.content.facts.get("use") != "summary"
+        # An accomplishment goes under its job first, so only awards stand alone.
+        and (card.kind != "accomplishment" or _award(card))
         and (view := item_view(ResumeItem(card=card_id))) is not None
     ]
     left_out_context.sort(
         key=lambda v: (order.index(v.kind) if v.kind in order else len(order), v.text.lower())
     )
+    highlights = None
+    if content.highlights is not None:
+        featured: list[RenderedItem] = []
+        for item in content.highlights.items:
+            view = item_view(item)
+            if view is None:
+                continue
+            view.where = _where(item.card, library)
+            if _employment_of(item.card, library) is None:
+                # Moved out from under its job since: it waits to be placed again.
+                if all(u.card != item.card for u in unplaced):
+                    unplaced.append(view)
+                continue
+            featured.append(view)
+        highlights = RenderedHighlights(
+            style=content.highlights.style,
+            paragraph=content.highlights.paragraph,
+            items=featured,
+        )
     return RenderedResume(
         header=content.header,
+        highlights=highlights,
         entries=entries,
         sections=list(sections.values()),
         left_out=left_out,
         left_out_context=left_out_context,
+        unplaced=unplaced,
         missing=missing,
     )
+
+
+def _award(card: CardText) -> bool:
+    return bool(card.content.facts.get("award"))
+
+
+def _employment_of(card_id: UUID, library: dict[UUID, CardText]) -> UUID | None:
+    """The employment (or flat role) a card sits under, however deep."""
+    seen: set[UUID] = set()
+    current = library.get(card_id)
+    while current is not None and current.parent_id is not None:
+        parent_id = current.parent_id
+        if parent_id in seen:
+            return None
+        seen.add(parent_id)
+        parent = library.get(parent_id)
+        if parent is None:
+            return None
+        if parent.kind in ENTRY_KINDS:
+            return parent_id
+        current = parent
+    return None
+
+
+def _where(card_id: UUID, library: dict[UUID, CardText]) -> str:
+    """ "Title · Employer" for the job a card sits under; empty under none."""
+    employment = _employment_of(card_id, library)
+    if employment is None:
+        return ""
+    employer = _employer(library[employment])
+    heading = _heading_of(card_id, employment, library)
+    title = _title(library[heading]) if heading is not None else ""
+    return f"{title} · {employer}" if title else employer
 
 
 def _detail_from_facts(card: CardText) -> str:
@@ -413,6 +496,8 @@ def describe(change: ResumeChange, library: dict[UUID, CardText]) -> str:
     card = library.get(change.card)
     if change.kind == "header":
         return "Changed the top: name, contact details or summary"
+    if change.kind == "highlights":
+        return "Changed the highlights: their style, words or lines"
     if card is None:
         return "Changed a card that's no longer in your library"
     if change.kind in ("entry_added", "entry_removed", "fold"):

@@ -6,12 +6,17 @@ import {
   changesLabel,
   cleanContent,
   cleanLine,
+  feature,
+  HIGHLIGHTS_MAX,
+  keptVersions,
   leaveOut,
   lineParts,
   move,
   moveContextLine,
+  moveHighlight,
   moveLine,
   type NewResume,
+  placeLine,
   proposalSize,
   type ResumeContent,
   resumeFor,
@@ -20,9 +25,13 @@ import {
   sameContent,
   setFold,
   setHeader,
+  setHighlightParagraph,
+  setHighlightStyle,
+  showHighlights,
   switchOff,
   switchOn,
   switchOnContext,
+  unfeature,
   versionAuthor,
   versionLabel,
 } from "./resumes";
@@ -227,5 +236,69 @@ describe("arranging lines", () => {
   it("sets the top, dropping empty links", () => {
     const next = setHeader(content(), { ...HEADER, links: ["https://example.com", " "] });
     expect(next.header.links).toEqual(["https://example.com"]);
+  });
+});
+
+describe("highlights", () => {
+  it("features lines from under jobs, with the wording they have there", () => {
+    const start = content();
+    start.entries[0]!.items[1] = { card: "forecast", wording: "main" };
+    let next = feature(showHighlights(start, true), "forecast");
+    next = feature(next, "late");
+    next = feature(next, "late");
+    expect(next.highlights?.items).toEqual([
+      { card: "forecast", wording: "main" },
+      { card: "late" },
+    ]);
+    next = moveHighlight(next, "late", -1);
+    expect(next.highlights?.items.map((i) => i.card)).toEqual(["late", "forecast"]);
+    next = unfeature(next, "late");
+    expect(next.highlights?.items.map((i) => i.card)).toEqual(["forecast"]);
+    expect(start.highlights).toBeUndefined();
+  });
+
+  it("keeps the style and paragraph the person picks, up to the limit", () => {
+    let next = setHighlightStyle(content(), "both");
+    next = setHighlightParagraph(next, "Ships on time.");
+    expect(next.highlights).toEqual({ style: "both", paragraph: "Ships on time.", items: [] });
+    for (let i = 0; i < HIGHLIGHTS_MAX + 2; i++) next = feature(next, `line-${i}`);
+    expect(next.highlights?.items).toHaveLength(HIGHLIGHTS_MAX);
+    expect(showHighlights(next, false).highlights).toBeNull();
+  });
+
+  it("checks highlights the browser sends", () => {
+    const ok = { ...content(), highlights: { style: "paragraph", paragraph: "Hi", items: [] } };
+    expect(cleanContent(ok)).not.toBeNull();
+    expect(cleanContent({ ...ok, highlights: { ...ok.highlights, style: "loud" } })).toBeNull();
+    expect(cleanContent({ ...ok, highlights: { ...ok.highlights, items: "late" } })).toBeNull();
+  });
+});
+
+describe("placing a line", () => {
+  it("moves a line from the context to the end of its job", () => {
+    const start = { ...content(), context: [{ card: "degree" }, { card: "peak", wording: "main" }] };
+    const next = placeLine(start, "peak", "northwind");
+    expect(next.context.map((i) => i.card)).toEqual(["degree"]);
+    expect(next.entries[0]!.items.at(-1)).toEqual({ card: "peak", wording: "main" });
+  });
+
+  it("brings the job in when the resume had left it out", () => {
+    const next = placeLine(leaveOut(content(), "brightline"), "peak", "brightline");
+    expect(next.entries.at(-1)).toEqual({
+      card: "brightline",
+      fold_earlier: false,
+      items: [{ card: "peak", wording: "auto" }],
+    });
+  });
+});
+
+describe("keptVersions", () => {
+  it("lists the versions still there, newest first", () => {
+    const kept = keptVersions([
+      version({ id: "1", number: 1 }),
+      version({ id: "2", number: 2, redacted: true }),
+      version({ id: "3", number: 3 }),
+    ]);
+    expect(kept.map((v) => v.number)).toEqual([3, 1]);
   });
 });

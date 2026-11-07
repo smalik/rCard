@@ -383,8 +383,13 @@ def _content(answer: AssemblerAnswer, lib: Library, source: ResumeContent) -> Re
             continue
         seen.add(cid)
         context.append(ResumeItem(card=cid))
+    # Highlights come along as the source has them; the person changes them on the page.
+    highlights = source.highlights.model_copy(deep=True) if source.highlights else None
     return ResumeContent(
-        header=source.header.model_copy(deep=True), entries=entries, context=context
+        header=source.header.model_copy(deep=True),
+        entries=entries,
+        context=context,
+        highlights=highlights,
     )
 
 

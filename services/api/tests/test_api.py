@@ -588,6 +588,7 @@ def test_resume_flow_over_http(client: TestClient, reads: ImportWorker) -> None:
     imported = upload(client, reads, promotions_text().encode(), "Avery Quinn.txt", me)
     import_id = imported["id"]
     assert client.get("/v1/resumes", headers=me).json() == {"resumes": [], "ready": []}
+    assert client.get("/v1/resumes/latest/contact", headers=me).json() is None
     nothing = client.post("/v1/resumes/as-written", json={"import_id": import_id}, headers=me)
     assert nothing.status_code == 422
     for card in imported["result"]["cards"]:
@@ -607,6 +608,15 @@ def test_resume_flow_over_http(client: TestClient, reads: ImportWorker) -> None:
     assert page["entries"][0]["employer"] == "Northwind Logistics"
     again = client.post("/v1/resumes/as-written", json={"import_id": import_id}, headers=me)
     assert again.json()["resume"]["id"] == resume_id
+    contact = client.get("/v1/resumes/latest/contact", headers=me).json()
+    assert contact == {
+        "resume_id": resume_id,
+        "resume_name": resume["name"],
+        "base_version_id": v1,
+        "header": resume["content"]["header"],
+        "highlights": page.get("highlights"),
+    }
+    assert client.get("/v1/resumes/latest/contact", headers=other).json() is None
     listed = client.get("/v1/resumes", headers=me).json()
     assert [r["id"] for r in listed["resumes"]] == [resume_id] and listed["ready"] == []
 
@@ -686,8 +696,34 @@ def test_resume_flow_over_http(client: TestClient, reads: ImportWorker) -> None:
     )
     assert asked.status_code == 201 and asked.json()["resume_id"] == resume_id
 
+    plan = client.get(f"/v1/resumes/{resume_id}/versions/2/deletion", headers=me)
+    assert plan.status_code == 200, plan.text
+    assert plan.json() == {"numbers": [2], "back_to": None, "deletes_resume": False, "branches": []}
+    assert (
+        client.get(f"/v1/resumes/{resume_id}/versions/2/deletion", headers=other).status_code == 404
+    )
+    latest = client.get(f"/v1/resumes/{resume_id}", headers=me).json()["resume"]["head"]["id"]
+    stale = client.post(
+        f"/v1/resumes/{resume_id}/versions/2/delete", json={"base_version_id": head}, headers=me
+    )
+    assert stale.status_code == 409
+    deleted = client.post(
+        f"/v1/resumes/{resume_id}/versions/2/delete", json={"base_version_id": latest}, headers=me
+    )
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["resume"]["resume"]["versions"][1]["redacted"] is True
+    assert client.get(f"/v1/resumes/{resume_id}/versions/2", headers=me).status_code == 404
+
     assert client.get(f"/v1/resumes/{resume_id}", headers=other).status_code == 404
     assert client.get(f"/v1/resumes/{resume_id}/versions/1", headers=other).status_code == 404
+    assert (
+        client.post(
+            f"/v1/resumes/{resume_id}/versions/1/delete",
+            json={"base_version_id": latest, "after": True},
+            headers=other,
+        ).status_code
+        == 404
+    )
     assert (
         client.post(f"/v1/resumes/{resume_id}/ask", json={"text": "Mine now"}, headers=other)
     ).status_code == 404

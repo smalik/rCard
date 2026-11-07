@@ -54,6 +54,9 @@ export type DiffSection = { kind: string; label: string; presence: Presence; lin
 
 export type HeaderChange = { field: keyof ResumeHeader; label: string; was: string; now: string };
 
+// The highlights paragraph, when its words changed.
+export type ParagraphChange = { was: string; now: string };
+
 export type DiffCounts = {
   added: number;
   removed: number;
@@ -63,10 +66,14 @@ export type DiffCounts = {
   jobsRemoved: number;
   folds: number;
   header: number;
+  paragraph: number;
 };
 
 export type ResumeDiff = {
   header: HeaderChange[];
+  // The highlights paragraph as it reads now, and what it read before if that changed.
+  paragraph: string;
+  paragraphChange: ParagraphChange | null;
   entries: DiffEntry[];
   sections: DiffSection[];
   counts: DiffCounts;
@@ -266,6 +273,23 @@ function headerText(header: ResumeHeader, field: keyof ResumeHeader): string {
 
 // -- the whole page ------------------------------------------------------------
 
+type Listed = { kind: string; label: string; items: RenderedItem[] };
+
+/** The page's sections, with its featured highlights first when it shows them. */
+function listed(page: RenderedResume): Listed[] {
+  const h = page.highlights;
+  const featured =
+    h && h.style !== "paragraph" && h.items.length > 0
+      ? [{ kind: "highlights", label: "Highlights", items: h.items }]
+      : [];
+  return [...featured, ...page.sections];
+}
+
+function paragraphOf(page: RenderedResume): string {
+  const h = page.highlights;
+  return h && h.style !== "bullets" ? h.paragraph.trim() : "";
+}
+
 export function compareResumes(before: RenderedResume, after: RenderedResume): ResumeDiff {
   const header = HEADER_FIELDS.flatMap(({ field, label }) => {
     const was = headerText(before.header, field);
@@ -286,7 +310,11 @@ export function compareResumes(before: RenderedResume, after: RenderedResume): R
     ),
   );
 
-  const sections = mergeOrdered(before.sections, after.sections, (s) => s.kind).map((m) => ({
+  const paragraph = paragraphOf(after);
+  const was = paragraphOf(before);
+  const paragraphChange = was === paragraph ? null : { was, now: paragraph };
+
+  const sections = mergeOrdered(listed(before), listed(after), (s) => s.kind).map((m) => ({
     kind: m.item.kind,
     label: m.item.label,
     presence: m.presence,
@@ -306,8 +334,9 @@ export function compareResumes(before: RenderedResume, after: RenderedResume): R
     jobsRemoved: entries.filter((e) => e.presence === "removed").length,
     folds: entries.filter((e) => e.fold !== null).length,
     header: header.length,
+    paragraph: paragraphChange ? 1 : 0,
   };
-  return { header, entries, sections, counts };
+  return { header, paragraph, paragraphChange, entries, sections, counts };
 }
 
 function plural(n: number, one: string, many: string): string {
@@ -326,6 +355,7 @@ export function diffSummary(diff: ResumeDiff): string | null {
   if (c.moved) parts.push(`${c.moved} moved`);
   if (c.folds) parts.push(c.folds === 1 ? "titles folded or unfolded at 1 job" : `titles folded or unfolded at ${c.folds} jobs`);
   if (c.header) parts.push("the top changed");
+  if (c.paragraph) parts.push("the highlights paragraph changed");
   if (parts.length === 0) return null;
   const text = parts.join(", ");
   return text.charAt(0).toUpperCase() + text.slice(1);
@@ -333,5 +363,15 @@ export function diffSummary(diff: ResumeDiff): string | null {
 
 export function changeCount(diff: ResumeDiff): number {
   const c = diff.counts;
-  return c.added + c.removed + c.reworded + c.moved + c.jobsAdded + c.jobsRemoved + c.folds + c.header;
+  return (
+    c.added +
+    c.removed +
+    c.reworded +
+    c.moved +
+    c.jobsAdded +
+    c.jobsRemoved +
+    c.folds +
+    c.header +
+    c.paragraph
+  );
 }
