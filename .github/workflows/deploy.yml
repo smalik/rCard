@@ -59,9 +59,11 @@ jobs:
       - name: Run database migrations
         working-directory: services/api
         env:
-          PLYTOS_DATABASE_URL: postgresql://${{ env.MIGRATE_DB_USER }}@127.0.0.1:5432/plytos?sslmode=disable
           PLYTOS_APP_LOGIN_ROLES: ${{ env.API_DB_USER }}
         run: |
+          # The database user is an email-like name; its @ must be escaped
+          # to sit in the URL's user part.
+          export PLYTOS_DATABASE_URL="postgresql://${MIGRATE_DB_USER//@/%40}@127.0.0.1:5432/plytos?sslmode=disable"
           curl -sSfL -o "$RUNNER_TEMP/cloud-sql-proxy" \
             "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/$CLOUD_SQL_PROXY_VERSION/cloud-sql-proxy.linux.amd64"
           chmod +x "$RUNNER_TEMP/cloud-sql-proxy"
