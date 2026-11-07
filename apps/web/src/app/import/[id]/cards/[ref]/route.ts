@@ -1,4 +1,4 @@
-import { approveCard, decideCard, getMatches, placeCard } from "../../../../../lib/api";
+import { approveCard, decideCard, fixCard, getMatches, placeCard } from "../../../../../lib/api";
 import type { CardContent } from "../../../../../lib/cards";
 import {
   cleanContent,
@@ -51,8 +51,10 @@ async function decided(
 
 // The person's decision on one proposed card: approve it (as it is, or in
 // their edited words), set it aside for later, leave it out, or undo that.
-// "place" answers where it belongs: which job a result is from. A card that
-// matches one of theirs can carry on as it ("choice").
+// "place" answers where it belongs: which job a result is from, or moves it.
+// "fix" corrects its words or dates before it's kept (content null takes the
+// correction back). A card that matches one of theirs can carry on as it
+// ("choice").
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string; ref: string }> },
@@ -73,6 +75,16 @@ export async function POST(
         return problem(400, "That didn't come through. Try again.");
       }
       return await decided(session, id, await placeCard(session, id, ref, parentRef));
+    }
+    if (action === "fix") {
+      const content = body?.content ?? null;
+      if (content !== null) {
+        if (!isContent(content)) return problem(400, "That card didn't come through. Try again.");
+        const problems = contentProblems(content);
+        if (problems.length > 0) return problem(422, problems.join(" "));
+      }
+      const cleaned = content && cleanContent(content);
+      return await decided(session, id, await fixCard(session, id, ref, cleaned));
     }
     if (action === "approve") {
       const content = body?.content ?? null;

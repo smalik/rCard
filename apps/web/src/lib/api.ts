@@ -279,6 +279,21 @@ export function placeCard(
   );
 }
 
+// The person's correction to a proposed card's words or dates before it's kept,
+// or null to take it back.
+export function fixCard(
+  session: Session,
+  id: string,
+  ref: string,
+  content: CardContent | null,
+): Promise<Progress> {
+  return apiFetch<Progress>(
+    `/v1/imports/${encodeURIComponent(id)}/cards/${encodeURIComponent(ref)}/fix`,
+    session,
+    json({ content }),
+  );
+}
+
 // Approves a proposed card. One that matches the person's own card carries on
 // as it (see MatchChoice); `choice` null leaves that to the API's default.
 export function approveCard(

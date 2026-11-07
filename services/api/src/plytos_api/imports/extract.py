@@ -692,6 +692,7 @@ def _read_pdf(data: bytes, filename: str) -> ExtractedDocument:
     pictures: list[Picture] = []
     kept: list[PictureImage] = []
     scanned: list[int] = []
+    page_sizes: list[tuple[float, float]] = []
     try:
         pdf = pdfplumber.open(io.BytesIO(data))
     except Exception as exc:
@@ -703,6 +704,7 @@ def _read_pdf(data: bytes, filename: str) -> ExtractedDocument:
         has_text = False
         for number, page in enumerate(pdf.pages, start=1):
             images += len(page.images)
+            page_sizes.append((round(float(page.width) / 72, 2), round(float(page.height) / 72, 2)))
             words = page.extract_words(extra_attrs=["fontname", "size"], keep_blank_chars=False)
             before = len(blocks) - 1 if blocks else None
             if not words:
@@ -722,6 +724,7 @@ def _read_pdf(data: bytes, filename: str) -> ExtractedDocument:
                         )
                 continue
             has_text = True
+            size = (float(page.width), float(page.height))
             gutter = _gutter(words, float(page.width))
             if gutter is not None:
                 columns = 2
@@ -744,7 +747,7 @@ def _read_pdf(data: bytes, filename: str) -> ExtractedDocument:
                 right = max(float(w["x1"]) for line in running for w in line["words"])
                 for line in lines:
                     count = len(blocks)
-                    _add_pdf_line(blocks, line, number, bullet_x, flow, right)
+                    _add_pdf_line(blocks, line, number, bullet_x, flow, right, size)
                     if len(blocks) > count:
                         tops.append((blocks[-1].index, line["top"]))
             for img in page.images:
@@ -760,6 +763,7 @@ def _read_pdf(data: bytes, filename: str) -> ExtractedDocument:
         has_text_layer=has_text,
         scanned_pages=scanned,
         pictures=pictures,
+        page_sizes=page_sizes,
     )
     return ExtractedDocument(facts=facts, blocks=blocks, images=kept)
 
@@ -1089,17 +1093,20 @@ def _add_pdf_line(
     bullet_x: dict[int, tuple[float, float]],
     flow: dict[int, _Flow],
     right: float,
+    size: tuple[float, float],
 ) -> None:
     """Adds a PDF line as a block, or joins it to the bullet or the line it wraps from.
 
     bullet_x maps a bullet block's index to the x where its text starts and
     the bottom of its last line, so wrapped lines can be found. flow does the same
-    for plain lines, which carry on only from a line that filled the column.
+    for plain lines, which carry on only from a line that filled the column. size is
+    the page's width and height, to say where the line sits on it.
     """
     words = line["words"]
     text = clean(line["text"])
     if not text:
         return
+    box = _box(words, size)
     raw_fonts = [str(w["fontname"]) for w in words]
     stripped, glyph = split_bullet(text)
     drawn = glyph is None and bool(line.get("marked"))
@@ -1110,6 +1117,7 @@ def _add_pdf_line(
     # "January 2020") is one line.
     if glyph is None and prev is not None and prev.page == page and _splits_range(prev.text, text):
         prev.text = f"{prev.text} {text}"
+        prev.box = _union(prev.box, box)
         return
     # A section heading never carries a line on, nor is carried on by one, whatever its
     # type: a resume printed in one plain font sets its headings like any other line.
@@ -1122,9 +1130,10 @@ def _add_pdf_line(
         and prev.index in bullet_x
     ):
         text_x, bottom = bullet_x[prev.index]
-        size = float(words[0]["size"])
-        if abs(text_x - line["x0"]) <= 3 and line["top"] - bottom < size * 1.2:
+        font = float(words[0]["size"])
+        if abs(text_x - line["x0"]) <= 3 and line["top"] - bottom < font * 1.2:
             prev.text = f"{prev.text} {text}"
+            prev.box = _union(prev.box, box)
             bullet_x[prev.index] = (text_x, line["bottom"])
             return
     line_x1 = max(float(w["x1"]) for w in words)
@@ -1140,6 +1149,7 @@ def _add_pdf_line(
         and _wraps_from(flow[prev.index], line, text, right)
     ):
         prev.text = f"{prev.text} {text}"
+        prev.box = _union(prev.box, box)
         above = flow[prev.index]
         flow[prev.index] = above._replace(x1=line_x1, bottom=float(line["bottom"]))
         return
@@ -1153,6 +1163,7 @@ def _add_pdf_line(
         font_names=sorted({_font_name(f) for f in raw_fonts}),
         font_sizes=sorted({round(float(w["size"]) * 2) / 2 for w in words}),
         page=page,
+        box=box,
     )
     if glyph is not None:
         typed = not drawn and len(words) > 1
@@ -1168,6 +1179,32 @@ def _add_pdf_line(
             spaced="\t" in line["text"],
         )
     blocks.append(block)
+
+
+def _box(
+    words: list[dict[str, Any]], size: tuple[float, float]
+) -> tuple[float, float, float, float]:
+    """Where words sit on their page, as fractions of its width and height."""
+    width, height = size
+
+    def at(value: float, whole: float) -> float:
+        return round(min(1.0, max(0.0, value / whole)), 4) if whole > 0 else 0.0
+
+    return (
+        at(min(float(w["x0"]) for w in words), width),
+        at(min(float(w["top"]) for w in words), height),
+        at(max(float(w["x1"]) for w in words), width),
+        at(max(float(w["bottom"]) for w in words), height),
+    )
+
+
+def _union(
+    a: tuple[float, float, float, float] | None, b: tuple[float, float, float, float]
+) -> tuple[float, float, float, float]:
+    """The box around a line and the line it carries on to."""
+    if a is None:
+        return b
+    return (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
 
 
 _MONTHS = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?"

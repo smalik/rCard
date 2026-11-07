@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     # "prod" is the default so a missing setting never turns on dev shortcuts.
     env: Literal["dev", "test", "prod"] = "prod"
     database_url: str = "postgresql://localhost:5432/plytos"
+    # Connections kept open even when idle. Opening one to a far database takes
+    # several round trips, so a page that asks a few things at once shouldn't
+    # wait on new ones.
+    database_pool_min: int = 4
     # Key-encryption key that wraps each person's data key.
     #   local:<base64 of 32 bytes>   dev and test only
     #   gcp-kms:projects/<p>/locations/<l>/keyRings/<r>/cryptoKeys/<k>

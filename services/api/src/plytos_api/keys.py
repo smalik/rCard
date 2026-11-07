@@ -18,6 +18,8 @@ from uuid import UUID
 import psycopg
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from plytos_api.db import prefetched_keys
+
 _FORMAT_V1 = b"\x01"
 _NONCE_BYTES = 12
 
@@ -133,9 +135,13 @@ class Vault:
         return UserCipher(dek)
 
     def cipher_for(self, conn: psycopg.Connection, user_id: UUID) -> UserCipher:
-        row = conn.execute(
-            "select wrapped_dek from plytos_vault.user_key where user_id = %s", (user_id,)
-        ).fetchone()
-        if row is None:
-            raise KeyShreddedError(str(user_id))
-        return UserCipher(self._kek.unwrap(bytes(row[0]), _key_aad(user_id)))
+        # Database.as_user fetched the wrapped key with the transaction's setup.
+        wrapped = (prefetched_keys.get() or {}).get(user_id)
+        if wrapped is None:
+            row = conn.execute(
+                "select wrapped_dek from plytos_vault.user_key where user_id = %s", (user_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyShreddedError(str(user_id))
+            wrapped = bytes(row[0])
+        return UserCipher(self._kek.unwrap(wrapped, _key_aad(user_id)))

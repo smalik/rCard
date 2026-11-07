@@ -435,9 +435,10 @@ class ResumeStore:
         if row is None:
             raise ResumeNotFoundError(str(resume_id))
         summary = self._summary(row)
-        versions = self._versions(resume_id)
+        # The versions come with their content, so the head's isn't asked again.
+        versions, contents = self._versions_and_contents(resume_id)
         head = versions[-1]
-        content = self._content(head.id)
+        content = contents.get(head.id, ResumeContent())
         parent_name = None
         if summary.parent_id is not None:
             parent = self._conn.execute(
@@ -663,31 +664,43 @@ class ResumeStore:
         return found[0] if found else None
 
     def _versions(self, resume_id: UUID) -> list[ResumeVersionView]:
-        rows = self._conn.execute(
-            f"select {_VERSION_COLUMNS} from plytos.resume_version"  # noqa: S608
-            " where resume_id = %s order by number",
-            (resume_id,),
-        ).fetchall()
+        return self._versions_and_contents(resume_id)[0]
+
+    def _versions_and_contents(
+        self, resume_id: UUID
+    ) -> tuple[list[ResumeVersionView], dict[UUID, ResumeContent]]:
+        """A resume's versions, oldest first, and the content of each one not
+        redacted. The versions and their names come in one trip."""
+        with self._conn.pipeline():
+            found = self._conn.execute(
+                f"select {_VERSION_COLUMNS} from plytos.resume_version"  # noqa: S608
+                " where resume_id = %s order by number",
+                (resume_id,),
+            )
+            named = self._conn.execute(
+                "select n.id, n.version_id, n.name_ciphertext from plytos.resume_version_name n"
+                " join plytos.resume_version v on v.id = n.version_id"
+                " where v.resume_id = %s order by n.created_at desc",
+                (resume_id,),
+            )
+        rows = found.fetchall()
         if not rows:
             raise ResumeNotFoundError(str(resume_id))
         names: dict[UUID, list[str]] = {}
-        for name_id, version_id, blob in self._conn.execute(
-            "select n.id, n.version_id, n.name_ciphertext from plytos.resume_version_name n"
-            " join plytos.resume_version v on v.id = n.version_id"
-            " where v.resume_id = %s order by n.created_at desc",
-            (resume_id,),
-        ).fetchall():
+        for name_id, version_id, blob in named.fetchall():
             names.setdefault(version_id, []).append(
                 self._cipher.decrypt(bytes(blob), _version_name_aad(name_id)).decode()
             )
         views = []
+        contents: dict[UUID, ResumeContent] = {}
         for r in rows:
             view = self._version_view(r)
             view.names = names.get(view.id, [])
-            if not view.redacted:
-                view.note = self._decrypt_content(r[0], r[9]).note
+            if not view.redacted and r[9] is not None:
+                contents[view.id] = self._decrypt_content(r[0], r[9])
+                view.note = contents[view.id].note
             views.append(view)
-        return views
+        return views, contents
 
     def _version_row(self, version_id: UUID) -> Sequence[Any]:
         row = self._conn.execute(

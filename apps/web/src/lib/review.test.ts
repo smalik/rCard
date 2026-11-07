@@ -84,7 +84,7 @@ function review(overrides: Partial<Review> = {}, progress: Partial<Review["progr
     cards: CARDS,
     findings: [FIGURES],
     toSettle: [0],
-    progress: { settled: {}, cards: {}, edits: {}, moves: {}, ...progress },
+    progress: { settled: {}, cards: {}, edits: {}, moves: {}, fixes: {}, corrections: {}, ...progress },
     contactKept: true,
     readBy: null,
     matches: {},

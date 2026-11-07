@@ -1,4 +1,4 @@
-import { ChevronRight, CornerDownRight, FileText } from "lucide-react";
+import { ChevronRight, CornerDownRight, FileText, Upload } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -110,7 +110,14 @@ export default async function ResumesPage() {
   return (
     <AppShell current="/resumes">
       <main className="mx-auto w-full max-w-3xl px-4 pt-6 sm:px-6 md:pt-10">
-        <h1 className="text-[32px] leading-none font-bold tracking-[-0.025em] md:text-[38px]">Resumes</h1>
+        <div className="flex items-end justify-between gap-3">
+          <h1 className="text-[32px] leading-none font-bold tracking-[-0.025em] md:text-[38px]">Resumes</h1>
+          <Button asChild size="sm" variant="outline">
+            <Link href="/import">
+              <Upload /> Bring in a resume
+            </Link>
+          </Button>
+        </div>
         <p className="mt-2 text-[15px] text-muted-foreground">
           Each resume is a selection of your cards. Every version is kept, and a resume made for a
           role stays tied to the one it came from.

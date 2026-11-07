@@ -604,7 +604,7 @@
   }
 }
 
-/* --- Kind pill, segments and fanned cards ------------------------------------- */
+/* --- Kind pill and segments --------------------------------------------------- */
 
 .kind-pill {
   display: inline-flex;
@@ -644,81 +644,6 @@
 
 .segments [data-state="later"] {
   background: var(--ink-30);
-}
-
-.fan {
-  position: relative;
-  flex: none;
-}
-
-.fan-large {
-  width: 200px;
-  height: 128px;
-  margin: 0 auto;
-}
-
-.fan-large .sketch-card {
-  width: 96px;
-  height: 112px;
-  border-radius: 14px;
-}
-
-.fan-large .fan-1 {
-  left: 0;
-  top: 12px;
-  transform: rotate(-8deg);
-}
-
-.fan-large .fan-2 {
-  left: 52px;
-  top: 0;
-  z-index: 1;
-}
-
-.fan-large .fan-3 {
-  left: 104px;
-  top: 12px;
-  transform: rotate(8deg);
-}
-
-.fan-small {
-  width: 64px;
-  height: 52px;
-}
-
-.fan-small .sketch-card {
-  width: 38px;
-  height: 48px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  padding: 0;
-}
-
-.fan-small .sketch-card::before {
-  height: 4px;
-  margin: 0;
-}
-
-.fan-small .sketch-card-top {
-  display: none;
-}
-
-.fan-small .fan-1 {
-  left: 0;
-  top: 4px;
-  transform: rotate(-8deg);
-}
-
-.fan-small .fan-2 {
-  left: 13px;
-  top: 0;
-  z-index: 1;
-}
-
-.fan-small .fan-3 {
-  left: 26px;
-  top: 4px;
-  transform: rotate(8deg);
 }
 
 /* --- Check: overview ----------------------------------------------------------- */
@@ -1634,48 +1559,6 @@ section[id] {
   font-size: 11px;
   line-height: 16px;
   letter-spacing: 0.5px;
-  color: var(--ink-60);
-}
-
-/* The career as read: employers, the titles inside each, results under each. */
-.career-outline,
-.career-outline ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.career-outline {
-  display: grid;
-  gap: 12px;
-}
-.career-outline .outline-job {
-  border: 1px solid var(--ink-12);
-  border-radius: 12px;
-  padding: 12px 14px;
-  background: var(--paper, transparent);
-}
-.career-outline ul {
-  margin-top: 8px;
-  padding-left: 14px;
-  border-left: 2px solid var(--ink-12);
-  display: grid;
-  gap: 8px;
-}
-.career-outline li {
-  display: grid;
-  gap: 2px;
-}
-.outline-name {
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-.outline-job > .outline-name {
-  font-size: 17px;
-}
-.outline-meta {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 16px;
   color: var(--ink-60);
 }
 }

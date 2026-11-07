@@ -345,7 +345,11 @@ export function SharedResume({
         )}
         <Button size="sm" variant="ghost" asChild>
           <Link href={`/import/${id}`}>
-            {resume.state === "failed" ? "See what went wrong" : resume.state === "reading" ? "See how it's going" : "See what I read"}
+            {resume.state === "failed"
+              ? "See what went wrong"
+              : resume.state === "reading"
+                ? "See how it's going"
+                : "Check it beside your file"}
           </Link>
         </Button>
       </div>

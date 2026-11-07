@@ -30,6 +30,10 @@ class Block(BaseModel):
     where: Literal["body", "table", "text_box", "header", "footer", "image"] = "body"
     page: int | None = None
     links: list[str] = Field(default_factory=list)
+    # Where the line sits on its page of a PDF, as fractions of the page's width and
+    # height: left, top, right, bottom. The person's screen lights it up on a picture
+    # of the page. None for Word and text files, and for lines read from a picture.
+    box: tuple[float, float, float, float] | None = None
 
 
 class Picture(BaseModel):
@@ -74,6 +78,9 @@ class DocumentFacts(BaseModel):
     markings: list[str] = Field(default_factory=list)
     pictures: list[Picture] = Field(default_factory=list)
     text_width_in: float | None = None
+    # Each page of a PDF as (width, height) in inches, so a picture of it can be laid
+    # out before it arrives.
+    page_sizes: list[tuple[float, float]] = Field(default_factory=list)
 
 
 class ExtractedDocument(BaseModel):

@@ -82,6 +82,26 @@ class ImportProgress(BaseModel):
     # Where the person says a card belongs, by card ref: the proposed card it
     # sits under, or None for the top of the tree.
     moves: dict[str, str | None] = Field(default_factory=dict)
+    # The person's own corrections to a proposed card while checking the import
+    # (its words or dates), by card ref. They win over the import's reading; a
+    # number picked in answer to a question still applies on top.
+    fixes: dict[str, MainContent] = Field(default_factory=dict)
+    # How many corrections of each kind the person made ("wording", "dates",
+    # "facts", "moved"): numbers only, never what was corrected, so how well
+    # imports read can be measured without keeping anyone's words.
+    corrections: dict[str, int] = Field(default_factory=dict)
+
+
+class ImportOutline(BaseModel):
+    """What a reading holds, in numbers, so listing files needn't open it."""
+
+    cards: int
+    # Positions of the findings the person settles (see to_settle).
+    settle: list[int]
+
+
+def outline_of(result: ImportResult) -> ImportOutline:
+    return ImportOutline(cards=len(result.cards), settle=to_settle(result))
 
 
 class ImportFile(BaseModel):
@@ -161,7 +181,10 @@ def find_matches(
 ) -> dict[str, CardMatch]:
     """The person's card each proposed card stands for, by ref, as things stand:
     the person's decisions, moves and edits count."""
-    contents = {p.ref: progress.edits.get(p.ref) or p.content for p in result.cards}
+    contents = {
+        p.ref: progress.edits.get(p.ref) or progress.fixes.get(p.ref) or p.content
+        for p in result.cards
+    }
     decided = {ref: Decided(state=d.state, card_id=d.card_id) for ref, d in progress.cards.items()}
     return match_cards(result, decided, progress.moves, contents, cards, reserved)
 
@@ -194,8 +217,9 @@ class ImportStore:
         progress = ImportProgress()
         row = self._conn.execute(
             "insert into plytos.resume_import (id, owner_id, file_format, file_size,"
-            " file_ciphertext, name_ciphertext, result_ciphertext, progress_ciphertext)"
-            " values (%s, %s, %s, %s, %s, %s, %s, %s) returning created_at, updated_at",
+            " file_ciphertext, name_ciphertext, result_ciphertext, progress_ciphertext,"
+            " outline_ciphertext)"
+            " values (%s, %s, %s, %s, %s, %s, %s, %s, %s) returning created_at, updated_at",
             (
                 import_id,
                 self._user_id,
@@ -205,6 +229,7 @@ class ImportStore:
                 self._seal("name", import_id, filename.encode()),
                 self._seal("result", import_id, result.model_dump_json().encode()),
                 self._seal("progress", import_id, progress.model_dump_json().encode()),
+                self._seal_outline(import_id, result),
             ),
         ).fetchone()
         assert row is not None
@@ -277,10 +302,12 @@ class ImportStore:
         longer this attempt's."""
         done = self._conn.execute(
             "update plytos.resume_import set state = 'read', stage = null, locked_until = null,"
-            " error_code = null, result_ciphertext = %s, updated_at = now()"
+            " error_code = null, result_ciphertext = %s, outline_ciphertext = %s,"
+            " updated_at = now()"
             " where id = %s and state = 'reading' and attempts = %s",
             (
                 self._seal("result", import_id, result.model_dump_json().encode()),
+                self._seal_outline(import_id, result),
                 import_id,
                 attempt,
             ),
@@ -376,7 +403,31 @@ class ImportStore:
                 raise ImportConflictError("That card can't sit there.")
         elif proposal.kind in ("position", "engagement"):
             raise ImportConflictError("A title needs an employer.")
+        if parent_ref != _parent_ref(progress, proposal) and proposal.placement is None:
+            _count(progress, "moved")
         progress.moves[ref] = parent_ref
+        self._save_progress(import_id, progress)
+        return progress
+
+    def fix(self, import_id: UUID, ref: str, content: MainContent | None) -> ImportProgress:
+        """Records the person's correction to a proposed card's words or dates, or
+        takes it back (None), before the card is approved."""
+        result, progress = self._load(import_id)
+        proposal = _proposal(result, ref)
+        current = progress.cards.get(ref)
+        if current is not None and current.state == "approved":
+            raise ImportConflictError("That card is already approved. Change it on the card.")
+        if content is None:
+            progress.fixes.pop(ref, None)
+        else:
+            before = progress.edits.get(ref) or progress.fixes.get(ref) or proposal.content
+            kind = _correction(before, content)
+            if kind is None:
+                return progress
+            # It sits under whatever card it sits under; a correction can't move it.
+            progress.fixes[ref] = content.model_copy(update={"parent": None})
+            _count(progress, kind)
+        _rebuild_edits(result, progress)
         self._save_progress(import_id, progress)
         return progress
 
@@ -474,7 +525,7 @@ class ImportStore:
             raise ImportConflictError("That card is already approved.")
         if proposal.placement is not None and ref not in progress.moves:
             raise ImportConflictError(f"{proposal.placement.question} Answer that first.")
-        chosen = content or progress.edits.get(ref) or proposal.content
+        chosen = content or progress.edits.get(ref) or progress.fixes.get(ref) or proposal.content
         # It sits under the saved card of its nearest approved parent.
         chosen = chosen.model_copy(update={"parent": _saved_parent(result, progress, proposal)})
 
@@ -519,9 +570,13 @@ class ImportStore:
 
     # -- reading -------------------------------------------------------------
 
+    # The reading itself is fetched only for an import read before outlines
+    # were kept, to write its outline once.
     _SUMMARY = (
         "select id, created_at, updated_at, file_format, file_size, name_ciphertext,"
-        " result_ciphertext, progress_ciphertext, state, stage from plytos.resume_import"
+        " outline_ciphertext, progress_ciphertext, state, stage,"
+        " case when outline_ciphertext is null then result_ciphertext end"
+        " from plytos.resume_import"
     )
 
     def summaries(self) -> list[ImportSummary]:
@@ -533,6 +588,27 @@ class ImportStore:
         if row is None:
             raise ImportNotFoundError(str(import_id))
         return self._summary(row)
+
+    def _seal_outline(self, import_id: UUID, result: ImportResult) -> bytes:
+        return self._seal("outline", import_id, outline_of(result).model_dump_json().encode())
+
+    def _outline(
+        self, import_id: UUID, sealed: bytes | None, reading: bytes | None
+    ) -> ImportOutline:
+        if sealed is not None:
+            return ImportOutline.model_validate_json(self._open("outline", import_id, sealed))
+        if reading is None:
+            return ImportOutline(cards=0, settle=[])
+        # Read before outlines were kept: work it out once, and keep it.
+        outline = outline_of(
+            ImportResult.model_validate_json(self._open("result", import_id, reading))
+        )
+        self._conn.execute(
+            "update plytos.resume_import set outline_ciphertext = %s"
+            " where id = %s and outline_ciphertext is null",
+            (self._seal("outline", import_id, outline.model_dump_json().encode()), import_id),
+        )
+        return outline
 
     def status(self, import_id: UUID) -> ImportStatus:
         """Where a reading is, without opening what was read."""
@@ -555,16 +631,12 @@ class ImportStore:
 
     def _summary(self, r: Sequence[Any]) -> ImportSummary:
         import_id: UUID = r[0]
-        result = (
-            ImportResult.model_validate_json(self._open("result", import_id, r[6]))
-            if r[6] is not None
-            else None
-        )
+        outline = self._outline(import_id, r[6], r[10])
         progress = ImportProgress.model_validate_json(self._open("progress", import_id, r[7]))
         states = [d.state for d in progress.cards.values()]
         unsettled = [
             i
-            for i in to_settle(result)
+            for i in outline.settle
             if (s := progress.settled.get(str(i))) is None or s.answer == "later"
         ]
         return ImportSummary(
@@ -576,7 +648,7 @@ class ImportStore:
             file=ImportFile(
                 format=r[3], size=r[4], name=self._open("name", import_id, r[5]).decode()
             ),
-            cards=len(result.cards) if result is not None else 0,
+            cards=outline.cards,
             approved=states.count("approved"),
             later=states.count("later"),
             dropped=states.count("dropped"),
@@ -739,6 +811,24 @@ def _rebuild_edits(result: ImportResult, progress: ImportProgress) -> None:
             settlement.changed = _use_figure(result.cards, finding, settlement.value, progress)
 
 
+def _count(progress: ImportProgress, kind: str) -> None:
+    progress.corrections[kind] = progress.corrections.get(kind, 0) + 1
+
+
+_DATE_FACTS = ("start", "end")
+
+
+def _correction(before: MainContent, after: MainContent) -> str | None:
+    """What kind of correction the person made, or None when nothing changed."""
+    if before.framing != after.framing:
+        return "wording"
+    if any(before.facts.get(k) != after.facts.get(k) for k in _DATE_FACTS):
+        return "dates"
+    if before.facts != after.facts:
+        return "facts"
+    return None
+
+
 def _use_figure(
     cards: list[ProposedCard], finding: Finding, value: str, progress: ImportProgress
 ) -> list[str]:
@@ -751,7 +841,7 @@ def _use_figure(
         for card in cards:
             if loc.block not in card.source_blocks:
                 continue
-            content = progress.edits.get(card.ref) or card.content
+            content = progress.edits.get(card.ref) or progress.fixes.get(card.ref) or card.content
             text = content.framing.headline + " " + content.framing.body
             if quoted[:40] not in text and content.framing.headline[:40] not in quoted:
                 continue  # another sentence from the same line

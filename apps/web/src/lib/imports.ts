@@ -103,6 +103,10 @@ export type Progress = {
   edits: Record<string, CardContent>;
   // Where the person says a card belongs: the card it sits under, by ref.
   moves: Record<string, string | null>;
+  // The person's own corrections to a card's words or dates, by ref.
+  fixes: Record<string, CardContent>;
+  // How many corrections of each kind, as numbers only.
+  corrections: Record<string, number>;
 };
 
 export type ImportFileInfo = {
@@ -274,7 +278,12 @@ export function toMatches(raw: unknown): Record<string, CardMatch> {
 }
 
 function emptyProgress(): Progress {
-  return { settled: {}, cards: {}, edits: {}, moves: {} };
+  return { settled: {}, cards: {}, edits: {}, moves: {}, fixes: {}, corrections: {} };
+}
+
+// Progress as the API sends it, with anything an older import lacks filled in.
+export function toProgress(raw: Partial<Progress> | undefined): Progress {
+  return { ...emptyProgress(), ...raw };
 }
 
 const OLD_PICTURE_CHECK = "Plytos read this from a picture in your resume. Check the wording.";
@@ -331,7 +340,7 @@ export function toReview(raw: unknown): Review {
       })),
     })),
     toSettle: view.to_settle ?? [],
-    progress: { ...emptyProgress(), ...view.progress },
+    progress: toProgress(view.progress),
     contactKept:
       (contact.emails?.length ?? 0) > 0 || (contact.phones?.length ?? 0) > 0 || !!contact.location,
     readBy: typeof result.read_by === "string" ? result.read_by : null,
@@ -362,8 +371,10 @@ export function readerName(readBy: string | null): string | null {
 
 // --- Progress ---------------------------------------------------------------
 
+// A card's words as they stand: a number the person picked, else their own
+// correction, else the reading.
 export function contentFor(card: Proposal, progress: Progress): CardContent {
-  return progress.edits[card.ref] ?? card.content;
+  return progress.edits[card.ref] ?? progress.fixes?.[card.ref] ?? card.content;
 }
 
 export function stateOf(ref: string, progress: Progress): CardState | "pending" {
@@ -376,10 +387,6 @@ export function settleState(index: number, progress: Progress): SettleState {
   const settlement = progress.settled[String(index)];
   if (!settlement) return "open";
   return settlement.answer === "later" ? "later" : "settled";
-}
-
-export function settledCount(review: Review): number {
-  return review.toSettle.filter((i) => settleState(i, review.progress) === "settled").length;
 }
 
 // The figures a "two numbers" question offers, in the order the resume uses them.

@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { ApiError, getImport } from "../../../lib/api";
 import { type ImportStatus, type Review, toReview, toStatus } from "../../../lib/imports";
+import { type ResumeFile, toResumeFile } from "../../../lib/rebuilt";
 import { isImportId } from "../../../lib/routes";
 import { currentSession } from "../../../lib/session";
 
@@ -12,7 +13,9 @@ import { currentSession } from "../../../lib/session";
 // else's import, or one that was deleted, is simply not found.
 export async function loadImport(
   id: string,
-): Promise<{ review: Review; status: null } | { review: null; status: ImportStatus }> {
+): Promise<
+  { review: Review; file: ResumeFile; status: null } | { review: null; file: null; status: ImportStatus }
+> {
   const session = await currentSession();
   if (!session) redirect("/sign-in");
   if (!isImportId(id)) notFound();
@@ -25,8 +28,8 @@ export async function loadImport(
   }
   const status = toStatus(raw);
   return status.state === "read"
-    ? { review: toReview(raw), status: null }
-    : { review: null, status };
+    ? { review: toReview(raw), file: toResumeFile(raw), status: null }
+    : { review: null, file: null, status };
 }
 
 // What was read, for the pages that need it. Until then they send the person

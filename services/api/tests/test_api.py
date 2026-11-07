@@ -252,7 +252,14 @@ def test_resume_import_keeps_the_original_and_saves_only_approved_cards(
     assert (status_now["state"], status_now["stage"]) == ("read", None)
     view = client.get(f"/v1/imports/{import_id}", headers=me).json()
     assert view["state"] == "read"
-    assert view["progress"] == {"settled": {}, "cards": {}, "edits": {}, "moves": {}}
+    assert view["progress"] == {
+        "settled": {},
+        "cards": {},
+        "edits": {},
+        "moves": {},
+        "fixes": {},
+        "corrections": {},
+    }
     assert len(view["result"]["roles"]) == 4
     assert client.get("/v1/cards", headers=me).json() == before
 
@@ -605,6 +612,26 @@ def test_going_through_a_job_at_once_over_http(client: TestClient, reads: Import
     assert twice.status_code == 409
     odd = client.post(url, json={"keep": [{"ref": "card-7; drop"}]}, headers=me)
     assert odd.status_code == 422
+
+
+def test_fixing_a_line_before_keeping_it_over_http(client: TestClient, reads: ImportWorker) -> None:
+    me, other = as_user("api-fix"), as_user("api-fix-other")
+    imported = upload(client, reads, title_first_text().encode(), "Robin Diaz.txt", me)
+    cards = imported["result"]["cards"]
+    line = next(c for c in cards if c["content"]["framing"]["headline"].startswith("Cut load"))
+    fixed = {
+        **line["content"],
+        "framing": {**line["content"]["framing"], "headline": "Cut it by 40%."},
+    }
+    url = f"/v1/imports/{imported['id']}/cards/{line['ref']}/fix"
+    assert client.post(url, json={"content": fixed}, headers=other).status_code == 404
+    saved = client.post(url, json={"content": fixed}, headers=me)
+    assert saved.status_code == 200, saved.text
+    progress = saved.json()
+    assert progress["fixes"][line["ref"]]["framing"]["headline"] == "Cut it by 40%."
+    assert progress["corrections"] == {"wording": 1}
+    undone = client.post(url, json={"content": None}, headers=me)
+    assert undone.status_code == 200 and undone.json()["fixes"] == {}
 
 
 def test_resume_flow_over_http(client: TestClient, reads: ImportWorker) -> None:
