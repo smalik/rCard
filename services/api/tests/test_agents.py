@@ -12,6 +12,7 @@ from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 import pytest
 from psycopg import errors
@@ -712,8 +713,14 @@ def test_a_check_in_asks_one_question_and_queues_next_month(
         assert question.author == "plytos"
         [run] = [r for r in store.runs() if r.state == "done"]
         assert (run.agent, run.trigger_kind) == ("check_in", "schedule")
+        # The next one waits for the plan's next time: the last Friday ahead,
+        # which may be days or weeks away depending on today's date.
         next_at = store.next_check_in()
-        assert next_at is not None and next_at > datetime.now(UTC) + timedelta(days=20)
+        assert next_at is not None and next_at > datetime.now(UTC)
+        there = next_at.astimezone(ZoneInfo(LAST_FRIDAY.time_zone))
+        assert there.weekday() == 4 and (there + timedelta(days=7)).month != there.month
+        assert there.strftime("%H:%M") == LAST_FRIDAY.time
+        assert next_at - datetime.now(UTC) < timedelta(days=36)
 
 
 def test_a_check_in_waits_a_day_when_the_person_is_mid_conversation(
