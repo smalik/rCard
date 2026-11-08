@@ -10,6 +10,7 @@ from urllib.parse import quote
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from psycopg import sql
 
 from plytos_api.agents.model import NewCard, ProposalBody
 from plytos_api.agents.store import AgentStore
@@ -266,7 +267,8 @@ def test_an_empty_account_made_first_gives_way_and_a_used_one_doesnt(
             test_db.owner_url, source_kek, target_db.owner_url, TARGET_KEK,
             someone, "dev:early", commit=True,
         )  # fmt: skip
-        assert report.replaced_empty_user and str(report.user_id) != early
+        assert report.replaced == {"plytos.app_user": 1, "plytos_vault.user_key": 1}
+        assert str(report.user_id) != early
         with psycopg.connect(target_db.owner_url) as conn:
             ids = conn.execute(
                 "select id from plytos.app_user where auth_subject = 'dev:early'"
@@ -280,6 +282,116 @@ def test_an_empty_account_made_first_gives_way_and_a_used_one_doesnt(
             running.get("/v1/cards", headers=_as("early")).json()
             == source.get("/v1/cards", headers=_as("moving")).json()
         )
+
+
+def _owned_anywhere(url: str, user_id: str) -> dict[str, int]:
+    with psycopg.connect(url) as conn:
+        tables = plan(read_tables(conn)).order
+        return {
+            t.name: conn.execute(
+                sql.SQL("select count(*) from {} where {} = %s").format(
+                    sql.Identifier(*t.name.split(".")),
+                    sql.Identifier(t.owner_column),
+                ),
+                (user_id,),
+            ).fetchone()[0]  # type: ignore[index]
+            for t in tables
+        }
+
+
+def test_a_used_account_is_erased_only_when_asked(
+    test_db: DbUrls,
+    target_db: DbUrls,
+    source: TestClient,
+    source_kek: LocalKek,
+    kek_setting: str,
+    someone: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Somebody tried the new place before the copy: brought a resume in,
+    kept its cards and made a resume from it. With --replace that account
+    goes, all of it, and the copy takes its place; nobody else is touched."""
+    target = Database(target_db.app_url, max_size=2)
+    target.open()
+    vault = Vault(TARGET_KEK)
+    app = create_app(
+        Settings(
+            env="test", database_url=target_db.app_url, kek=TARGET_SETTING, imports_inline=False
+        )
+    )
+    try:
+        with TestClient(app) as trying:
+            me = _as("tried")
+            kept = trying.post(
+                "/v1/imports",
+                content=promotions_text().encode(),
+                headers=me | {"X-Plytos-Filename": quote("Avery Quinn.txt")},
+            )
+            assert kept.status_code == 202, kept.text
+            import_id = kept.json()["id"]
+            ImportWorker(target, vault, None, retry_base_seconds=0).run_until_idle()
+            imported = trying.get(f"/v1/imports/{import_id}", headers=me).json()
+            for card in imported["result"]["cards"]:
+                approved = trying.post(
+                    f"/v1/imports/{import_id}/cards/{card['ref']}/approve", json={}, headers=me
+                )
+                assert approved.status_code == 201, approved.text
+            made = trying.post("/v1/resumes/as-written", json={"import_id": import_id}, headers=me)
+            assert made.status_code == 201, made.text
+            tried = trying.get("/v1/me", headers=me).json()["id"]
+
+            bystander = _as("bystander")
+            trying.post(
+                "/v1/cards",
+                json={"kind": "accomplishment", "content": main_content("Stays").model_dump()},
+                headers=bystander,
+            )
+            theirs = trying.get("/v1/cards", headers=bystander).json()
+            assert theirs
+    finally:
+        target.close()
+    held = {name: n for name, n in _owned_anywhere(target_db.owner_url, tried).items() if n}
+    for table in ("card", "card_version", "resume", "resume_version", "resume_import", "event"):
+        assert held.get(f"plytos.{table}"), table
+
+    def attempt(**changes: Any) -> Any:
+        return transfer(
+            test_db.owner_url, source_kek, target_db.owner_url, TARGET_KEK,
+            someone, "dev:tried", **({"commit": True} | changes),
+        )  # fmt: skip
+
+    with pytest.raises(TransferError, match="already has things"):
+        attempt()
+    rehearsal = attempt(commit=False, replace=True)
+    assert rehearsal.replaced == held and not rehearsal.committed
+    still = {name: n for name, n in _owned_anywhere(target_db.owner_url, tried).items() if n}
+    assert still == held
+
+    monkeypatch.setenv("PLYTOS_TRANSFER_SOURCE_URL", test_db.owner_url)
+    monkeypatch.setenv("PLYTOS_TRANSFER_SOURCE_KEK", kek_setting)
+    monkeypatch.setenv("PLYTOS_TRANSFER_TARGET_URL", target_db.owner_url)
+    monkeypatch.setenv("PLYTOS_TRANSFER_TARGET_KEK", TARGET_SETTING)
+    copy = ["--from-subject", someone, "--to-subject", "dev:tried", "--commit"]
+    assert main(copy) == 1
+    assert "--replace" in capsys.readouterr().err
+    assert main([*copy, "--replace"]) == 0
+    printed = capsys.readouterr().out
+    assert "Erased what dev:tried held" in printed and "Copied." in printed
+    assert not any(_owned_anywhere(target_db.owner_url, tried).values())
+    assert sorted(_people(target_db.owner_url)) == ["dev:bystander", "dev:tried"]
+
+    after = create_app(
+        Settings(
+            env="test", database_url=target_db.app_url, kek=TARGET_SETTING, imports_inline=False
+        )
+    )
+    with TestClient(after) as moved:
+        assert (
+            moved.get("/v1/cards", headers=_as("tried")).json()
+            == source.get("/v1/cards", headers=_as("moving")).json()
+        )
+        assert moved.get("/v1/cards", headers=_as("bystander")).json() == theirs
 
 
 def test_nothing_is_copied_when_something_is_off(

@@ -10,13 +10,17 @@ run, connecting to each as the owner of its tables:
     PLYTOS_TRANSFER_TARGET_KEK   the key that wraps the target's data keys
 
     python -m plytos_api.transfer --from-subject dev:sam \\
-        --to-subject iap:accounts.google.com:1234 [--commit]
+        --to-subject iap:accounts.google.com:1234 [--replace] [--commit]
 
 Content moves exactly as stored, still encrypted with the person's data key.
 Only the data key itself is unsealed with the source's key and sealed again
 with the target's, and the person signs in under the new subject. Without
 --commit everything runs, including the resealing, in a transaction that is
 then rolled back. Only table names and row counts are printed.
+
+If someone already signs in to the target under the new subject, an empty
+account (one made by signing in first) gives way. One with anything in it
+stops the copy, unless --replace says to erase it, in the same transaction.
 """
 
 from __future__ import annotations
@@ -79,7 +83,9 @@ class Plan:
 class Report:
     user_id: UUID
     counts: dict[str, int]
-    replaced_empty_user: bool
+    # What the account already under the new subject held before it was
+    # erased, by table; None when there was no such account.
+    replaced: dict[str, int] | None
     committed: bool
 
 
@@ -275,6 +281,7 @@ def transfer(
     to_subject: str,
     *,
     commit: bool,
+    replace: bool = False,
 ) -> Report:
     if not from_subject or not to_subject:
         raise TransferError("name the subject to copy from and the one to copy to")
@@ -307,19 +314,23 @@ def transfer(
 
         if target.execute("select 1 from plytos.app_user where id = %s", (user_id,)).fetchone():
             raise TransferError("this person is already in the target")
-        replaced = False
+        replaced: dict[str, int] | None = None
         existing = target.execute(
             "select id from plytos.app_user where auth_subject = %s", (to_subject,)
         ).fetchone()
         if existing is not None:
             # Signing in before the copy makes an empty account; it can go.
-            # One with anything in it stays, and the copy stops.
+            # One with anything in it stays, and the copy stops, unless the
+            # person asked for it to be replaced.
             counts = _owned_counts(target, steps.order, existing[0])
-            if any(n for name, n in counts.items() if name not in (USERS, KEYS)):
-                raise TransferError(f"{to_subject} already has things in the target")
-            target.execute("delete from plytos_vault.user_key where user_id = %s", (existing[0],))
-            target.execute("delete from plytos.app_user where id = %s", (existing[0],))
-            replaced = True
+            used = any(n for name, n in counts.items() if name not in (USERS, KEYS))
+            if used and not replace:
+                raise TransferError(
+                    f"{to_subject} already has things in the target;"
+                    " --replace erases them before copying"
+                )
+            _erase(target, steps, existing[0])
+            replaced = {name: n for name, n in counts.items() if n}
 
         held_back: dict[str, set[str]] = defaultdict(set)
         for fk in steps.deferred:
@@ -390,6 +401,37 @@ def transfer(
     return Report(user_id, copied, replaced, commit)
 
 
+def _erase(conn: psycopg.Connection, steps: Plan, user_id: UUID) -> None:
+    """Deletes everything one person has, the rows that point at others
+    first. References between tables that point at each other are cleared
+    beforehand, as the copy fills them in afterwards."""
+    by_name = {table.name: table for table in steps.order}
+    held_back: dict[str, set[str]] = defaultdict(set)
+    for fk in steps.deferred:
+        held_back[fk.table].update(fk.columns)
+    for name, columns in held_back.items():
+        table = by_name[name]
+        conn.execute(
+            sql.SQL("update {} set {} where {} = %s").format(
+                _quoted(name),
+                sql.SQL(", ").join(
+                    sql.SQL("{} = null").format(sql.Identifier(c)) for c in sorted(columns)
+                ),
+                sql.Identifier(table.owner_column),
+            ),
+            (user_id,),
+        )
+    for table in reversed(steps.order):
+        conn.execute(
+            sql.SQL("delete from {} where {} = %s").format(
+                _quoted(table.name), sql.Identifier(table.owner_column)
+            ),
+            (user_id,),
+        )
+    if any(_owned_counts(conn, steps.order, user_id).values()):
+        raise TransferError("the account being replaced didn't erase cleanly")
+
+
 def _reseal(
     table: Table,
     row: Row,
@@ -420,6 +462,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--from-subject", required=True, help="how the person signs in now")
     parser.add_argument("--to-subject", required=True, help="how they'll sign in after the copy")
     parser.add_argument("--commit", action="store_true", help="keep the copy (default: rehearse)")
+    parser.add_argument(
+        "--replace",
+        action="store_true",
+        help="erase whatever the target already holds under --to-subject first",
+    )
     args = parser.parse_args(argv)
     try:
         settings = {
@@ -443,14 +490,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.from_subject,
             args.to_subject,
             commit=args.commit,
+            replace=args.replace,
         )
     except TransferError as refused:
         print(f"Nothing copied: {refused}", file=sys.stderr)
         return 1
     for name, count in report.counts.items():
         print(f"{name:32} {count:6}")
-    if report.replaced_empty_user:
-        print(f"Removed the empty account {args.to_subject} made before the copy.")
+    if report.replaced is not None:
+        if set(report.replaced) <= {USERS, KEYS}:
+            print(f"Removed the empty account {args.to_subject} made before the copy.")
+        else:
+            print(f"Erased what {args.to_subject} held before the copy:")
+            for name, count in report.replaced.items():
+                print(f"  {name:30} {count:6}")
     print("Copied." if report.committed else "Rehearsal only: nothing kept. Add --commit to copy.")
     return 0
 

@@ -87,7 +87,10 @@ databases must be at the same migrations, so deploy first.
    ```
 
 3. Rehearse, then copy. Without `--commit` it does everything and keeps
-   nothing; either way it prints only table names and row counts.
+   nothing; either way it prints only table names and row counts. If you
+   already used the deployed app under that sign-in (brought a resume in,
+   say), the copy stops rather than mix the two; add `--replace` to erase
+   that account first, in the same transaction as the copy.
 
    ```sh
    export PLYTOS_TRANSFER_SOURCE_URL=...   # the preview's owner connection
