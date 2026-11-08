@@ -86,6 +86,11 @@ databases must be at the same migrations, so deploy first.
      --port 5433 "$(terraform output -raw sql_connection_name)" &
    ```
 
+   Without working Application Default Credentials, give the proxy a token
+   for the migrations account instead: `T=$(gcloud auth print-access-token
+   --impersonate-service-account "$MIGRATE")`, then `cloud-sql-proxy
+   --auto-iam-authn --token "$T" --login-token "$T" --port 5433 ...`.
+
 3. Rehearse, then copy. Without `--commit` it does everything and keeps
    nothing; either way it prints only table names and row counts. If you
    already used the deployed app under that sign-in (brought a resume in,
@@ -101,6 +106,9 @@ databases must be at the same migrations, so deploy first.
    # KMS bills calls to your sign-in's quota project, which is your gcloud
    # default project unless you say otherwise.
    export GOOGLE_CLOUD_QUOTA_PROJECT="$PROJECT"
+   # If Application Default Credentials keep expiring (Workspace
+   # reauthentication), use gcloud's own sign-in for KMS instead:
+   export PLYTOS_TRANSFER_GCP_TOKEN="$(gcloud auth print-access-token)"
    cd ../../services/api
    uv run --extra gcp python -m plytos_api.transfer --from-subject dev:<you> --to-subject iap:accounts.google.com:<id>
    uv run --extra gcp python -m plytos_api.transfer --from-subject dev:<you> --to-subject iap:accounts.google.com:<id> --commit

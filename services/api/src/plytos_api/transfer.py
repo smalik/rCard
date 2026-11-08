@@ -8,6 +8,11 @@ run, connecting to each as the owner of its tables:
     PLYTOS_TRANSFER_SOURCE_KEK   the key that wrapped the source's data keys
     PLYTOS_TRANSFER_TARGET_URL   the target database
     PLYTOS_TRANSFER_TARGET_KEK   the key that wraps the target's data keys
+    PLYTOS_TRANSFER_GCP_TOKEN    optional: an access token for Cloud KMS, such
+                                 as `gcloud auth print-access-token` prints,
+                                 used instead of Application Default
+                                 Credentials, which expire within hours under
+                                 Workspace reauthentication
 
     python -m plytos_api.transfer --from-subject dev:sam \\
         --to-subject iap:accounts.google.com:1234 [--replace] [--commit]
@@ -457,6 +462,19 @@ def _reseal(
     return tuple(values)
 
 
+def _token_credentials(token: str) -> Any:
+    """Credentials from a bare access token, or None to use Application
+    Default Credentials. KMS bills the calls to GOOGLE_CLOUD_QUOTA_PROJECT
+    when it's set."""
+    token = token.strip()
+    if not token:
+        return None
+    from google.oauth2.credentials import Credentials
+
+    quota_project = os.environ.get("GOOGLE_CLOUD_QUOTA_PROJECT") or None
+    return Credentials(token, quota_project_id=quota_project)  # type: ignore[no-untyped-call]
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--from-subject", required=True, help="how the person signs in now")
@@ -481,12 +499,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyError as missing:
         print(f"set {missing.args[0]}", file=sys.stderr)
         return 2
+    credentials = _token_credentials(os.environ.get("PLYTOS_TRANSFER_GCP_TOKEN", ""))
     try:
         report = transfer(
             settings["PLYTOS_TRANSFER_SOURCE_URL"],
-            kek_from_setting(settings["PLYTOS_TRANSFER_SOURCE_KEK"], allow_local=True),
+            kek_from_setting(
+                settings["PLYTOS_TRANSFER_SOURCE_KEK"], allow_local=True, credentials=credentials
+            ),
             settings["PLYTOS_TRANSFER_TARGET_URL"],
-            kek_from_setting(settings["PLYTOS_TRANSFER_TARGET_KEK"], allow_local=True),
+            kek_from_setting(
+                settings["PLYTOS_TRANSFER_TARGET_KEK"], allow_local=True, credentials=credentials
+            ),
             args.from_subject,
             args.to_subject,
             commit=args.commit,

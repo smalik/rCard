@@ -56,16 +56,18 @@ class LocalKek:
 class CloudKmsKek:
     """A KEK in Cloud KMS. The key material never leaves KMS."""
 
-    def __init__(self, key_name: str) -> None:
+    def __init__(self, key_name: str, credentials: Any = None) -> None:
         self._client: Any = None
         self._key_name = key_name
+        # None means the service's own identity (Application Default Credentials).
+        self._credentials = credentials
         self.name = "gcp-kms:" + key_name
 
     def _kms(self) -> Any:
         if self._client is None:
             from google.cloud import kms
 
-            self._client = kms.KeyManagementServiceClient()
+            self._client = kms.KeyManagementServiceClient(credentials=self._credentials)
         return self._client
 
     def wrap(self, dek: bytes, aad: bytes) -> bytes:
@@ -85,14 +87,14 @@ class CloudKmsKek:
         return bytes(response.plaintext)
 
 
-def kek_from_setting(value: str, *, allow_local: bool) -> KeyEncryptionKey:
+def kek_from_setting(value: str, *, allow_local: bool, credentials: Any = None) -> KeyEncryptionKey:
     scheme, _, rest = value.partition(":")
     if scheme == "local":
         if not allow_local:
             raise ValueError("a local KEK is only allowed in dev and test")
         return LocalKek(base64.b64decode(rest))
     if scheme == "gcp-kms":
-        return CloudKmsKek(rest)
+        return CloudKmsKek(rest, credentials)
     raise ValueError("PLYTOS_KEK must start with local: or gcp-kms:")
 
 

@@ -466,3 +466,51 @@ def test_the_command_rehearses_unless_told_to_copy(
     assert main(["--from-subject", someone, "--to-subject", "dev:moved", "--commit"]) == 0
     assert "Copied." in capsys.readouterr().out
     assert _people(target_db.owner_url) == ["dev:moved"]
+
+
+def test_kms_can_use_a_gcloud_token_instead_of_default_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Application Default Credentials expire within hours under Workspace
+    reauthentication; a token from `gcloud auth print-access-token` does
+    the job for the few seconds a copy takes."""
+    from google.cloud import kms
+
+    import plytos_api.transfer as transfer_module
+    from plytos_api.keys import CloudKmsKek
+
+    seen: dict[str, Any] = {}
+
+    def fake_transfer(*args: Any, **kwargs: Any) -> Any:
+        seen["target_kek"] = args[3]
+        raise TransferError("stop here")
+
+    class FakeClient:
+        def __init__(self, credentials: Any = None) -> None:
+            seen["client_credentials"] = credentials
+
+    monkeypatch.setattr(transfer_module, "transfer", fake_transfer)
+    monkeypatch.setattr(kms, "KeyManagementServiceClient", FakeClient)
+    key = "projects/p/locations/l/keyRings/r/cryptoKeys/k"
+    for name, value in {
+        "PLYTOS_TRANSFER_SOURCE_URL": "postgresql://source",
+        "PLYTOS_TRANSFER_SOURCE_KEK": TARGET_SETTING,
+        "PLYTOS_TRANSFER_TARGET_URL": "postgresql://target",
+        "PLYTOS_TRANSFER_TARGET_KEK": f"gcp-kms:{key}",
+        "PLYTOS_TRANSFER_GCP_TOKEN": "a-token\n",
+        "GOOGLE_CLOUD_QUOTA_PROJECT": "rcard-dev",
+    }.items():
+        monkeypatch.setenv(name, value)
+
+    assert main(["--from-subject", "dev:a", "--to-subject", "dev:b"]) == 1
+    kek = seen["target_kek"]
+    assert isinstance(kek, CloudKmsKek) and kek.name == f"gcp-kms:{key}"
+    kek._kms()
+    credentials = seen["client_credentials"]
+    assert credentials.token == "a-token" and credentials.quota_project_id == "rcard-dev"
+
+    # Without a token, the client falls back to the default credentials.
+    monkeypatch.delenv("PLYTOS_TRANSFER_GCP_TOKEN")
+    assert main(["--from-subject", "dev:a", "--to-subject", "dev:b"]) == 1
+    seen["target_kek"]._kms()
+    assert seen["client_credentials"] is None
