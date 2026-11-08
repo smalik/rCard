@@ -98,6 +98,9 @@ databases must be at the same migrations, so deploy first.
    DB_USER=${MIGRATE%.gserviceaccount.com}   # its @ is escaped in the URL below
    export PLYTOS_TRANSFER_TARGET_URL="postgresql://${DB_USER//@/%40}@127.0.0.1:5433/plytos?sslmode=disable"
    export PLYTOS_TRANSFER_TARGET_KEK="gcp-kms:projects/$PROJECT/locations/us-central1/keyRings/plytos/cryptoKeys/user-data-kek"
+   # KMS bills calls to your sign-in's quota project, which is your gcloud
+   # default project unless you say otherwise.
+   export GOOGLE_CLOUD_QUOTA_PROJECT="$PROJECT"
    cd ../../services/api
    uv run --extra gcp python -m plytos_api.transfer --from-subject dev:<you> --to-subject iap:accounts.google.com:<id>
    uv run --extra gcp python -m plytos_api.transfer --from-subject dev:<you> --to-subject iap:accounts.google.com:<id> --commit
