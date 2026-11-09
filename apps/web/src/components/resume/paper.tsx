@@ -13,12 +13,12 @@ import {
   ChevronsUpDown,
   Pencil,
   Plus,
-  Sparkles,
   X,
 } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 
 import { DisclosureTriangle } from "@/components/cards/strength-card";
+import { PlytosWroteGlyph } from "@/components/glyphs";
 import type { DiffEntry, DiffLine, HeaderChange, ResumeDiff } from "@/lib/resume-diff";
 import {
   lineParts,
@@ -159,7 +159,7 @@ function Worded({ wording }: { wording: RenderedItem["wording"] }) {
       title={label}
       className="ml-1 inline-flex align-[-1px] text-paper-accent print:hidden"
     >
-      <Sparkles aria-hidden className="size-3" />
+      <PlytosWroteGlyph className="size-3.5" />
       <span className="sr-only">({label.toLowerCase()})</span>
     </span>
   );

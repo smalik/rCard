@@ -1,9 +1,10 @@
 "use client";
 
-import { Pencil, Sparkles, UserRound } from "lucide-react";
+import { Pencil, UserRound } from "lucide-react";
 import { type KeyboardEvent, useEffect, useState } from "react";
 
 import { useCardActions } from "@/components/cards/actions";
+import { PlytosWroteGlyph } from "@/components/glyphs";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -28,12 +29,12 @@ export function WrittenTag({ by, className }: { by: "plytos" | "person"; classNa
     <span
       className={cn(
         "inline-flex items-center gap-1 text-[12px] font-medium",
-        by === "plytos" ? "text-primary" : "text-muted-foreground",
+        by === "plytos" ? "text-pen" : "text-muted-foreground",
         className,
       )}
     >
       {by === "plytos" ? (
-        <Sparkles className="size-3" aria-hidden />
+        <PlytosWroteGlyph className="size-3.5" />
       ) : (
         <UserRound className="size-3" aria-hidden />
       )}
@@ -52,13 +53,13 @@ export function Writing({ lines = 1, label }: { lines?: number; label: string })
           key={i}
           aria-hidden
           className={cn(
-            "block h-[0.95em] rounded-md bg-[linear-gradient(90deg,var(--muted)_25%,color-mix(in_oklab,var(--primary)_22%,var(--muted))_50%,var(--muted)_75%)] bg-[length:200%_100%] animate-writing motion-reduce:animate-none",
+            "block h-[0.95em] rounded-md bg-[linear-gradient(90deg,var(--muted)_25%,color-mix(in_oklab,var(--pen)_22%,var(--muted))_50%,var(--muted)_75%)] bg-[length:200%_100%] animate-writing motion-reduce:animate-none",
             i === lines - 1 && lines > 1 ? "w-3/5" : "w-full",
           )}
         />
       ))}
-      <span aria-hidden className="flex items-center gap-1 text-[12px] font-medium text-primary">
-        <Sparkles className="size-3 animate-live-dot motion-reduce:animate-none" />
+      <span aria-hidden className="flex items-center gap-1 text-[12px] font-medium text-pen">
+        <PlytosWroteGlyph className="size-3.5 animate-live-dot motion-reduce:animate-none" />
         {label}
       </span>
     </div>
@@ -209,8 +210,8 @@ export function WrittenText({
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
         {rewriting ? (
           // What it wrote before stays readable while it writes again.
-          <span role="status" className="inline-flex items-center gap-1 text-[12px] font-medium text-primary">
-            <Sparkles className="size-3 animate-live-dot motion-reduce:animate-none" aria-hidden />
+          <span role="status" className="inline-flex items-center gap-1 text-[12px] font-medium text-pen">
+            <PlytosWroteGlyph className="size-3.5 animate-live-dot motion-reduce:animate-none" />
             Rewriting…
           </span>
         ) : (
@@ -303,9 +304,9 @@ export function RewriteButton({
             disabled={busy || nothing}
             aria-label={`Rewrite the headline and stories for ${employer}`}
             onClick={() => (targets.own > 0 ? setAsking(true) : void run(false))}
-            className="inline-flex h-7 items-center gap-1 rounded-full border bg-card px-2.5 text-[12px] font-medium text-primary shadow-sheet transition-colors hover:bg-accent disabled:opacity-50 focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none"
+            className="inline-flex h-7 items-center gap-1 rounded-full border bg-card px-2.5 text-[12px] font-medium text-pen shadow-sheet transition-colors hover:bg-accent disabled:opacity-50 focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none"
           >
-            <Sparkles className={cn("size-3.5", busy && "animate-live-dot motion-reduce:animate-none")} aria-hidden />
+            <PlytosWroteGlyph className={cn("size-3.5", busy && "animate-live-dot motion-reduce:animate-none")} />
             {busy ? "Writing…" : "Rewrite"}
           </button>
         </TooltipTrigger>

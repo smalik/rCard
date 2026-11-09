@@ -12,106 +12,125 @@
 /* Dark mode follows the device. */
 @custom-variant dark (@media (prefers-color-scheme: dark));
 
+/* The field notebook: oatmeal desk, cream dot-grid pages, kraft covers for
+   each title, warm ink for everything you touch, and one blue ballpoint for
+   whatever Plytos wrote. Controls are Apple glass, tinted warm. */
 :root {
   --radius: 0.875rem;
 
-  /* A warm, quiet canvas, white cards, and a deep "felt" green: the table the
-     cards are played on. */
-  --background: #f3f2ee;
-  --foreground: #151617;
-  --card: #ffffff;
-  --card-foreground: #151617;
-  --popover: #ffffff;
-  --popover-foreground: #151617;
-  --primary: #1b6b52;
-  --primary-foreground: #ffffff;
-  --secondary: #ebe9e3;
-  --secondary-foreground: #151617;
-  --muted: #efeee9;
-  --muted-foreground: #6b6a65;
-  --accent: #e6efe9;
-  --accent-foreground: #134d3b;
-  --destructive: #c23b22;
-  --border: #e3e1da;
-  --input: #d9d6ce;
-  --ring: #1b6b52;
+  --background: #f1eadf;
+  --foreground: #2a251f;
+  --card: #fffcf5;
+  --card-foreground: #2a251f;
+  --popover: #fffcf5;
+  --popover-foreground: #2a251f;
+  /* Actions are ink: a dark capsule with cream words. */
+  --primary: #2a251f;
+  --primary-foreground: #fffcf5;
+  --secondary: #ece3d5;
+  --secondary-foreground: #2a251f;
+  --muted: #f3ecdf;
+  --muted-foreground: #6e6458;
+  --accent: #ece3d5;
+  --accent-foreground: #2a251f;
+  --destructive: #b3261e;
+  --border: #e6dccb;
+  --input: #dccfbc;
+  --ring: #2b4c9b;
 
-  /* Live data: a card that just changed glows amber for a moment. */
-  --live: #d98a00;
-  --live-soft: rgba(217, 138, 0, 0.14);
+  /* Plytos's pen: its mark, its notes, and what it just changed. */
+  --pen: #2b4c9b;
+  --pen-soft: rgba(43, 76, 155, 0.07);
 
-  /* One color per kind of card, always paired with an icon and a label. */
-  --kind-experience: #1b6b52;
-  --kind-position: #2f6f8f;
-  --kind-education: #3b5b8c;
-  --kind-award: #b7791f;
-  --kind-contact: #46484d;
-  --kind-credential: #0e7490;
-  --kind-skill: #9b4a5c;
-  --kind-project: #5a6b2b;
-  --kind-activity: #c2571a;
+  /* Each title's notebook cover, and the dots on every page. */
+  --kraft: #d9bf99;
+  --kraft-ink: #4a3f33;
+  --kraft-soft: #eadcc4;
+  --dots: #e6dccb;
 
-  /* A resume reads on paper: white in light mode, softened in dark, and
-     black on white when printed. */
-  --paper: #ffffff;
-  --paper-ink: #1b1b1a;
-  --paper-soft: #64625d;
-  --paper-rule: #dcd9d1;
-  --paper-accent: #1b6b52;
-  --paper-added: #e3f3ea;
-  --paper-removed: #b4321b;
+  /* Glass for bars, menus and round buttons, warmed to sit on the desk. */
+  --glass: rgba(255, 251, 242, 0.62);
+  --glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.9), inset 0 0 0 0.5px rgba(255, 255, 255, 0.7),
+    0 10px 26px -8px rgba(70, 50, 25, 0.25);
 
-  /* Paper-like depth for stacked cards. */
-  --elev-card: 0 1px 0 rgba(21, 22, 23, 0.03), 0 1px 3px rgba(21, 22, 23, 0.06),
-    0 12px 28px -16px rgba(21, 22, 23, 0.22);
-  --elev-lift: 0 2px 4px rgba(21, 22, 23, 0.06), 0 22px 44px -18px rgba(21, 22, 23, 0.32);
-  --elev-sheet: 0 1px 2px rgba(21, 22, 23, 0.05);
+  /* Live data: a card that just changed glows in Plytos's blue for a moment. */
+  --live: #2b4c9b;
+  --live-soft: rgba(43, 76, 155, 0.14);
+
+  /* Kinds are named in words, so they share the ink rather than nine colors. */
+  --kind-experience: var(--kraft-ink);
+  --kind-position: var(--kraft-ink);
+  --kind-education: var(--kraft-ink);
+  --kind-award: var(--kraft-ink);
+  --kind-contact: var(--kraft-ink);
+  --kind-credential: var(--kraft-ink);
+  --kind-skill: var(--kraft-ink);
+  --kind-project: var(--kraft-ink);
+  --kind-activity: var(--kraft-ink);
+
+  /* A resume reads on paper: cream on screen, black on white when printed. */
+  --paper: #fffdf8;
+  --paper-ink: #2a251f;
+  --paper-soft: #6e6458;
+  --paper-rule: #e2d7c5;
+  --paper-accent: #2b4c9b;
+  --paper-added: #e8edf7;
+  --paper-removed: #b3261e;
+
+  /* Paper-like depth, with warm shadows. */
+  --elev-card: 0 0.5px 0 rgba(70, 50, 25, 0.06), 0 1px 3px rgba(70, 50, 25, 0.08),
+    0 10px 22px -16px rgba(70, 50, 25, 0.35);
+  --elev-lift: 0 2px 4px rgba(70, 50, 25, 0.08), 0 22px 44px -18px rgba(70, 50, 25, 0.38);
+  --elev-sheet: 0 1px 2px rgba(70, 50, 25, 0.07);
 }
 
 @media (prefers-color-scheme: dark) {
+  /* The same notebook at night: a dark desk, warm charcoal pages. */
   :root {
-    --background: #0d0e0f;
-    --foreground: #eeede9;
-    --card: #17181a;
-    --card-foreground: #eeede9;
-    --popover: #1c1e20;
-    --popover-foreground: #eeede9;
-    --primary: #46c08f;
-    --primary-foreground: #04281b;
-    --secondary: #232528;
-    --secondary-foreground: #eeede9;
-    --muted: #1f2123;
-    --muted-foreground: #a3a19b;
-    --accent: #15302a;
-    --accent-foreground: #9fe3c4;
-    --destructive: #f0715a;
-    --border: #2a2c2f;
-    --input: #34373a;
-    --ring: #46c08f;
+    --background: #171411;
+    --foreground: #f3ece1;
+    --card: #221e19;
+    --card-foreground: #f3ece1;
+    --popover: #2a251f;
+    --popover-foreground: #f3ece1;
+    --primary: #f3ece1;
+    --primary-foreground: #1c1814;
+    --secondary: #332d26;
+    --secondary-foreground: #f3ece1;
+    --muted: #2a251f;
+    --muted-foreground: #b3a898;
+    --accent: #332d26;
+    --accent-foreground: #f3ece1;
+    --destructive: #f2877a;
+    --border: #3a332b;
+    --input: #463e34;
+    --ring: #a9bdf2;
 
-    --live: #ffb224;
-    --live-soft: rgba(255, 178, 36, 0.16);
+    --pen: #a9bdf2;
+    --pen-soft: rgba(169, 189, 242, 0.1);
 
-    --kind-experience: #46c08f;
-    --kind-position: #6cb4d6;
-    --kind-education: #86a7dc;
-    --kind-award: #e0aa4c;
-    --kind-contact: #b9bbc0;
-    --kind-credential: #4cc3dc;
-    --kind-skill: #e08aa0;
-    --kind-project: #a9bf6a;
-    --kind-activity: #f08c4f;
+    --kraft: #5e4b31;
+    --kraft-ink: #e3d2b6;
+    --kraft-soft: #3d3224;
+    --dots: #332d26;
+
+    --glass: rgba(52, 46, 39, 0.58);
+    --glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 0 0 0.5px rgba(255, 255, 255, 0.08),
+      0 10px 28px -8px rgba(0, 0, 0, 0.6);
+
+    --live: #a9bdf2;
+    --live-soft: rgba(169, 189, 242, 0.16);
 
     --elev-card: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 1px 3px rgba(0, 0, 0, 0.5),
       0 12px 28px -16px rgba(0, 0, 0, 0.8);
     --elev-lift: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 22px 44px -18px rgba(0, 0, 0, 0.9);
     --elev-sheet: 0 1px 2px rgba(0, 0, 0, 0.4);
 
-    --paper: #f6f5f1;
-    --paper-ink: #1b1b1a;
-    --paper-soft: #5d5b56;
-    --paper-rule: #d4d1c8;
-    --paper-added: #d9efe2;
+    --paper: #f6f0e4;
+    --paper-ink: #2a251f;
+    --paper-soft: #62584c;
+    --paper-rule: #d8cbb6;
+    --paper-added: #dde5f5;
   }
 }
 
@@ -129,8 +148,10 @@
 }
 
 @theme inline {
-  --font-sans: "Inter Variable", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui,
-    sans-serif;
+  /* Apple's rounded face where there is one (iPhone, iPad, Mac in Safari);
+     Nunito, self-hosted, everywhere else. */
+  --font-sans: ui-rounded, "SF Pro Rounded", "Nunito Variable", -apple-system, BlinkMacSystemFont,
+    system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
   --radius-sm: calc(var(--radius) - 6px);
@@ -163,6 +184,11 @@
   --color-ring: var(--ring);
   --color-live: var(--live);
   --color-live-soft: var(--live-soft);
+  --color-pen: var(--pen);
+  --color-pen-soft: var(--pen-soft);
+  --color-kraft: var(--kraft);
+  --color-kraft-ink: var(--kraft-ink);
+  --color-kraft-soft: var(--kraft-soft);
 
   --color-paper: var(--paper);
   --color-paper-ink: var(--paper-ink);
@@ -236,6 +262,11 @@
    face turned away hides once it is edge-on. With reduced motion the faces
    swap without turning. */
 @layer components {
+  /* Rebuilt screens set every heading in the same rounded face; the older
+     screens' display face stays with them. */
+  .font-sans :is(h1, h2, h3) {
+    font-family: inherit;
+  }
   .flip-scene {
     perspective: 1800px;
   }
@@ -273,4 +304,31 @@
       transition-delay: 0s;
     }
   }
+}
+
+/* A notebook page: cream with a faint dot grid. Cards wear it; the resume
+   stays plain paper. */
+@utility paper-dots {
+  background-color: var(--card);
+  background-image: radial-gradient(circle, var(--dots) 1px, transparent 1.4px);
+  background-size: 14px 14px;
+  background-position: 7px 7px;
+  @media print {
+    background-image: none;
+  }
+}
+
+/* Apple glass, warmed: for bars, menus and round buttons, never for words. */
+@utility glass {
+  background-color: var(--glass);
+  -webkit-backdrop-filter: blur(14px) saturate(170%);
+  backdrop-filter: blur(14px) saturate(170%);
+  box-shadow: var(--glass-edge);
+}
+
+/* A title's notebook cover. */
+@utility kraft-cover {
+  background-color: var(--kraft);
+  background-image: linear-gradient(170deg, color-mix(in oklab, var(--kraft) 84%, white), var(--kraft));
+  color: var(--foreground);
 }

@@ -37,28 +37,27 @@ export type Purpose =
   | "activity"
   | "highlight";
 
-export const PURPOSES: Record<Purpose, { label: string; icon: LucideIcon; tile: string }> = {
-  experience: { label: "Work experience", icon: BriefcaseBusiness, tile: "bg-kind-experience" },
-  contact: { label: "Contact", icon: Contact, tile: "bg-kind-contact" },
-  education: { label: "Education", icon: GraduationCap, tile: "bg-kind-education" },
-  award: { label: "Award", icon: Award, tile: "bg-kind-award" },
-  credential: { label: "Certification", icon: BadgeCheck, tile: "bg-kind-credential" },
-  skill: { label: "Skills", icon: Wrench, tile: "bg-kind-skill" },
-  project: { label: "Project", icon: FolderGit2, tile: "bg-kind-project" },
-  activity: { label: "Activity", icon: Presentation, tile: "bg-kind-activity" },
-  highlight: { label: "Highlight", icon: Star, tile: "bg-kind-position" },
+export const PURPOSES: Record<Purpose, { label: string; icon: LucideIcon }> = {
+  experience: { label: "Work experience", icon: BriefcaseBusiness },
+  contact: { label: "Contact", icon: Contact },
+  education: { label: "Education", icon: GraduationCap },
+  award: { label: "Award", icon: Award },
+  credential: { label: "Certification", icon: BadgeCheck },
+  skill: { label: "Skills", icon: Wrench },
+  project: { label: "Project", icon: FolderGit2 },
+  activity: { label: "Activity", icon: Presentation },
+  highlight: { label: "Highlight", icon: Star },
 };
 
-/** The rounded, colored glyph that says what kind of card this is, as iOS
- * settings rows do. Always shown with its label. */
+/** The small kraft label that says what kind of card this is. Kinds are
+ * told apart by their word and glyph, not by color; always shown with its label. */
 export function KindTile({ purpose, className }: { purpose: Purpose; className?: string }) {
-  const { icon: Icon, tile } = PURPOSES[purpose];
+  const { icon: Icon } = PURPOSES[purpose];
   return (
     <span
       aria-hidden
       className={cn(
-        "grid size-7 shrink-0 place-items-center rounded-[9px] text-white shadow-[inset_0_-1px_0_rgba(0,0,0,0.12)] dark:text-black/80",
-        tile,
+        "grid size-7 shrink-0 place-items-center rounded-[8px] bg-kraft-soft text-kraft-ink",
         className,
       )}
     >
@@ -79,7 +78,7 @@ export function LiveMeta({ live, now }: { live: Live; now: Date }) {
   const by = live.author === "ai" ? "drafted by Plytos" : live.author === "reviewer" ? "reviewed" : "";
   return (
     <span className="flex items-center gap-1.5 text-[12px] text-muted-foreground tabular-nums">
-      <span className="font-mono text-[11px] font-medium text-foreground/70">v{live.version}</span>
+      <span className="font-bold text-foreground/75">v{live.version}</span>
       <span aria-hidden>·</span>
       {/* The server and the browser can read the clock a moment apart. */}
       <time dateTime={live.updatedAt} suppressHydrationWarning>
@@ -88,7 +87,7 @@ export function LiveMeta({ live, now }: { live: Live; now: Date }) {
       {by && (
         <>
           <span aria-hidden>·</span>
-          <span>{by}</span>
+          <span className={live.author === "ai" ? "font-semibold text-pen" : undefined}>{by}</span>
         </>
       )}
       {(live.variantsBehind ?? 0) > 0 && (
@@ -192,15 +191,16 @@ function Face({
   return (
     <div
       className={cn(
-        "flex flex-col rounded-card border bg-card text-card-foreground shadow-card",
+        "flex flex-col rounded-card border border-border/70 text-card-foreground shadow-card",
         compact ? "gap-2.5 p-3.5" : "gap-4 p-4 sm:p-5",
-        side === "back" && "bg-[color-mix(in_oklab,var(--card),var(--muted)_45%)]",
+        // The front is a dot-grid page; the back is the plain inside cover.
+        side === "back" ? "bg-[color-mix(in_oklab,var(--card),var(--kraft-soft)_40%)]" : "paper-dots",
       )}
     >
       <header className="-mt-1 -mr-1.5 flex min-h-8 items-center gap-2">
         <KindTile purpose={purpose} className="size-6 rounded-[7px] [&_svg]:size-3.5" />
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
-          <span className="truncate text-[12px] font-semibold tracking-[0.03em] text-muted-foreground uppercase">
+          <span className="truncate text-[13px] font-bold text-muted-foreground">
             {side === "back" ? `${title ?? PURPOSES[purpose].label} · back` : (title ?? PURPOSES[purpose].label)}
           </span>
           {live && !compact && <LiveMeta live={live} now={now} />}

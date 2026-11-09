@@ -171,7 +171,7 @@ export function AccomplishmentCard({ card, className }: { card: LibraryCard; cla
       className={className}
       front={
         <div className="flex flex-col gap-3">
-          <h3 className="text-[19px] leading-snug font-semibold tracking-[-0.015em] text-balance">
+          <h3 className="text-[19px] leading-snug font-bold tracking-[-0.015em] text-balance">
             {headline(card)}
           </h3>
           {card.content?.framing.body && (

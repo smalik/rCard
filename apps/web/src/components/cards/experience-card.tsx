@@ -100,7 +100,7 @@ function SectionLabel({ children, className }: { children: ReactNode; className?
   return (
     <span
       className={cn(
-        "text-[11.5px] font-semibold tracking-[0.04em] text-muted-foreground uppercase",
+        "text-[13px] font-bold text-muted-foreground",
         className,
       )}
     >
@@ -237,13 +237,14 @@ function RoleBlock({
   const regionId = `role-${block.card.id}`;
   const title = blockTitle(block);
   return (
-    <div className={cn("relative pl-5", fresh.has(block.card.id) && "animate-live-glow rounded-inset")}>
-      {/* A node on the employer's timeline. */}
-      <span
-        aria-hidden
-        className="absolute top-[13px] left-[3px] size-[9px] rounded-full border-2 border-card bg-kind-position ring-1 ring-kind-position/40"
-      />
-      <div className="flex items-start gap-1">
+    // Each title is its own little notebook: a kraft cover, then dot-grid pages.
+    <div
+      className={cn(
+        "overflow-hidden rounded-card border border-kraft/70 shadow-sheet",
+        fresh.has(block.card.id) && "animate-live-glow",
+      )}
+    >
+      <div className="kraft-cover flex items-start gap-1 px-2 py-1">
         <button
           type="button"
           onClick={() => onToggle(block.card.id)}
@@ -251,25 +252,21 @@ function RoleBlock({
           aria-controls={regionId}
           className="grid min-w-0 flex-1 grid-cols-[12px_minmax(0,1fr)] items-start gap-x-2 rounded-inset py-1.5 pr-1 text-left focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none sm:grid-cols-[12px_minmax(0,1fr)_auto] sm:gap-x-3"
         >
-          <DisclosureTriangle open={open} className="mt-[5px]" />
+          <DisclosureTriangle open={open} className="mt-[5px] text-kraft-ink" />
           <span className="min-w-0">
-            <span className="text-[15.5px] leading-[22px] font-semibold tracking-[-0.01em]">
-              {title}
-            </span>
+            <span className="text-[16px] leading-[22px] font-extrabold tracking-[-0.01em]">{title}</span>
             {block.client && (
-              <span className="ml-2 rounded-full bg-muted px-1.5 py-px align-[1px] text-[11px] font-medium text-muted-foreground">
-                Client
-              </span>
+              <span className="ml-2 text-[12px] font-bold text-kraft-ink">Client</span>
             )}
-            {plain && <span className="block text-[13px] text-muted-foreground">{plain}</span>}
+            {plain && <span className="block text-[13px] font-semibold text-kraft-ink">{plain}</span>}
             {dates && (
-              <span className="block text-[13px] text-muted-foreground tabular-nums sm:hidden">
+              <span className="block text-[13px] font-semibold text-kraft-ink tabular-nums sm:hidden">
                 {dates}
               </span>
             )}
           </span>
           {dates && (
-            <span className="hidden pt-px text-[13px] leading-[22px] text-muted-foreground tabular-nums sm:block">
+            <span className="hidden pt-px text-[13px] leading-[22px] font-semibold text-kraft-ink tabular-nums sm:block">
               {dates}
             </span>
           )}
@@ -279,7 +276,7 @@ function RoleBlock({
             type="button"
             onClick={() => setEditing(true)}
             aria-label={`Edit ${title}: dates, team and story`}
-            className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none"
+            className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-full text-kraft-ink transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:outline-none"
           >
             <Pencil className="size-3.5" />
           </button>
@@ -287,9 +284,9 @@ function RoleBlock({
         {controls}
       </div>
       <TitleEditor block={block} open={editing} onOpenChange={setEditing} />
-      <div id={regionId}>
+      <div id={regionId} className="paper-dots px-2 pt-2.5 pb-3">
         {open ? (
-          <div className="mt-1 mb-3 flex flex-col gap-2.5">
+          <div className="flex flex-col gap-2.5">
             {!arranging && (
               <div className="flex flex-col gap-1 pl-5">
                 <SectionLabel>The story</SectionLabel>
@@ -322,7 +319,7 @@ function RoleBlock({
             )}
           </div>
         ) : (
-          <div className="mt-0.5 pl-0.5">
+          <div className="pl-0.5">
             {story && (
               <p className="mb-2 line-clamp-2 pl-[18px] text-[13.5px] leading-snug text-muted-foreground">
                 {story}
@@ -339,7 +336,7 @@ function RoleBlock({
             arranging={arranging}
             label={`Client work as ${title}`}
             onReorder={(next) => void reorder(block.card.id, next.map((b) => b.card.id))}
-            className="flex flex-col gap-0.5"
+            className="mt-3 flex flex-col gap-3"
             controls="inline"
             render={(inner, _, handles) => (
               <RoleBlock
@@ -478,7 +475,7 @@ export function ExperienceCard({
               </button>
               <div className="flex min-w-0 flex-1 flex-wrap items-end justify-between gap-x-4 gap-y-1">
                 <div className="min-w-0">
-                  <h3 className="text-[23px] leading-tight font-semibold tracking-[-0.02em]">
+                  <h3 className="text-[24px] leading-tight font-extrabold tracking-[-0.015em]">
                     {employer}
                   </h3>
                   {former && (
@@ -553,12 +550,7 @@ export function ExperienceCard({
               )}
 
               {blocks.length > 0 && (
-                <div className="relative border-t pt-3">
-                  {/* The employer's timeline, joining its titles in order. */}
-                  <span
-                    aria-hidden
-                    className="absolute top-7 bottom-4 left-[7px] w-px bg-border"
-                  />
+                <div className="border-t border-border/70 pt-4">
                   <SortableList
                     items={blocks}
                     id={(b) => b.card.id}
@@ -571,7 +563,7 @@ export function ExperienceCard({
                         next.map((b) => b.card.id),
                       )
                     }
-                    className="flex flex-col gap-0.5"
+                    className="flex flex-col gap-3"
                     controls="inline"
                     render={(block, _, handles) => (
                       <RoleBlock

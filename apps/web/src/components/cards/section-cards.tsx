@@ -64,7 +64,7 @@ function FactCard({
         <div className="flex flex-col gap-2.5">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <h3 className="text-[18px] leading-snug font-semibold tracking-[-0.015em] text-balance">
+              <h3 className="text-[18px] leading-snug font-bold tracking-[-0.015em] text-balance">
                 {name}
               </h3>
               {sub && <p className="text-[14px] text-muted-foreground">{sub}</p>}
@@ -277,7 +277,7 @@ export function ContactCard({
       front={
         <div className="flex flex-col gap-3">
           <div>
-            <h3 className="text-[23px] leading-tight font-semibold tracking-[-0.02em]">
+            <h3 className="text-[23px] leading-tight font-extrabold tracking-[-0.015em]">
               {header.name || "Your name"}
             </h3>
             {header.headline && (
