@@ -11,7 +11,7 @@ import "@fontsource/instrument-sans/700.css";
 import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
 import "@fontsource/ibm-plex-mono/600.css";
-import "@fontsource-variable/inter";
+import "@fontsource-variable/nunito";
 // The design system first: it sets the cascade layers the older styles join.
 import "./ui.css";
 import "./globals.css";
@@ -35,7 +35,10 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: "#fbf6ee",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f1eadf" },
+    { media: "(prefers-color-scheme: dark)", color: "#171411" },
+  ],
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

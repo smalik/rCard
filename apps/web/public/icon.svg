@@ -1,6 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#231f1b"/>
-  <rect x="136" y="150" width="200" height="260" rx="28" fill="#fbf6ee" opacity="0.55" transform="rotate(-8 236 280)"/>
-  <rect x="176" y="112" width="200" height="260" rx="28" fill="#fbf6ee"/>
-  <path d="M226 176h56a44 44 0 0 1 0 88h-30v52h-26z" fill="#231f1b"/>
+  <defs>
+    <linearGradient id="kraft" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#e5d1af"/>
+      <stop offset="1" stop-color="#cbaa7b"/>
+    </linearGradient>
+    <clipPath id="shape"><rect width="512" height="512" rx="112"/></clipPath>
+  </defs>
+  <g clip-path="url(#shape)">
+    <rect width="512" height="512" fill="url(#kraft)"/>
+    <rect x="90" y="146" width="244" height="170" rx="18" fill="#7a5f3c" opacity="0.28"/>
+    <rect x="86" y="134" width="244" height="170" rx="18" fill="#fffcf5"/>
+    <path d="M144 224l50 46 90-96" fill="none" stroke="#2b4c9b" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="372" y="0" width="34" height="512" fill="#2a251f"/>
+  </g>
 </svg>

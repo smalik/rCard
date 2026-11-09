@@ -15,7 +15,6 @@ import {
   Pencil,
   Plus,
   Printer,
-  Sparkles,
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
@@ -25,6 +24,7 @@ import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useSta
 import { AccomplishmentSheet } from "@/components/cards/accomplishment";
 import { type CardActions, CardActionsProvider, type CardVersion } from "@/components/cards/actions";
 import { type Place, PlacePicker } from "@/components/cards/place-picker";
+import { PlytosWroteGlyph } from "@/components/glyphs";
 import { DiffPaper, Paper, type PaperEdits } from "@/components/resume/paper";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -879,7 +879,7 @@ function HighlightsRail({
           disabled={busy}
           onClick={() => onChange(showHighlights(content, true))}
         >
-          <Sparkles /> Add highlights
+          <PlytosWroteGlyph className="size-4" /> Add highlights
         </Button>
       </RailCard>
     );
@@ -1620,7 +1620,7 @@ function MakeVersion({ base, resumeName }: { base: string; resumeName: string })
           </p>
         )}
         <Button type="submit" disabled={busy || !ready}>
-          <Sparkles /> Ask Plytos
+          <PlytosWroteGlyph className="size-4" /> Ask Plytos
         </Button>
         <Button type="button" variant="ghost" size="sm" disabled={busy || !ready} onClick={copy}>
           <FileText /> Copy it and change it myself

@@ -105,11 +105,13 @@ function Section({
     <section id={id} aria-labelledby={`${id}-title`} className={cn("scroll-mt-24", className)}>
       <h2
         id={`${id}-title`}
-        className="mb-3 flex items-center gap-2 text-[13px] font-semibold tracking-[0.03em] text-muted-foreground uppercase"
+        className="mb-3 flex items-center gap-2 text-[15px] font-extrabold tracking-[-0.005em] text-foreground"
       >
         <KindTile purpose={purpose} className="size-5 rounded-[6px] [&_svg]:size-3" />
         {title}
-        {count !== undefined && <span className="font-normal tabular-nums">{count}</span>}
+        {count !== undefined && (
+          <span className="font-semibold text-muted-foreground tabular-nums">{count}</span>
+        )}
       </h2>
       <div className="flex flex-col gap-4">{children}</div>
     </section>
@@ -366,7 +368,7 @@ export function LibraryScreen({
         <main className="mx-auto w-full max-w-6xl px-4 pt-6 sm:px-6 md:pt-10">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <h1 className="text-[32px] leading-none font-bold tracking-[-0.025em] md:text-[38px]">
+              <h1 className="text-[32px] leading-none font-extrabold tracking-[-0.02em] md:text-[38px]">
                 Your cards
               </h1>
               <p className="mt-2 text-[15px] text-muted-foreground">
