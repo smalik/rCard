@@ -582,7 +582,7 @@ export function ReviewScreen({ initial, file }: { initial: Review; file: ResumeF
           "z-30 flex flex-col gap-2",
           wide
             ? "shrink-0 border-t border-border/70 py-3"
-            : "fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] border-t border-border/70 bg-background/90 px-4 py-2.5 backdrop-blur-xl",
+            : "fixed inset-x-0 bottom-(--tab-bar-clear) border-t border-border/70 bg-background/90 px-4 py-2.5 backdrop-blur-xl",
         )}
       >
         {!wide && tab === "file" && pick?.side === "file" && (fileNote || fileCards.length > 0) && (

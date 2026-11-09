@@ -341,7 +341,7 @@ export function TalkScreen({
 
       <form
         onSubmit={say}
-        className="sticky bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-20 -mx-4 flex flex-col gap-1.5 bg-gradient-to-t from-background from-70% to-transparent px-4 pt-4 pb-3 sm:-mx-6 sm:px-6 md:bottom-0 md:pb-6"
+        className="sticky bottom-(--tab-bar-clear) z-20 -mx-4 flex flex-col gap-1.5 bg-gradient-to-t from-background from-70% to-transparent px-4 pt-4 pb-3 sm:-mx-6 sm:px-6 md:bottom-0 md:pb-6"
       >
         {error && (
           <p role="alert" className="px-2 text-[13px] text-destructive">

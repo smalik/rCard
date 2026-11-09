@@ -42,10 +42,11 @@ export function AppShell({ current, children }: { current: Place; children: Reac
         </div>
       </header>
       <div className="pb-[calc(6.5rem+env(safe-area-inset-bottom))] md:pb-16 print:p-0">{children}</div>
-      {/* Glass floats over the cards; the cards scroll under it. */}
+      {/* Glass floats over the cards; the cards scroll under it. The fade sits
+          under anything a screen docks above the tab bar. */}
       <div
         aria-hidden
-        className="pointer-events-none fixed inset-x-0 bottom-0 z-30 h-28 bg-linear-to-b from-transparent to-background/90 md:hidden print:hidden"
+        className="pointer-events-none fixed inset-x-0 bottom-0 z-[15] h-28 bg-linear-to-b from-transparent to-background/90 md:hidden print:hidden"
       />
       <nav
         aria-label="Plytos"
